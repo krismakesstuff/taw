@@ -166,6 +166,7 @@ public:
     // Selection: a time range and/or a range of tracks, made with shift + arrows. The time
     // range has its own two ends, independent of the cursor and the playhead.
     bool mixFocused() const;
+    bool loopActive() const; // loop on with a real range: play starts at its start
     bool hasTimeSelection() const { return timeAnchor >= 0 && timeHead >= 0 && timeHead != timeAnchor; }
     juce::Range<juce::int64> timeSelection() const;
     std::vector<int> selectedTracks() const; // empty when no track selection

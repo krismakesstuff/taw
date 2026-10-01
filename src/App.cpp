@@ -452,10 +452,19 @@ Result App::play()
     if (engine.isRolling())
         return Result::good();
 
+    // With the loop on, play always starts at the loop; the cursor stays where you left it.
     playStart = cursor;
     cursorMovedWhileRolling = false;
-    engine.play (cursor);
+    engine.play (loopActive() ? (juce::int64) session->tree()[ids::loopStart] : cursor);
     return Result::good();
+}
+
+bool App::loopActive() const
+{
+    if (session == nullptr || ! (bool) session->tree()[ids::loop])
+        return false;
+
+    return (juce::int64) session->tree()[ids::loopEnd] > (juce::int64) session->tree()[ids::loopStart];
 }
 
 // Enter on an empty line: back to where play started. Stopped and already there, back to the
@@ -470,7 +479,7 @@ Result App::returnPlayhead()
 
     if (engine.isRolling())
     {
-        engine.seek (playStart);
+        engine.seek (loopActive() ? (juce::int64) session->tree()[ids::loopStart] : playStart);
         return Result::good();
     }
 

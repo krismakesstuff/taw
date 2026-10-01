@@ -5,6 +5,10 @@ and driven by a small command language that people and agents share.
 
 Early proof of concept. See [docs/design.md](docs/design.md) for the design and what's planned.
 
+**Platforms:** Windows for now (cmd / Windows Terminal, ASIO). taw will become
+cross-platform (macOS and Linux) in future updates; the engine, sessions and command language
+are already platform-neutral.
+
 ## Build (Windows)
 
 Needs Visual Studio 2022 (C++ workload) and CMake 3.24+. JUCE and the Steinberg ASIO SDK are
@@ -37,11 +41,11 @@ live in `%APPDATA%\taw`. Templates are plain JSON: copy one to make your own.
 ## Thirty-second tour
 
 ```
-1 r           record track 1            space   stop (cursor returns)
-1-3 r         record tracks 1-3         ← →     move a bar (ctrl: 4, alt: a beat)
-2 i 3         track 2 <- input 3        shift   extend a selection
-2 v -6        track 2 at -6 dB          [ ]     volume -1 / +1 dB
-add Vox       new track                 ?       all commands
+1 r           arm track 1 (hear input)  space       play / stop
+ctrl+space    record the armed tracks   ← →         move a bar (ctrl: 4, alt: a step)
+2i3           track 2 <- input 3        shift ← →   select a range
+2v-6          track 2 at -6 dB          ctrl c / v  copy / paste the range
+add Vox       new track                 ?           all commands
 ```
 
 ## License

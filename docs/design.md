@@ -31,6 +31,16 @@ being worked out.
 - **Target terminal: Windows `cmd` (conhost)** first. Rendering uses VT sequences and only
   glyphs that Consolas has (block elements, box drawing). Input uses the Win32 console API,
   which reports modifiers reliably (Shift/Ctrl+arrows).
+- **Cross-platform is planned** for future updates: macOS and Linux after Windows. JUCE
+  already covers audio devices (Core Audio, ALSA/JACK) and file formats, and the
+  Windows-only parts are kept behind small seams so each can get a POSIX counterpart:
+  - `Console`: Win32 console input → a termios backend that parses VT key sequences (with an
+    extended keyboard protocol where the terminal has one, so modifiers stay reliable).
+  - `Safety`: minidumps, console control handler, process checks → signal handlers, core
+    dumps / crash logs, `kill(pid, 0)`.
+  - Windows Media Foundation (MP3 encoding, m4a/aac/wma import) → a portable encoder/decoder.
+  - Clipboard, the UTF-16 command line, and Mac/SMB private-use path names.
+  The command language, sessions and engine are platform-neutral and stay that way.
 
 ## Threads
 

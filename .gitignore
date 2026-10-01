@@ -1,0 +1,10 @@
+build/
+out/
+.vs/
+*.user
+# test sessions created while developing
+sessions/
+
+# crash dumps from the shell, and --bouncetest output
+*.stackdump
+bouncetest/

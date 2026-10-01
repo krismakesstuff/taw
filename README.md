@@ -48,6 +48,17 @@ ctrl+space    record the armed tracks   ← →         move a bar (ctrl: 4, alt
 add Vox       new track                 ?           all commands
 ```
 
+## Roadmap
+
+Next up, roughly in order:
+
+- **Sample groups:** gather sample tracks into a kit you can program, mix and move as one,
+  while each sound keeps its own track.
+- **MIDI keyboard recording:** play parts in from a MIDI controller.
+- **Plugin hosting (VST3/CLAP):** each plugin runs in its own process, so a crashing plugin is
+  bypassed instead of taking the session down.
+- **Cross-platform:** macOS and Linux.
+
 ## License
 
 AGPLv3. JUCE is used under the AGPLv3; the ASIO SDK under its GPLv3 option.

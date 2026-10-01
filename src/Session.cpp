@@ -384,7 +384,12 @@ static void migrateTakesToClips (juce::ValueTree& session)
 //==============================================================================
 juce::File configFolder()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("taw");
+    // %APPDATA%\taw on Windows; ~/Library/Application Support/taw on macOS.
+    auto base = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
+   #if JUCE_MAC
+    base = base.getChildFile ("Application Support");
+   #endif
+    return base.getChildFile ("taw");
 }
 
 static juce::ValueTree makeTemplate (int numMics)

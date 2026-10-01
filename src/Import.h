@@ -5,8 +5,9 @@
 namespace taw
 {
 // Copies audio files into a session: decodes them (wav, aiff, flac, ogg, mp3, m4a/aac via
-// Windows), resamples to the session rate, and writes 32-bit float WAVs into the session's
-// audio folder so the session stays self-contained. Runs on its own thread.
+// Windows or macOS; on macOS anything else via ffmpeg, if installed), resamples to the session
+// rate, and writes 32-bit float WAVs into the session's audio folder so the session stays
+// self-contained. Runs on its own thread.
 class Import final : private juce::Thread
 {
 public:

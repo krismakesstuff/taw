@@ -33,7 +33,7 @@ struct Key
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.
-// Windows console (conhost / cmd) first; the interface is small so other backends can follow.
+// Two backends: the Windows console (conhost / cmd) and POSIX terminals (macOS Terminal).
 class Console
 {
 public:
@@ -54,8 +54,18 @@ public:
 
 private:
     bool opened = false;
+#ifdef _WIN32
     void* in = nullptr;
     void* out = nullptr;
     unsigned long oldInMode = 0, oldOutMode = 0;
+#else
+    std::string pending; // bytes of a key sequence still arriving
+    int pendingPolls = 0;
+
+public:
+    // Turns terminal input into keys, consuming what it used. An unfinished sequence stays in
+    // bytes unless flush is set (nothing more is coming). Public for taw --keytest.
+    static std::vector<Key> decode (std::string& bytes, bool flush);
+#endif
 };
 } // namespace taw

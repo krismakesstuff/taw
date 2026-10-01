@@ -112,7 +112,11 @@ int App::run()
 {
     if (! console.open())
     {
+#if JUCE_WINDOWS
         std::fputs ("taw needs an interactive console (cmd, Windows Terminal).\n", stderr);
+#else
+        std::fputs ("taw needs an interactive terminal (Terminal, iTerm2).\n", stderr);
+#endif
         return 1;
     }
 
@@ -347,7 +351,7 @@ void App::openDevicePicker()
         }
     }
 
-    // Put ASIO first: it's what a dedicated interface should be using.
+    // Put ASIO first: it's what a dedicated interface should be using. (macOS has only CoreAudio.)
     std::stable_partition (deviceChoices.begin(), deviceChoices.end(), [] (const auto& c) { return c.type == "ASIO"; });
 
     if (current != nullptr)
@@ -415,6 +419,17 @@ Result App::showControlPanel()
 
     if (device == nullptr)
         return Result::fail (L"no audio device \x2014 type dev");
+
+#if JUCE_MAC
+    // CoreAudio devices have no driver panel; their settings live in Audio MIDI Setup.
+    if (! device->hasControlPanel())
+    {
+        juce::ChildProcess open;
+        return open.start (juce::StringArray { "open", "-a", "Audio MIDI Setup" }, 0)
+                   ? Result::good ("opened Audio MIDI Setup")
+                   : Result::fail ("couldn't open Audio MIDI Setup");
+    }
+#endif
 
     if (! device->hasControlPanel())
         return Result::fail (device->getTypeName() + " has no driver panel");
@@ -1012,10 +1027,77 @@ std::unique_ptr<Graph> App::buildGraph()
 //==============================================================================
 // Import
 
+juce::String App::expandHome (const juce::String& path)
+{
+#if JUCE_WINDOWS
+    return path;
+#else
+    if (path == "~" || path.startsWith ("~/"))
+        return juce::File::getSpecialLocation (juce::File::userHomeDirectory).getFullPathName() + path.substring (1);
+
+    return path;
+#endif
+}
+
 juce::StringArray App::splitPaths (const juce::String& text)
 {
     const auto t = text.trim();
     juce::StringArray out;
+
+#if ! JUCE_WINDOWS
+    // macOS terminals drop files shell-style: My\ Song.wav, or 'quoted'. Split the way a shell
+    // would, then expand ~.
+    if (t.containsAnyOf ("\\'~"))
+    {
+        juce::String current;
+        bool inToken = false;
+        juce::juce_wchar quote = 0;
+
+        for (auto p = t.getCharPointer(); ! p.isEmpty();)
+        {
+            const auto c = p.getAndAdvance();
+
+            if (quote != 0)
+            {
+                if (c == quote)
+                    quote = 0;
+                else if (c == '\\' && quote == '"' && ! p.isEmpty())
+                    current += juce::String::charToString (p.getAndAdvance());
+                else
+                    current += juce::String::charToString (c);
+            }
+            else if (c == '\\' && ! p.isEmpty())
+            {
+                current += juce::String::charToString (p.getAndAdvance());
+                inToken = true;
+            }
+            else if (c == '\'' || c == '"')
+            {
+                quote = c;
+                inToken = true;
+            }
+            else if (c == ' ' || c == '\t')
+            {
+                if (inToken)
+                    out.add (expandHome (current));
+
+                current.clear();
+                inToken = false;
+            }
+            else
+            {
+                current += juce::String::charToString (c);
+                inToken = true;
+            }
+        }
+
+        if (inToken)
+            out.add (expandHome (current));
+
+        out.removeEmptyStrings();
+        return out;
+    }
+#endif
 
     if (t.containsChar ('"'))
     {
@@ -1046,7 +1128,11 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
         return Result::fail ("stop recording first");
 
     if (paths.isEmpty())
+#if JUCE_WINDOWS
         return Result::fail (L"import what? import D:\\stems\\kick.wav \x00b7 or drop files here");
+#else
+        return Result::fail (L"import what? import ~/stems/kick.wav \x00b7 or drop files here");
+#endif
 
     juce::StringArray notFound;
     auto files = Import::expand (paths, juce::File::getCurrentWorkingDirectory(), notFound);
@@ -1197,7 +1283,7 @@ Result App::startBounce (const juce::StringArray& args)
         if (a.equalsIgnoreCase ("wav") || a.equalsIgnoreCase ("mp3"))
             s.setProperty (ids::bounceFormat, a.toLowerCase(), nullptr);
         else if (a.containsAnyOf ("\\/:"))
-            s.setProperty (ids::bounceFolder, a.unquoted(), nullptr);
+            s.setProperty (ids::bounceFolder, expandHome (a.unquoted()), nullptr);
         else
             nameParts.add (a.unquoted());
     }
@@ -1519,18 +1605,20 @@ void App::handleMainKey (const Key& k)
     }
 
     // Volume rides act immediately, stopped or rolling, unless you're typing a command.
-    // Ctrl rides the mix from anywhere, so you don't have to walk down to it.
-    if (k.code == Key::Char && (k.ch == '[' || k.ch == ']') && ! k.alt && commandLine.isEmpty())
+    // Ctrl (or shift: { }) rides the mix from anywhere, so you don't have to walk down to it.
+    // Shift is there because macOS Terminal sends ctrl+[ as Escape.
+    if (k.code == Key::Char && (k.ch == '[' || k.ch == ']' || k.ch == '{' || k.ch == '}') && ! k.alt && commandLine.isEmpty())
     {
-        const auto delta = k.ch == ']' ? 1.0 : -1.0;
-        const bool onMix = k.ctrl || (mixFocused() && selectedTracks().empty());
+        const auto delta = (k.ch == ']' || k.ch == '}') ? 1.0 : -1.0;
+        const bool mixKey = k.ctrl || k.ch == '{' || k.ch == '}';
+        const bool onMix = mixKey || (mixFocused() && selectedTracks().empty());
         juce::StringArray who;
 
         for (auto t : defaultTargets())
             who.add (juce::String (t));
 
         beginEdit ("volume", onMix ? juce::String ("vol:mix") : "vol:" + who.joinIntoString (","));
-        say (k.ctrl && session != nullptr ? setMixVolume ((double) session->tree()[ids::mixDb] + delta) : nudgeVolume (delta));
+        say (mixKey && session != nullptr ? setMixVolume ((double) session->tree()[ids::mixDb] + delta) : nudgeVolume (delta));
         return;
     }
 
@@ -1561,7 +1649,7 @@ void App::handleMainKey (const Key& k)
             beginEdit ("duplicate");
             say (duplicateSelection (defaultTargets()));
         }
-        else if (k.ch == 'm')
+        else if (k.ch == 'k' || k.ch == 'm') // k: macOS Terminal sends ctrl+m as Enter
         {
             beginEdit ("marker");
             say (addMarker (engine.isRolling() ? engine.playhead() : cursor));

@@ -115,7 +115,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `Home` / `End` | session start / end of last take | same |
 | `↑` / `↓` | focus previous / next track; below the last track is the Mix | same |
 | `[` / `]` | volume −1 / +1 dB on the selection, focused track, or Mix (also while rolling) | same |
-| `Ctrl+[` / `Ctrl+]` | Mix volume −1 / +1 dB, from anywhere | same |
+| `{` / `}` or `Ctrl+[` / `Ctrl+]` | Mix volume −1 / +1 dB, from anywhere (`{ }` because macOS Terminal sends `Ctrl+[` as Escape) | same |
 | `+` / `-` (empty command line) | zoom in / out | same |
 | `Space` (empty command line) | play / stop | same |
 
@@ -185,11 +185,11 @@ records the selected tracks, else whatever is armed.
 | `Space` / `Esc` (empty command line) | stop (cursor returns to where play started) |
 | `Enter` (empty command line) | back to where play started, still playing |
 | `Ctrl+Space` | punch: toggle recording on armed tracks without stopping |
-| `Ctrl+M` | drop a marker at the playhead (stopped: at the cursor) |
+| `Ctrl+K` (or `Ctrl+M`) | drop a marker at the playhead (stopped: at the cursor); `Ctrl+K` because macOS Terminal sends `Ctrl+M` as Enter |
 | `Ctrl+C` / `X` / `D`, `Delete` | edit the selection, as when stopped |
 | `←` `→` (any modifier) | move the cursor / selection, not the playhead |
 | `Ctrl+V` | paste at the cursor |
-| `[` / `]` | track volume; with `Ctrl`, the mix |
+| `[` / `]` | track volume; `{` `}` or with `Ctrl`, the mix |
 | anything else | the command line: `2m`, `3s`, `l` (loop; ignored while recording), `c` (click) |
 
 ### Planned (not in the POC)

@@ -68,7 +68,7 @@ struct Clipboard
     std::vector<Lane> lanes;
 };
 
-// Ctrl+C also puts this on the Windows clipboard: terminals turn Ctrl+V into pasted text, and
+// Ctrl+C also puts this on the system clipboard: terminals turn paste keys into pasted text, and
 // this text arriving is how taw knows to paste.
 inline constexpr const char* pasteMarker = "taw:paste";
 
@@ -142,6 +142,7 @@ public:
     Clipboard clipboard;
 
     static juce::StringArray splitPaths (const juce::String& text);
+    static juce::String expandHome (const juce::String& path); // ~/x -> /Users/you/x (not on Windows)
     bool isBouncing() const { return bounce != nullptr; }
     void openDevicePicker();
     Result showControlPanel();

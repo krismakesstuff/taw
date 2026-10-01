@@ -1,0 +1,32 @@
+#!/bin/sh
+# Dev launcher (macOS): run the newest local build of taw.
+#
+#   ./taw               open or start a session in ./sessions
+#   ./taw my-song       open or create sessions/my-song
+#   ./taw build         build Release, then exit
+#
+# Sessions made from here live in ./sessions (git-ignored) so they stay out of the source tree.
+
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+REL="$ROOT/build/taw_artefacts/Release/taw"
+DBG="$ROOT/build/taw_artefacts/Debug/taw"
+
+if [ "$1" = "build" ]; then
+    [ -d "$ROOT/build" ] || cmake -S "$ROOT" -B "$ROOT/build" -DCMAKE_BUILD_TYPE=Release || exit 1
+    exec cmake --build "$ROOT/build" --config Release -j "$(sysctl -n hw.ncpu)"
+fi
+
+EXE=""
+[ -x "$REL" ] && EXE="$REL"
+[ -z "$EXE" ] && [ -x "$DBG" ] && EXE="$DBG"
+
+# Both exist: take Debug only if it's newer.
+[ -x "$REL" ] && [ -x "$DBG" ] && [ "$DBG" -nt "$REL" ] && EXE="$DBG"
+
+if [ -z "$EXE" ]; then
+    echo "No build yet. Run: ./taw build"
+    exit 1
+fi
+
+mkdir -p "$ROOT/sessions"
+cd "$ROOT/sessions" && exec "$EXE" "$@"

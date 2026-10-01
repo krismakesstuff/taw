@@ -1,22 +1,27 @@
 #include "Import.h"
 
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
- #define NOMINMAX
-#endif
-#include <windows.h>
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
+#if JUCE_WINDOWS
+ #define WIN32_LEAN_AND_MEAN
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+ #include <mfapi.h>
+ #include <mfidl.h>
+ #include <mfreadwrite.h>
 
-#pragma comment(lib, "mfplat.lib")
-#pragma comment(lib, "mfreadwrite.lib")
-#pragma comment(lib, "mfuuid.lib")
+ #pragma comment(lib, "mfplat.lib")
+ #pragma comment(lib, "mfreadwrite.lib")
+ #pragma comment(lib, "mfuuid.lib")
+#else
+ #include "Ffmpeg.h"
+#endif
 
 namespace taw
 {
 namespace
 {
+#if JUCE_WINDOWS
 template <typename T>
 struct Com
 {
@@ -99,6 +104,47 @@ bool readWithMediaFoundation (const juce::File& file, juce::AudioBuffer<float>& 
     rate = sampleRate;
     return frames > 0;
 }
+
+bool readWithSystemDecoder (const juce::File& file, juce::AudioBuffer<float>& out, double& rate, juce::String&)
+{
+    return readWithMediaFoundation (file, out, rate);
+}
+#else
+// Decodes anything ffmpeg can (wma, opus, video soundtracks, ...) when JUCE's own readers
+// (which include macOS's: m4a/aac, caf, mp3) can't open a file: ffmpeg writes a float WAV to
+// a temporary file, which is read back here.
+bool readWithSystemDecoder (const juce::File& file, juce::AudioBuffer<float>& out, double& rate, juce::String& error)
+{
+    const auto exe = ffmpeg::find();
+
+    if (! exe.existsAsFile())
+    {
+        error = "can't read " + file.getFileName() + juce::String (L" \x00b7 for more formats, ") + ffmpeg::installHint;
+        return false;
+    }
+
+    const juce::TemporaryFile wav (".wav");
+    juce::ChildProcess p;
+
+    if (! p.start (juce::StringArray { exe.getFullPathName(), "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
+                                       "-i", file.getFullPathName(), "-vn", "-c:a", "pcm_f32le", "-f", "wav",
+                                       wav.getFile().getFullPathName() }, 0))
+        return false;
+
+    if (! p.waitForProcessToFinish (-1) || p.getExitCode() != 0)
+        return false;
+
+    std::unique_ptr<juce::AudioFormatReader> reader { juce::WavAudioFormat().createReaderFor (new juce::FileInputStream (wav.getFile()), true) };
+
+    if (reader == nullptr || reader->lengthInSamples <= 0 || reader->lengthInSamples > std::numeric_limits<int>::max())
+        return false;
+
+    out.setSize (juce::jlimit (1, 2, (int) reader->numChannels), (int) reader->lengthInSamples);
+    reader->read (&out, 0, out.getNumSamples(), 0, true, out.getNumChannels() > 1);
+    rate = reader->sampleRate;
+    return true;
+}
+#endif
 } // namespace
 
 static const juce::StringArray audioExtensions { ".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3", ".m4a", ".aac", ".wma" };
@@ -123,6 +169,7 @@ bool Import::isAudioFile (const juce::File& f)
 }
 
 // A name as Windows users read it: no private-use characters, no trailing spaces or dots.
+// (Harmless elsewhere: it only matters when the name typed doesn't exist as written.)
 static juce::String comparableName (const juce::String& name)
 {
     juce::String out;
@@ -254,9 +301,10 @@ void Import::importOne (Item& item)
         reader->read (&audio, 0, audio.getNumSamples(), 0, true, ch > 1);
         sourceRate = reader->sampleRate;
     }
-    else if (! readWithMediaFoundation (item.source, audio, sourceRate))
+    else if (! readWithSystemDecoder (item.source, audio, sourceRate, item.error))
     {
-        item.error = "can't read " + item.source.getFileName();
+        if (item.error.isEmpty())
+            item.error = "can't read " + item.source.getFileName();
         return;
     }
 

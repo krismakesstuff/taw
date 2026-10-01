@@ -30,7 +30,6 @@ target_sources(taw PRIVATE
     src/AudioEngine.cpp
     src/Bounce.cpp
     src/Import.cpp
-    src/Console.cpp
     src/Safety.cpp
     src/Editing.cpp
     src/Ui.cpp)
@@ -42,6 +41,16 @@ target_compile_definitions(taw PRIVATE
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0
     TAW_VERSION="${PROJECT_VERSION}")
+
+if (WIN32)
+    target_sources(taw PRIVATE src/ConsoleWindows.cpp)
+else()
+    target_sources(taw PRIVATE src/ConsolePosix.cpp)
+endif()
+
+if (APPLE)
+    target_sources(taw PRIVATE src/TerminalSetup.cpp)
+endif()
 
 if (WIN32)
     target_compile_definitions(taw PRIVATE JUCE_ASIO=1 JUCE_WASAPI=1 JUCE_DIRECTSOUND=1 NOMINMAX

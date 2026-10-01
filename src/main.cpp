@@ -5,22 +5,34 @@
 
 #include <juce_events/juce_events.h>
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <shellapi.h>
-#pragma comment(lib, "shell32.lib")
+#if JUCE_MAC
+ #include "TerminalSetup.h"
+#endif
+
+#if JUCE_WINDOWS
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include <shellapi.h>
+ #pragma comment(lib, "shell32.lib")
+#endif
 
 // taw                 open ./session.json, or start a new session here
 // taw <dir>           open <dir>, or create a session called <dir>
 // taw <dir> -t 3mic   create <dir> from the 3mic template without asking
+#if JUCE_WINDOWS
 int main()
+#else
+int main (int argc, char** argv)
+#endif
 {
     juce::ScopedJuceInitialiser_GUI juce;
     taw::safety::installCrashHandler();
 
+    juce::StringArray args;
+
+#if JUCE_WINDOWS
     // argv is in the ANSI code page, which mangles anything outside it (accents, Mac-mapped
     // characters); take the UTF-16 command line instead.
-    juce::StringArray args;
     int argc = 0;
 
     if (auto** argv = CommandLineToArgvW (GetCommandLineW(), &argc))
@@ -30,6 +42,10 @@ int main()
 
         LocalFree (argv);
     }
+#else
+    for (int i = 1; i < argc; ++i)
+        args.add (juce::String::fromUTF8 (argv[i]));
+#endif
 
     if (args.contains ("-h") || args.contains ("--help"))
     {
@@ -37,7 +53,11 @@ int main()
                    "  taw                 open the session in this folder, or start a new one\n"
                    "  taw my-song         open my-song, or create it\n"
                    "  taw my-song -t 3mic create my-song from the 3mic template\n\n"
+#if JUCE_WINDOWS
                    "templates and device settings live in %APPDATA%\\taw");
+#else
+                   "templates and device settings live in ~/Library/Application Support/taw");
+#endif
         return 0;
     }
 
@@ -287,6 +307,97 @@ int main()
         return failures;
     }
 
+#if JUCE_MAC
+    // taw --terminal-profile   add the "taw" Terminal.app profile (keys taw needs, Option as Alt)
+    if (args[0] == "--terminal-profile")
+    {
+        const auto r = taw::terminalSetup::install();
+        std::puts (r.wasOk() ? "Added. Terminal opened a new window with the taw profile."
+                             : r.getErrorMessage().toRawUTF8());
+        return r.wasOk() ? 0 : 1;
+    }
+#endif
+
+#if ! JUCE_WINDOWS
+    // taw --keytest   check how terminal input decodes into keys (Terminal.app, iTerm2, kitty)
+    if (args[0] == "--keytest")
+    {
+        auto describe = [] (const std::vector<taw::Key>& keys)
+        {
+            static const char* names[] = { "None", "Char", "Enter", "Backspace", "Escape", "Tab", "Left", "Right", "Up",
+                                           "Down", "Home", "End", "PageUp", "PageDown", "Delete", "F1" };
+            juce::StringArray out;
+
+            for (const auto& k : keys)
+                out.add (juce::String (k.ctrl ? "ctrl+" : "") + (k.alt ? "alt+" : "") + (k.shift ? "shift+" : "")
+                         + (k.code == taw::Key::Char ? juce::String::charToString ((juce::juce_wchar) k.ch) : juce::String (names[k.code])));
+
+            return out.joinIntoString (" ");
+        };
+
+        const std::pair<const char*, const char*> cases[] = {
+            { "a", "a" }, { "\x7f", "Backspace" }, { "\r", "Enter" }, { "\t", "Tab" }, { "\x1b", "Escape" },
+            { "\x1b[D", "Left" }, { "\x1b[1;2C", "shift+Right" }, { "\x1b[1;5D", "ctrl+Left" }, { "\x1b[1;3D", "alt+Left" },
+            { "\x1b[1;7C", "ctrl+alt+Right" }, { "\x1b[1;6D", "ctrl+shift+Left" }, { "\x1b[1;2A", "shift+Up" },
+            { "\x1b" "b", "alt+Left" }, { "\x1b" "f", "alt+Right" }, { "\x1b\x1b[C", "alt+Right" }, { "\x1b/", "alt+/" },
+            { "\x1b[H", "Home" }, { "\x1b[F", "End" }, { "\x1b[1;2H", "shift+Home" }, { "\x1b[5~", "PageUp" },
+            { "\x1b[6~", "PageDown" }, { "\x1b[3~", "Delete" }, { "\x1bOP", "F1" }, { "\x1bOD", "Left" },
+            { "\x1a", "ctrl+z" }, { "\x19", "ctrl+y" }, { "\x03", "ctrl+c" }, { "\x16", "ctrl+v" }, { "\x1d", "ctrl+]" },
+            { "]", "]" }, { "[", "[" }, { "2m", "2 m" }, { "\xc3\xa9", "\xc3\xa9" }, { "\x1b[Z", "shift+Tab" },
+            // kitty keyboard protocol (iTerm2, Ghostty, kitty, WezTerm); cmd counts as alt
+            { "\x1b[27u", "Escape" }, { "\x1b[91;5u", "ctrl+[" }, { "\x1b[109;5u", "ctrl+m" }, { "\x1b[32;5u", "ctrl+ " },
+            { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
+        };
+
+        // Control bytes made readable: esc[1;5D, 0x1a.
+        auto label = [] (const std::string& bytes)
+        {
+            std::string out;
+
+            for (auto c : bytes)
+            {
+                char hex[8];
+                std::snprintf (hex, sizeof (hex), "0x%02x", (unsigned char) c);
+                out += c == 0x1b ? "esc" : ((unsigned char) c < 0x20 || c == 0x7f) ? hex : std::string (1, c);
+            }
+
+            return out;
+        };
+
+        int failures = 0;
+
+        for (const auto& [bytes, want] : cases)
+        {
+            std::string in (bytes);
+            const auto got = describe (taw::Console::decode (in, true));
+            const bool ok = got == juce::String::fromUTF8 (want);
+            std::printf ("%-22s %-18s %s\n", label (bytes).c_str(), got.toRawUTF8(), ok ? "ok" : "FAILED");
+            failures += ok ? 0 : 1;
+        }
+
+        // ctrl+space is a NUL byte.
+        {
+            std::string in (1, '\0');
+            const auto got = describe (taw::Console::decode (in, true));
+            std::printf ("%-22s %-18s %s\n", "NUL", got.toRawUTF8(), got == "ctrl+ " ? "ok" : "FAILED");
+            failures += got == "ctrl+ " ? 0 : 1;
+        }
+
+        // A sequence split across reads waits for the rest instead of becoming Escape.
+        {
+            std::string in ("\x1b[1;");
+            const auto first = taw::Console::decode (in, false);
+            in += "5D";
+            const auto got = describe (taw::Console::decode (in, false));
+            const bool ok = first.empty() && got == "ctrl+Left";
+            std::printf ("%-22s %-18s %s\n", "split esc[1; + 5D", got.toRawUTF8(), ok ? "ok" : "FAILED");
+            failures += ok ? 0 : 1;
+        }
+
+        return failures;
+    }
+#endif
+
     // taw --importtest <dest> <files...>   import files at 44.1 kHz into <dest> (no device needed)
     if (args[0] == "--importtest")
     {
@@ -360,12 +471,21 @@ int main()
         taw::AudioEngine engine;
         auto& dm = engine.devices();
         dm.initialise (taw::AudioEngine::maxInputs, 2, nullptr, false);
+#if JUCE_WINDOWS
         dm.setCurrentAudioDeviceType ("ASIO", true);
+#else
+        dm.setCurrentAudioDeviceType ("CoreAudio", true);
+#endif
 
         if (auto* type = dm.getCurrentDeviceTypeObject())
             type->scanForDevices();
         auto setup = dm.getAudioDeviceSetup();
+#if JUCE_WINDOWS
         setup.outputDeviceName = setup.inputDeviceName = args[st + 1].isNotEmpty() ? args[st + 1] : "SSL ASIO Driver 1";
+#else
+        if (args[st + 1].isNotEmpty()) // otherwise the system's default input and output
+            setup.outputDeviceName = setup.inputDeviceName = args[st + 1];
+#endif
         setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
 
         if (auto err = dm.setAudioDeviceSetup (setup, true); err.isNotEmpty() || dm.getCurrentAudioDevice() == nullptr)
@@ -473,6 +593,10 @@ int main()
 
     if (reopen)
         openDir = unclean.session;
+
+#if JUCE_MAC
+    taw::terminalSetup::offerOnce(); // before the screen is taken over
+#endif
 
     taw::safety::startRunMarker();
     taw::enableRecentSessions();

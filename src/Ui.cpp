@@ -666,16 +666,16 @@ void Ui::drawBottom (App& app)
     juce::String hints;
 
     if (app.recording)
-        hints = L"space stop \x00b7 ctrl+space punch out \x00b7 ctrl+m marker \x00b7 commands work: 2m 3s c \x00b7 [ ] volume";
+        hints = L"space stop \x00b7 ctrl+space punch out \x00b7 ctrl+k marker \x00b7 commands work: 2m 3s c \x00b7 [ ] volume";
     else if (rolling)
         hints = app.hasTimeSelection() ? L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 ctrl+v pastes at the cursor \x00b7 l loop \x00b7 shift \x2190\x2192 extend \x00b7 space stop"
-                                       : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ctrl+m marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
+                                       : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ctrl+k marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.session != nullptr && ! app.mixFocused() && Session::isSampleTrack (app.session->track (app.focused)))
         hints = L"alt+/ toggles a hit \x00b7 alt \x2190\x2192 step, ctrl+alt 4 steps (grid 16 for 16ths) \x00b7 pat x...x... \x00b7 space play \x00b7 [ ] vol \x00b7 audio converts back \x00b7 ? help";
     else
-        hints = L"enter run (empty: return) \x00b7 space play \x00b7 ctrl+space record \x00b7 1 r arms \x00b7 \x2190\x2192 bar \x00b7 ctrl 4 bars \x00b7 alt beat \x00b7 shift select \x00b7 [ ] vol (ctrl: mix) \x00b7 add \x00b7 import / drop files \x00b7 ? help";
+        hints = L"enter run (empty: return) \x00b7 space play \x00b7 ctrl+space record \x00b7 1 r arms \x00b7 \x2190\x2192 bar \x00b7 ctrl 4 bars \x00b7 alt beat \x00b7 shift select \x00b7 [ ] vol ({ }: mix) \x00b7 add \x00b7 import / drop files \x00b7 ? help";
 
     canvas.text (1, hintY, hints, colour::dim, -1, false, w - 2);
 }
@@ -693,13 +693,13 @@ void Ui::drawHelp (App&)
         { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
         { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch" },
         { Pair, L"home / end", L"start / end", L"2mon", L"hear input on playback too" },
-        { Pair, L"\x2191 \x2193", L"choose track or Mix", L"ctrl m", L"marker at the playhead" },
+        { Pair, L"\x2191 \x2193", L"choose track or Mix", L"ctrl k", L"marker at the playhead" },
         { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
         { Pair, L"+ -   enter", L"zoom / return to start", L"l", L"loop the selection / toggle loop" },
         { Heading, L"TRACKS", nullptr, L"VOLUME", nullptr },
         { Note, L"Numbers first, spaces optional: 2m, 1-3m, 2i3, 2v-6. No number = selection or \x25b8 track." },
         { Pair, L"add vox in2", L"new track on input 2", L"[  ]", L"track -1 / +1 dB" },
-        { Pair, L"2a 2m 2s", L"arm / mute / solo", L"ctrl [  ]", L"mix -1 / +1 dB" },
+        { Pair, L"2a 2m 2s", L"arm / mute / solo", L"{ } ctrl [ ]", L"mix -1 / +1 dB" },
         { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
         { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
         { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
@@ -712,7 +712,11 @@ void Ui::drawHelp (App&)
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
+#if JUCE_WINDOWS
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav D:\\x", L"...to a folder (remembered)" },
+#else
+        { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
+#endif
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
         { Pair, L"save  close", L"save / back to sessions", L"q", L"save and quit" },
         { Note, L"esc clears the line, the selection, then clip lights \x00b7 ? closes this" },
@@ -768,7 +772,11 @@ void Ui::drawDevicePicker (App& app)
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
     canvas.text (5, 0, L"\x25b8 audio device", colour::text, colour::headerBg);
+#if JUCE_WINDOWS
     canvas.text (1, 2, "Choose the interface taw records and plays through. ASIO gives the lowest latency.", colour::dim);
+#else
+    canvas.text (1, 2, "Choose the interface taw records and plays through.", colour::dim);
+#endif
 
     const int top = 4, visible = h - top - 4;
     const int first = std::max (0, std::min (app.pickIndex - visible / 2, (int) app.deviceChoices.size() - visible));

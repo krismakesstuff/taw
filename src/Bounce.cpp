@@ -1,17 +1,28 @@
 ﻿#include "Bounce.h"
 
-#define WIN32_LEAN_AND_MEAN
-#ifndef NOMINMAX
- #define NOMINMAX
-#endif
-#include <windows.h>
-#include <mfapi.h>
-#include <mfidl.h>
-#include <mfreadwrite.h>
+#if JUCE_WINDOWS
+ #define WIN32_LEAN_AND_MEAN
+ #ifndef NOMINMAX
+  #define NOMINMAX
+ #endif
+ #include <windows.h>
+ #include <mfapi.h>
+ #include <mfidl.h>
+ #include <mfreadwrite.h>
 
-#pragma comment(lib, "mfplat.lib")
-#pragma comment(lib, "mfreadwrite.lib")
-#pragma comment(lib, "mfuuid.lib")
+ #pragma comment(lib, "mfplat.lib")
+ #pragma comment(lib, "mfreadwrite.lib")
+ #pragma comment(lib, "mfuuid.lib")
+#else
+ #include "Ffmpeg.h"
+ #include <fcntl.h>
+ #include <signal.h>
+ #include <spawn.h>
+ #include <sys/wait.h>
+ #include <unistd.h>
+
+extern char** environ;
+#endif
 
 namespace taw
 {
@@ -19,6 +30,7 @@ namespace
 {
 constexpr int blockSize = 8192;
 
+#if JUCE_WINDOWS
 template <typename T>
 struct ComPtr
 {
@@ -135,6 +147,127 @@ private:
     DWORD stream = 0;
     juce::int64 written = 0;
 };
+#else
+// MP3 through an installed ffmpeg (LAME inside): the mix streams into its stdin as float PCM.
+class Mp3Writer
+{
+public:
+    Mp3Writer (const juce::File& file, double sampleRate, juce::String& error)
+    {
+        if (sampleRate != 44100.0 && sampleRate != 48000.0 && sampleRate != 32000.0)
+        {
+            error = "MP3 needs a 32, 44.1 or 48 kHz session";
+            return;
+        }
+
+        const auto exe = ffmpeg::find();
+
+        if (! exe.existsAsFile())
+        {
+            error = juce::String (L"MP3 needs ffmpeg \x00b7 ") + ffmpeg::installHint;
+            return;
+        }
+
+        const juce::StringArray args { exe.getFullPathName(), "-hide_banner", "-loglevel", "error", "-y",
+                                       "-f", "f32le", "-ar", juce::String ((int) sampleRate), "-ac", "2", "-i", "pipe:0",
+                                       "-c:a", "libmp3lame", "-b:a", "320k", "-f", "mp3", file.getFullPathName() };
+        std::vector<char*> argv;
+
+        for (const auto& a : args)
+            argv.push_back (const_cast<char*> (a.toRawUTF8()));
+
+        argv.push_back (nullptr);
+
+        int fds[2];
+
+        if (pipe (fds) != 0)
+        {
+            error = "can't start ffmpeg";
+            return;
+        }
+
+        // ffmpeg reads the pipe; its own output goes nowhere (errors show up as its exit code).
+        posix_spawn_file_actions_t actions;
+        posix_spawn_file_actions_init (&actions);
+        posix_spawn_file_actions_adddup2 (&actions, fds[0], STDIN_FILENO);
+        posix_spawn_file_actions_addclose (&actions, fds[1]);
+        posix_spawn_file_actions_addopen (&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0);
+        posix_spawn_file_actions_addopen (&actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+
+        const auto spawned = posix_spawn (&child, argv[0], &actions, nullptr, argv.data(), environ);
+        posix_spawn_file_actions_destroy (&actions);
+        ::close (fds[0]);
+
+        if (spawned != 0)
+        {
+            ::close (fds[1]);
+            child = -1;
+            error = "can't start ffmpeg";
+            return;
+        }
+
+        input = fds[1];
+    }
+
+    ~Mp3Writer()
+    {
+        if (input >= 0)
+            ::close (input);
+
+        if (child > 0)
+        {
+            if (! finalised)
+                kill (child, SIGTERM);
+
+            int status = 0;
+            waitpid (child, &status, 0);
+        }
+    }
+
+    bool write (const juce::AudioBuffer<float>& block, int n)
+    {
+        interleaved.resize ((size_t) n * 2);
+
+        for (int i = 0; i < n; ++i)
+            for (int ch = 0; ch < 2; ++ch)
+                interleaved[(size_t) (i * 2 + ch)] = juce::jlimit (-1.0f, 1.0f, block.getSample (ch, i));
+
+        auto* data = reinterpret_cast<const char*> (interleaved.data());
+        auto left = interleaved.size() * sizeof (float);
+
+        while (left > 0)
+        {
+            const auto w = ::write (input, data, left);
+
+            if (w <= 0)
+                return false; // ffmpeg gave up
+
+            data += w;
+            left -= (size_t) w;
+        }
+
+        return true;
+    }
+
+    bool finish()
+    {
+        finalised = true;
+        ::close (input); // end of stream: ffmpeg writes the rest and exits
+        input = -1;
+
+        int status = 0;
+        const bool ok = waitpid (child, &status, 0) == child && WIFEXITED (status) && WEXITSTATUS (status) == 0;
+        child = -1;
+        return ok;
+    }
+
+private:
+    pid_t child = -1;
+    int input = -1;
+    bool finalised = false;
+    std::vector<float> interleaved;
+};
+#endif
 } // namespace
 
 Bounce::Bounce (std::unique_ptr<Graph> g, juce::Range<juce::int64> r, double rate, Format f, juce::File file)
@@ -182,7 +315,7 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
 void Bounce::run()
 {
     target.getParentDirectory().createDirectory();
-    // Write under a temporary name; keep the extension, Media Foundation picks the container from it.
+    // Write under a temporary name; keep the extension, the MP3 encoder picks the container from it.
     const auto partial = target.getSiblingFile (target.getFileNameWithoutExtension() + ".part" + target.getFileExtension());
     juce::AudioBuffer<float> block (2, blockSize);
 

@@ -7,6 +7,8 @@
 #endif
 #include <windows.h>
 #include <algorithm>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 namespace taw
@@ -48,6 +50,41 @@ bool useEdgeFont (HANDLE out)
 }
 } // namespace
 
+// TAW_FOCUS_LOG=1: what's in front and why the keyboard was or wasn't taken back, to
+// %TEMP%\taw-focus.log, a line each time that changes.
+static void logFocus (const std::string& line)
+{
+    static const bool on = GetEnvironmentVariableA ("TAW_FOCUS_LOG", nullptr, 0) > 0;
+    static std::string last;
+
+    if (! on || line == last)
+        return;
+
+    last = line;
+    char path[MAX_PATH] {};
+    GetTempPathA (MAX_PATH, path);
+
+    FILE* f = nullptr;
+
+    if (fopen_s (&f, (std::string (path) + "taw-focus.log").c_str(), "a") == 0 && f != nullptr)
+    {
+        std::fprintf (f, "%llu %s\n", (unsigned long long) GetTickCount64(), line.c_str());
+        std::fclose (f);
+    }
+}
+
+static std::string describeWindow (HWND w)
+{
+    char cls[128] {}, title[128] {};
+    GetClassNameA (w, cls, sizeof (cls));
+    GetWindowTextA (w, title, sizeof (title));
+    DWORD pid = 0;
+    GetWindowThreadProcessId (w, &pid);
+    char s[400];
+    std::snprintf (s, sizeof (s), "%p [%s] \"%s\" pid %lu%s", (void*) w, cls, title, pid, pid == GetCurrentProcessId() ? " (taw)" : "");
+    return s;
+}
+
 bool Console::open()
 {
     if (opened)
@@ -80,6 +117,8 @@ bool Console::open()
     if (terminal == nullptr || ! IsWindowVisible ((HWND) terminal))
         terminal = GetForegroundWindow();
 
+    logFocus ("terminal " + describeWindow ((HWND) terminal));
+
     edgeGlyphs = useEdgeFont (out);
     write (L"\x1b[?1049h\x1b[?25l\x1b[2J");
     return true;
@@ -102,38 +141,74 @@ void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
 {
     const auto front = GetForegroundWindow();
 
-    if (! opened || terminal == nullptr || front == nullptr || front == (HWND) terminal
-        || std::find (pluginWindows.begin(), pluginWindows.end(), (void*) front) == pluginWindows.end())
+    if (! opened || terminal == nullptr || front == nullptr || front == (HWND) terminal)
     {
         readySince = 0.0;
-        return; // not one of ours (a plugin's own dialog keeps the keyboard, so you can type a preset name)
+        return;
+    }
+
+    // One of taw's windows: a plugin's, or one a plugin made (Waves' shell puts the keyboard on
+    // windows of its own). Not a dialog box, so a preset can still be named; and not anything
+    // outside taw (you went to another app).
+    DWORD pid = 0;
+    GetWindowThreadProcessId (front, &pid);
+    char cls[64] {};
+    GetClassNameA (front, cls, sizeof (cls));
+    const bool plugin = std::find (pluginWindows.begin(), pluginWindows.end(), (void*) front) != pluginWindows.end();
+    const bool dialog = std::strcmp (cls, "#32770") == 0;
+
+    if (pid != GetCurrentProcessId() || dialog || (pluginWindows.empty() && ! plugin))
+    {
+        logFocus ("front " + describeWindow (front) + (dialog ? ": a dialog, it keeps the keyboard" : ": not taw's, left alone"));
+        readySince = 0.0;
+        return;
     }
 
     // Not while the mouse is busy in it: a button held (dragging a knob), something captured,
     // a menu open, the window being moved.
     GUITHREADINFO gui {};
     gui.cbSize = sizeof (gui);
-    const bool busy = (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0 || (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0
-                      || (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0
-                      || (GetGUIThreadInfo (GetWindowThreadProcessId (front, nullptr), &gui)
-                          && (gui.hwndCapture != nullptr || gui.hwndMenuOwner != nullptr
-                              || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE | GUI_INMOVESIZE)) != 0));
+    const bool button = (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0 || (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0
+                        || (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0;
+    const bool gotInfo = GetGUIThreadInfo (GetWindowThreadProcessId (front, nullptr), &gui) != 0;
+    const bool menu = gotInfo && (gui.hwndMenuOwner != nullptr || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE)) != 0);
+    const bool moving = gotInfo && (gui.flags & GUI_INMOVESIZE) != 0;
     const auto now = (double) GetTickCount64();
 
-    if (busy)
+    // (Capture alone doesn't count: some plugins hold it all the time.)
+    if (button || menu || moving)
     {
+        logFocus ("front " + describeWindow (front) + (button ? ": mouse button down" : menu ? ": menu open" : ": being moved"));
         readySince = 0.0;
         return;
     }
 
     // A moment after the click, so a double-click or a menu that opens on release still works.
     if (readySince == 0.0)
-        readySince = now;
-    else if (now - readySince > 250.0)
     {
-        SetForegroundWindow ((HWND) terminal);
-        readySince = 0.0;
+        readySince = now;
+        return;
     }
+
+    if (now - readySince < 250.0)
+        return;
+
+    readySince = 0.0;
+
+    // Windows only lets the app in front move the focus, and sometimes not even then; tapping
+    // Alt (nothing reads it) lifts that lock.
+    if (! SetForegroundWindow ((HWND) terminal))
+    {
+        INPUT alt[2] {};
+        alt[0].type = alt[1].type = INPUT_KEYBOARD;
+        alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+        alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput (2, alt, sizeof (INPUT));
+        SetForegroundWindow ((HWND) terminal);
+    }
+
+    logFocus ("front " + describeWindow (front) + " -> gave the keyboard to the terminal " + describeWindow ((HWND) terminal)
+              + (GetForegroundWindow() == (HWND) terminal ? ": ok" : ": FAILED, still " + describeWindow (GetForegroundWindow())));
 }
 
 std::vector<Key> Console::poll()

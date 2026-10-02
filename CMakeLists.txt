@@ -48,6 +48,14 @@ target_compile_definitions(taw PRIVATE
     JUCE_PLUGINHOST_VST3=1 # instrument tracks host VST3 plugins (in process for now)
     TAW_VERSION="${PROJECT_VERSION}")
 
+# Which build this is (commit, + for changes on top, when), shown in the title bar.
+set(TAW_BUILD_INFO ${CMAKE_BINARY_DIR}/generated/BuildInfo.cpp)
+add_custom_target(taw_build_info
+    COMMAND ${CMAKE_COMMAND} -DSRC=${CMAKE_SOURCE_DIR} -DOUT=${TAW_BUILD_INFO} -P ${CMAKE_SOURCE_DIR}/cmake/BuildInfo.cmake
+    BYPRODUCTS ${TAW_BUILD_INFO})
+add_dependencies(taw taw_build_info)
+target_sources(taw PRIVATE ${TAW_BUILD_INFO})
+
 if (WIN32)
     target_sources(taw PRIVATE src/ConsoleWindows.cpp)
 else()

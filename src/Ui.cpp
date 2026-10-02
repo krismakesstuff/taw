@@ -243,7 +243,10 @@ void Ui::drawMain (App& app)
 
 void Ui::drawTitle (App& app)
 {
-    const int x = canvas.text (1, 0, "taw", colour::accent, -1, true);
+    int x = canvas.text (1, 0, "taw", colour::accent, -1, true);
+
+    // Which build: the version, the commit (+: changes on top of it) and when it was built.
+    x = canvas.text (x + 1, 0, juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime(), colour::faint);
 
     if (auto* s = app.session.get())
         canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);

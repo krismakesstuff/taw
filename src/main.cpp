@@ -3,6 +3,7 @@
 #include "Import.h"
 #include "Plugins.h"
 #include "Safety.h"
+#include "Ui.h"
 
 #include <juce_events/juce_events.h>
 
@@ -45,6 +46,13 @@ int main (int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         args.add (juce::String::fromUTF8 (argv[i]));
 #endif
+
+    // taw --version   which build this is (also in the title bar).
+    if (args[0] == "--version")
+    {
+        std::printf ("taw %s %s built %s\n", TAW_VERSION, taw::buildCommit(), taw::buildTime());
+        return 0;
+    }
 
     // taw --scan-plugin <file> <out.xml>   (taw runs this itself) describe one plugin file in a
     // child process, so a plugin that crashes or hangs while loading can't take taw with it.

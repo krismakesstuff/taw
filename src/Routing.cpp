@@ -866,7 +866,7 @@ bool App::handleBusPickerKey (const Key& k)
 }
 
 // In the routing column (after o): left/right walk inserts A-E, sends A-E, then the output;
-// up/down change tracks as usual. On an insert: enter opens its window (empty: the effects
+// up/down go row by row (inserts, sends, the next track's inserts). On an insert: enter opens its window (empty: the effects
 // picker), M bypasses, shift+left/right moves it along the chain, del removes it. On a send:
 // enter picks its bus, [ ] ride its level, M turns it off, P flips pre/post, del removes it. On
 // the output: enter picks a bus, del puts it back on the mix. Esc or o leaves. An open plugin
@@ -917,10 +917,30 @@ bool App::handleIoKey (const Key& k)
 
         case Key::Up:
         case Key::Down:
+        {
             if (k.ctrl || k.alt || k.shift)
                 return false;
 
-            k.code == Key::Up ? focusUp (false) : focusDown (false);
+            // By row: a track's inserts, then its sends, then the next track's inserts. The
+            // output only has the sends row, so it goes track to track. One row tall (no sends
+            // row showing): track to track.
+            const bool down = k.code == Key::Down;
+            const bool rows = session->trackHeight() > 1;
+
+            if (rows && insertSlot >= 0 && down)
+                ioCell = ioFirstSend + insertSlot;
+            else if (rows && sendSlot >= 0 && ! down)
+                ioCell = ioFirstInsert + sendSlot;
+            else
+            {
+                const auto before = focused;
+                down ? focusDown (false) : focusUp (false);
+
+                if (rows && focused != before && ! mixFocused() && ! onTopLane())
+                    ioCell = sendSlot >= 0 ? ioFirstInsert + sendSlot
+                           : insertSlot >= 0 ? ioFirstSend + insertSlot
+                                             : ioCell;
+            }
 
             if (! mixFocused() && ! onTopLane())
             {
@@ -928,6 +948,7 @@ bool App::handleIoKey (const Key& k)
                 say (Result::good (describeIoCell (focused, ioCell)));
             }
             return true;
+        }
 
         case Key::Enter:
             if (insertSlot >= 0)

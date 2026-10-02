@@ -12,19 +12,25 @@ class App;
 
 namespace layout
 {
-// Left to right, as in Pro Tools: the track panel, the routing column, the meter, then the
-// timeline.
-constexpr int leftPanel = 25;  // focus, number, name, flags, input
-constexpr int ioPanel = 27;    // inserts A-E on a track's first row; sends A-E and the output on its second
-constexpr int meterPanel = 18; // volume, meter bar, peak readout
+// Left to right: the track header, the routing column, the timeline, then the meter.
+//
+// The header holds focus, number, name and input; the R M S I flags go on a track's second row
+// (twoRows: tracks two or more rows tall), else after the name, which takes a wider header.
+inline int leftPanel (bool twoRows) { return twoRows ? 20 : 25; }
+constexpr int ioPanel = 42;    // inserts A-E on a track's first row; sends A-E and the output on its second
+constexpr int meterPanel = 18; // volume (pan under it), meter bar, peak readout
 
 inline int ioWidth (bool io) { return io ? ioPanel + 1 : 0; } // with its border
-constexpr int ioSlots = 1, ioSlotW = 4, ioOut = 21;            // offsets in the panel, slot cell width
+constexpr int ioSlots = 1, ioSlotW = 7, ioOut = 36;            // offsets in the panel, slot cell width (6 letters and a gap)
 
-inline int laneStart (bool io) { return leftPanel + 1 + ioWidth (io) + meterPanel + 1; }
+inline int laneStart (bool io, bool twoRows) { return leftPanel (twoRows) + 1 + ioWidth (io); }
 
-// Console width minus the one-column gutter, everything left of the lane and its right border.
-inline int laneWidth (int consoleWidth, bool io) { return std::max (10, consoleWidth - 1 - laneStart (io) - 1); }
+// Console width minus the one-column gutter, everything left of the lane, its right border and
+// the meter.
+inline int laneWidth (int consoleWidth, bool io, bool twoRows)
+{
+    return std::max (10, consoleWidth - 1 - laneStart (io, twoRows) - 1 - meterPanel);
+}
 } // namespace layout
 
 struct Cell

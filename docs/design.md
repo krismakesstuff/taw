@@ -368,10 +368,10 @@ The effects picker lists what fits the track: where a plugin comes as "X Mono", 
 and "X Stereo" (Waves), a mono track sees the Mono and Mono/Stereo ones, a stereo track the
 Stereo one. Typed names pick the same way.
 
-- **The routing column** sits left of the timeline, between the track panel and the meter,
-  as in Pro Tools. A track's first row shows inserts A to E, its second sends A to E and then
-  the output, and a third row the send levels (pre-fader in the accent colour). A track one
-  row tall shows its inserts and output. `o` steps into the column: ←→ walk the inserts, the
+- **The routing column** sits left of the timeline, after the track header, as in Pro Tools
+  (the meter is right of the timeline). A track's first row shows inserts A to E, its second
+  sends A to E and then the output, and a third row the send levels (pre-fader in the accent
+  colour); names get six letters. A track one row tall shows its inserts and output. `o` steps into the column: ←→ walk the inserts, the
   sends, then the output; ↑↓ change tracks. On an insert, enter opens its window (an empty one:
   the effects picker, type to filter), `M` bypasses it, shift+←→ moves it along the chain, del
   removes it. On a send, enter picks its bus (a name nothing matches makes that bus), `[ ]`
@@ -547,7 +547,9 @@ and how far along it is (plugins can take seconds each); keys wait until it's op
  (blank)
  transport: ■ STOP · bars.beats · time · tempo/sig · click · loop   (centred)
  ruler
- tracks:    number · name · arm/mute/solo/mon · input │ inserts A-E / sends A-E · out │ volume · meter · peak │ timeline lane
+ tracks:    number · name · input │ inserts A-E / sends A-E · out │ timeline lane │ volume · meter · peak
+            second row: R M S I flags (an instrument's plugin), pan under the volume
+            one row tall: the flags go after the name, in a wider header
  mix
  message:   feedback from the last command
  command:   : 1-3 r

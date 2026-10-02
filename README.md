@@ -101,7 +101,8 @@ and naming a bus that doesn't exist yet creates it. `3 fx valhalla` puts an effe
 (on a bus, that's your reverb return); `2 out drums` sends a whole track into a bus.
 
 The routing column sits left of the timeline, as in Pro Tools: inserts on a track's first row,
-sends and the output on its second. `o` steps into it: arrows pick a slot, enter opens an
+sends and the output on its second (the R M S I flags sit under the track's name, and the
+meter is on the right). `o` steps into it: arrows pick a slot, enter opens an
 effect's window (or picks an effect or a bus for an empty slot), `M` bypasses, shift+arrows
 reorder effects, `[ ]` set a send's level, `del` removes. An open plugin window follows you
 from slot to slot. Soloing a track keeps its reverb; soloing a bus plays just what's on it.

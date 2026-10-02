@@ -438,15 +438,16 @@ void Ui::drawTimeline (App& app)
     auto& s = *app.session;
     const int w = canvas.width(), h = canvas.height();
     const bool io = app.ioVisible;
-    const int ioX = leftPanel + 1, meterX = ioX + ioWidth (io), laneX = laneStart (io), laneW = laneWidth (w + 1, io);
+    const bool twoRows = s.trackHeight() > 1; // the flags go on a track's second row
+    const int leftW = leftPanel (twoRows);
+    const int ioX = leftW + 1, laneX = laneStart (io, twoRows), laneW = laneWidth (w + 1, io, twoRows), meterX = laneX + laneW + 1;
 
     // The borders between the panels and the timeline, and after it.
     auto borders = [&] (int y)
     {
         canvas.put (ioX - 1, y, L'\x2502', colour::faint);
-        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
         canvas.put (laneX - 1, y, L'\x2502', colour::faint);
-        canvas.put (laneX + laneW, y, L'\x2502', colour::faint);
+        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
     };
     const auto spc = app.samplesPerColumn();
     const auto rolling = app.engine.isRolling();
@@ -490,12 +491,12 @@ void Ui::drawTimeline (App& app)
     {
         const bool focusedLane = app.topLane == lane;
         const int bg = focusedLane ? colour::focusBg : -1;
-        canvas.fill (0, y, leftPanel, L' ', -1, bg);
+        canvas.fill (0, y, leftW, L' ', -1, bg);
 
         if (focusedLane)
             canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
-        canvas.text (1, y, label, focusedLane ? colour::dim : colour::faint, bg, false, leftPanel - 1);
+        canvas.text (1, y, label, focusedLane ? colour::dim : colour::faint, bg, false, leftW - 1);
         borders (y);
 
         if (focusedLane)
@@ -740,7 +741,7 @@ void Ui::drawTimeline (App& app)
                     continue;
 
                 const auto name = juce::MidiMessage::getMidiNoteName (p, true, true, 4);
-                canvas.text (leftPanel - 1 - name.length(), y + r, name, p % 12 == 0 ? colour::text : isBlackKey (p) ? colour::faint : colour::dim,
+                canvas.text (leftW - 1 - name.length(), y + r, name, p % 12 == 0 ? colour::text : isBlackKey (p) ? colour::faint : colour::dim,
                              panelBg, p % 12 == 0);
             }
 
@@ -805,11 +806,11 @@ void Ui::drawTimeline (App& app)
         // The row stays lit all the way along the timeline, so you can see which track you're on.
         const int laneBg = selectedRow ? colour::laneSelBg : focusedRow ? colour::laneFocusBg : -1;
 
-        // Left panel: focus, number, name, flags, input (on the first row; the rest is its colour)
+        // Header: focus, number, name and input on the first row; the R M S I flags on the second
+        // (or after the name when tracks are one row tall); the rest is its colour.
         for (int r = 0; r < rowsPerTrack; ++r)
         {
-            canvas.fill (0, y + r, leftPanel, L' ', -1, bg);
-            canvas.put (laneX - 1, y + r, L'\x2502', colour::faint);
+            canvas.fill (0, y + r, leftW, L' ', -1, bg);
             canvas.fill (meterX, y + r, meterPanel, L' ', -1, bg);
             borders (y + r);
         }
@@ -820,18 +821,19 @@ void Ui::drawTimeline (App& app)
         canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);
         canvas.text (4, y, padRight (t[ids::name].toString(), 10), colour::text, bg);
 
-        auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, y, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
+        const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y, kindX = leftW - 5;
+        auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, flagY, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
         // A bus has nothing to arm or monitor: just mute and solo.
         const bool busRow = Session::isBusTrack (t);
 
         if (! busRow)
-            flag (15, t[ids::armed], L'R', colour::rec);
+            flag (flagX, t[ids::armed], L'R', colour::rec);
 
-        flag (16, t[ids::mute], L'M', colour::meterYellow);
-        flag (17, t[ids::solo], L'S', colour::play);
+        flag (flagX + 1, t[ids::mute], L'M', colour::meterYellow);
+        flag (flagX + 2, t[ids::solo], L'S', colour::play);
 
         if (! busRow)
-            flag (18, t[ids::monitor], L'I', colour::wave);
+            flag (flagX + 3, t[ids::monitor], L'I', colour::wave);
 
         const bool sampleTrack = Session::isSampleTrack (t);
         const bool instrumentTrack = Session::isInstrumentTrack (t);
@@ -839,18 +841,18 @@ void Ui::drawTimeline (App& app)
         const int input = t[ids::input];
 
         if (busTrack)
-            canvas.text (20, y, "bus", colour::accent, bg);
+            canvas.text (kindX, y, "bus", colour::accent, bg);
         else if (sampleTrack)
-            canvas.text (20, y, "smp", colour::hit, bg);
+            canvas.text (kindX, y, "smp", colour::hit, bg);
         else if (instrumentTrack)
         {
-            // "inst", red when its plugin didn't load; the plugin's name under the track's.
+            // "inst", red when its plugin didn't load; the plugin's name after the flags.
             const auto problem = app.instrumentProblem (i);
-            canvas.text (20, y, "inst", problem.isNotEmpty() ? colour::error : colour::note, bg);
+            canvas.text (kindX, y, "inst", problem.isNotEmpty() ? colour::error : colour::note, bg);
 
-            if (rowsPerTrack > 1)
-                canvas.text (4, y + 1, problem.isNotEmpty() ? problem : t[ids::pluginName].toString(),
-                             problem.isNotEmpty() ? colour::error : colour::dim, bg, false, fill ? 15 : 19);
+            if (twoRows)
+                canvas.text (9, y + 1, problem.isNotEmpty() ? problem : t[ids::pluginName].toString(),
+                             problem.isNotEmpty() ? colour::error : colour::dim, bg, false, fill ? 6 : leftW - 10);
         }
         else
         {
@@ -859,7 +861,7 @@ void Ui::drawTimeline (App& app)
             const auto text = input <= 0 ? juce::String ("--")
                               : stereo   ? (input < 10 ? "i" : "") + juce::String (input) + "-" + juce::String (input + 1)
                                          : "in" + juce::String (input);
-            canvas.text (20, y, text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : colour::dim, bg, false, 5);
+            canvas.text (kindX, y, text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : colour::dim, bg, false, 5);
         }
 
         // Lane
@@ -1045,7 +1047,7 @@ void Ui::drawTimeline (App& app)
                                  : (bool) insert[ids::bypass]           ? colour::faint
                                  : app.insertSittingOut (insert)        ? colour::meterYellow // low latency mode
                                                                          : colour::note,
-                                 cbg, false, 3);
+                                 cbg, false, ioSlotW - 1);
             }
 
             if (rowsPerTrack > 1)
@@ -1064,7 +1066,7 @@ void Ui::drawTimeline (App& app)
                     const int dest = s.findBus (send[ids::to]);
                     const bool off = send[ids::mute];
                     canvas.text (x, y + 1, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(),
-                                 dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, false, 3);
+                                 dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, false, ioSlotW - 1);
 
                     // The level under the name; pre-fader sends in the accent colour.
                     if (rowsPerTrack > 2)
@@ -1072,7 +1074,7 @@ void Ui::drawTimeline (App& app)
                         const double db = send[ids::db];
                         const auto level = db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
                         canvas.fill (x - 1, y + 2, ioSlotW, L' ', -1, cbg);
-                        canvas.text (x, y + 2, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, 3);
+                        canvas.text (x, y + 2, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, ioSlotW - 1);
                     }
                 }
 
@@ -1114,7 +1116,8 @@ void Ui::drawTimeline (App& app)
     {
         const int y = masterY + ch;
         const int bg = mixFocused ? colour::focusBg : -1;
-        canvas.fill (0, y, meterX + meterPanel, L' ', -1, bg);
+        canvas.fill (0, y, laneX - 1, L' ', -1, bg);
+        canvas.fill (meterX, y, meterPanel, L' ', -1, bg);
 
         if (ch == 0)
         {
@@ -1125,7 +1128,7 @@ void Ui::drawTimeline (App& app)
             drawVolume (meterX, y, s.tree()[ids::mixDb], bg);
         }
 
-        canvas.text (leftPanel - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
+        canvas.text (leftW - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
         borders (y);
 
         if (ch == 0 && fill)

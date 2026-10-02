@@ -1617,7 +1617,7 @@ void App::setCursor (juce::int64 pos)
 
 void App::keepInView (juce::int64 pos)
 {
-    const auto span = (juce::int64) (samplesPerColumn() * layout::laneWidth (console.width(), ioVisible));
+    const auto span = (juce::int64) (samplesPerColumn() * laneColumns());
 
     if (pos < viewStart || pos >= viewStart + span)
     {
@@ -1957,7 +1957,7 @@ void App::showSelectionEdge (bool end)
     setCursor (pos);
 
     const auto spc = samplesPerColumn();
-    const auto columns = layout::laneWidth (console.width(), ioVisible);
+    const auto columns = laneColumns();
     const auto first = std::floor ((double) pos / spc) - columns / 2;
     viewStart = juce::jmax<juce::int64> (0, (juce::int64) (first * spc));
 }

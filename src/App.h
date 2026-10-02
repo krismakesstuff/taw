@@ -162,6 +162,11 @@ public:
 
     // Where the playhead is in what you hear: delay compensation makes the mix that much later
     // than what the engine is rendering. For drawing it and for markers dropped while playing.
+    int laneColumns() const
+    {
+        return layout::laneWidth (console.width(), ioVisible, session != nullptr && session->trackHeight() > 1);
+    }
+
     juce::int64 heardPlayhead() const
     {
         const auto p = engine.playhead();

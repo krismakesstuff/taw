@@ -326,8 +326,8 @@ int main (int argc, char** argv)
 
         // What the session holds now.
         auto& s = *app.session;
-        std::printf ("\n%s \xc2\xb7 %d tracks \xc2\xb7 mix %s dB\n", s.name().toRawUTF8(), s.numTracks(),
-                     taw::formatDb (s.tree()[taw::ids::mixDb]).toRawUTF8());
+        std::printf ("\n%s \xc2\xb7 %d tracks \xc2\xb7 mix %s dB \xc2\xb7 delay compensation %d samples\n", s.name().toRawUTF8(), s.numTracks(),
+                     taw::formatDb (s.tree()[taw::ids::mixDb]).toRawUTF8(), app.mixLatency);
 
         for (int t = 0; t < s.numTracks(); ++t)
         {
@@ -398,7 +398,7 @@ int main (int argc, char** argv)
 
             const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-counttest.wav");
             juce::String err;
-            auto rec = engine.createRecorder (0, 0, file, rate, err);
+            auto rec = engine.createRecorder (0, 0, 1, file, rate, err);
 
             auto g = std::make_unique<taw::Graph>();
             g->click.samplesPerBeat = rate / 2.0; // 120 bpm
@@ -782,7 +782,7 @@ int main (int argc, char** argv)
 
         const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-selftest.wav");
         juce::String err;
-        auto rec = engine.createRecorder (0, 0, file, d->getCurrentSampleRate(), err);
+        auto rec = engine.createRecorder (0, 0, 1, file, d->getCurrentSampleRate(), err);
 
         auto g = std::make_unique<taw::Graph>();
         g->tracks.push_back ({});

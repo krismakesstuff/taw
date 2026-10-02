@@ -110,7 +110,7 @@ std::vector<int> App::busFeeders (int busTrack) const
     return from;
 }
 
-void App::applyRouting (Graph& g) const
+void App::applyRouting (Graph& g, bool offline)
 {
     const auto n = (int) g.tracks.size();
 
@@ -172,9 +172,11 @@ void App::applyRouting (Graph& g) const
                 continue;
 
             if (const auto bus = busFor (t, session->findBus (send[ids::to])); bus >= 0)
-                tp.sends.push_back ({ bus, sendGain (send), (bool) send[ids::pre] });
+                tp.sends.push_back ({ bus, sendGain (send), (bool) send[ids::pre], {} });
         }
     }
+
+    compensateLatency (g, offline);
 
     // Solo follows the signal: a bus that a soloed track feeds stays audible (or you'd lose its
     // reverb), and so do the tracks whose output runs into a soloed bus (soloing the drum bus
@@ -212,6 +214,183 @@ void App::applyRouting (Graph& g) const
         if (! heard[(size_t) t] && tp.out < 0)
             tp.out = TrackPlay::nowhere;
     }
+}
+
+// Delay compensation. Each track's plugins make it late by its latency; a bus starts as late as
+// the latest thing feeding it. Every route (an output or a send) is delayed by what it takes to
+// arrive as late as the latest route into the same place, so everything meets in time at each
+// bus and at the mix. The mix's lateness is the graph's latency: recordings and bounces are
+// shifted by it. Routes keep their delay lines across rebuilds (a fader move mustn't empty them);
+// a bounce gets its own.
+void App::compensateLatency (Graph& g, bool offline)
+{
+    const auto n = (int) g.tracks.size();
+    std::vector<int> busTrack ((size_t) g.numBuses, -1), arrives ((size_t) n, 0), leaves ((size_t) n, 0);
+
+    for (int t = 0; t < n; ++t)
+        if (g.tracks[(size_t) t].busIndex >= 0)
+            busTrack[(size_t) g.tracks[(size_t) t].busIndex] = t;
+
+    auto destOf = [&] (int bus) { return bus >= 0 && bus < g.numBuses ? busTrack[(size_t) bus] : -1; }; // -1: the mix
+    int mix = 0;
+
+    for (auto t : g.order) // everything feeding a bus runs before it
+    {
+        auto& tp = g.tracks[(size_t) t];
+        leaves[(size_t) t] = arrives[(size_t) t] + tp.latency;
+
+        auto reach = [&] (int bus)
+        {
+            if (const auto d = destOf (bus); d >= 0)
+                arrives[(size_t) d] = juce::jmax (arrives[(size_t) d], leaves[(size_t) t]);
+            else
+                mix = juce::jmax (mix, leaves[(size_t) t]);
+        };
+
+        reach (tp.out);
+
+        for (const auto& s : tp.sends)
+            reach (s.bus);
+    }
+
+    g.latency = mix;
+
+    std::vector<KeptDelay> kept;
+
+    auto delayFor = [&] (int t, int edge, int bus) -> std::shared_ptr<RouteDelay>
+    {
+        const auto d = destOf (bus);
+        const auto length = (d >= 0 ? arrives[(size_t) d] : mix) - leaves[(size_t) t];
+
+        if (length <= 0)
+            return {};
+
+        if (offline)
+            return std::make_shared<RouteDelay> (length);
+
+        const auto track = session->track (t);
+
+        for (const auto& k : routeDelays)
+            if (k.track == track && k.edge == edge && k.line->length == length)
+            {
+                kept.push_back (k);
+                return k.line;
+            }
+
+        auto line = std::make_shared<RouteDelay> (length);
+        kept.push_back ({ track, edge, line });
+        return line;
+    };
+
+    for (int t = 0; t < n; ++t)
+    {
+        auto& tp = g.tracks[(size_t) t];
+        tp.outDelay = delayFor (t, -1, tp.out);
+
+        for (auto& s : tp.sends)
+            s.delay = delayFor (t, (int) (&s - tp.sends.data()), s.bus);
+    }
+
+    if (! offline)
+    {
+        routeDelays = std::move (kept);
+        mixLatency = g.latency;
+    }
+}
+
+//==============================================================================
+// Width and pan
+
+bool App::trackIsStereo (const juce::ValueTree& track)
+{
+    if (track.hasProperty (ids::channels))
+        return (int) track[ids::channels] >= 2;
+
+    if (Session::isInstrumentTrack (track) || Session::isBusTrack (track))
+        return true;
+
+    if (Session::isSampleTrack (track))
+    {
+        const auto* data = audioFor (track[ids::sample].toString());
+        return data != nullptr && data->audio->getNumChannels() > 1;
+    }
+
+    for (const auto& c : Session::clips (track))
+        if (const auto* data = clipFor (c); data != nullptr && data->audio->getNumChannels() > 1)
+            return true;
+
+    return false;
+}
+
+juce::String App::panText (double pan)
+{
+    const auto amount = juce::roundToInt (std::abs (pan) * 100.0);
+    return amount == 0 ? juce::String ("C") : pan < 0.0 ? "<" + juce::String (amount) : juce::String (amount) + ">";
+}
+
+// "c" or "0" centre; "l30", "30l", "<30" or "-30" left; "r30", "30r", "30>", "+30" or "30" right.
+Result App::setPan (const std::vector<int>& tracks, const juce::String& valueIn)
+{
+    auto v = valueIn.trim().toLowerCase().removeCharacters (" ");
+
+    if (v.isEmpty())
+        return Result::fail ("pan where? 2 pan l30, 2 pan c, 2 pan 45r");
+
+    double sign = 1.0;
+
+    if (v.startsWithChar ('l') || v.startsWithChar ('<') || v.endsWithChar ('l'))
+        sign = -1.0;
+
+    const auto digits = v.removeCharacters ("lr<>+c");
+
+    if (v != "c" && v != "center" && v != "centre" && ! digits.containsOnly ("-0123456789.") )
+        return Result::fail ("pan l30, pan c, pan 45r (or -100 to 100)");
+
+    const auto pan = juce::jlimit (-1.0, 1.0, sign * digits.getDoubleValue() / 100.0);
+
+    for (auto t : tracks)
+        session->track (t).setProperty (ids::pan, pan, um());
+
+    return Result::good (trackList (tracks) + " pan " + panText (pan));
+}
+
+Result App::nudgePan (const std::vector<int>& tracks, double delta)
+{
+    for (auto t : tracks)
+    {
+        auto track = session->track (t);
+        track.setProperty (ids::pan, juce::jlimit (-1.0, 1.0, std::round (((double) track[ids::pan] + delta) * 100.0) / 100.0), um());
+    }
+
+    return Result::good (trackList (tracks) + " pan " + panText (session->track (tracks.front())[ids::pan]));
+}
+
+Result App::setWidth (const std::vector<int>& tracks, bool stereo)
+{
+    for (auto t : tracks)
+    {
+        const auto track = session->track (t);
+
+        if (Session::isInstrumentTrack (track) || Session::isBusTrack (track))
+            return Result::fail ("track " + juce::String (t + 1) + " is " + (Session::isBusTrack (track) ? "a bus" : "an instrument") + ": always stereo");
+    }
+
+    for (auto t : tracks)
+    {
+        auto track = session->track (t);
+        track.setProperty (ids::channels, stereo ? 2 : 1, um());
+
+        // Its effects get made again for the new width (their settings carry over).
+        for (const auto& c : track)
+            if (c.hasType (ids::INSERT))
+                dropPlugin (c);
+    }
+
+    const int input = session->track (tracks.front())[ids::input];
+    return Result::good (trackList (tracks) + (stereo ? " stereo" : " mono")
+                         + (input > 0 ? (stereo ? L" \x00b7 records inputs " + juce::String (input) + "-" + juce::String (input + 1)
+                                                : L" \x00b7 records input " + juce::String (input))
+                                      : juce::String()));
 }
 
 //==============================================================================

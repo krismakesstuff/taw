@@ -105,7 +105,7 @@ void AudioEngine::seek (juce::int64 position)
         playPos.store (position);
 }
 
-std::shared_ptr<Recorder> AudioEngine::createRecorder (int trackIndex, int inputChannel, const juce::File& file,
+std::shared_ptr<Recorder> AudioEngine::createRecorder (int trackIndex, int inputChannel, int numChannels, const juce::File& file,
                                                        double sampleRate, juce::String& error)
 {
     juce::WavAudioFormat wav;
@@ -119,7 +119,7 @@ std::shared_ptr<Recorder> AudioEngine::createRecorder (int trackIndex, int input
 
     auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}
                                                    .withSampleRate (sampleRate)
-                                                   .withNumChannels (1)
+                                                   .withNumChannels (numChannels)
                                                    .withBitsPerSample (32)
                                                    .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
 
@@ -132,6 +132,7 @@ std::shared_ptr<Recorder> AudioEngine::createRecorder (int trackIndex, int input
     auto r = std::make_shared<Recorder>();
     r->trackIndex = trackIndex;
     r->inputChannel = inputChannel;
+    r->numChannels = numChannels;
     r->file = file;
     // Four seconds of headroom between the audio thread and the disk.
     r->writer = std::make_unique<juce::AudioFormatWriter::ThreadedWriter> (writer.release(), diskThread,
@@ -360,9 +361,9 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
             continue;
 
         auto& tp = current->tracks[(size_t) t];
-        const float* input = (tp.inputChannel >= 0 && tp.inputChannel < numIn && in[tp.inputChannel] != nullptr)
-                                 ? in[tp.inputChannel]
-                                 : nullptr;
+        auto inputAt = [&] (int ch) { return ch >= 0 && ch < numIn ? in[ch] : nullptr; };
+        const float* input = inputAt (tp.inputChannel);
+        const float* inputR = tp.stereo ? inputAt (tp.inputChannel + 1) : input; // a stereo track's right input
 
         juce::FloatVectorOperations::clear (trackL, n);
         juce::FloatVectorOperations::clear (trackR, n);
@@ -373,15 +374,16 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         if (monitoring)
         {
             if (input != nullptr)
-            {
                 juce::FloatVectorOperations::copy (trackL, input, n);
-                juce::FloatVectorOperations::copy (trackR, input, n);
-            }
+
+            if (inputR != nullptr)
+                juce::FloatVectorOperations::copy (trackR, inputR, n);
         }
         else if (isRolling)
         {
             renderClips (tp, pos, n, trackL, trackR);
             renderHits (tp, pos, n, trackL, trackR);
+            toMono (tp, trackL, trackR, n);
         }
 
         // A bus plays what was sent to it, stopped or rolling (an input monitored into it, a reverb tail).
@@ -400,8 +402,8 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         for (const auto& fx : tp.inserts)
             fx->process (transport, n, trackL, trackR);
 
-        const auto pan = (isStereo (tp) && ! monitoring) ? 1.0f : centrePan; // a mono input pans centre
-        routeTrack (tp, pan, trackL, trackR, n, busPtrs.data(), mixL, mixR);
+        panTrack (tp, trackL, trackR, n);
+        routeTrack (tp, trackL, trackR, n, busPtrs.data(), mixL, mixR);
 
         // The meter shows what you hear from the track: the input (pre-fader, for setting
         // levels) while monitoring, otherwise its playback.
@@ -420,19 +422,19 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         if (isRolling && tp.recorder != nullptr)
         {
             auto& rec = *tp.recorder;
-            const float* src = input != nullptr ? input : silence;
+            const float* srcs[2] = { input != nullptr ? input : silence, inputR != nullptr ? inputR : silence };
 
             if (rec.startSample.load (std::memory_order_relaxed) < 0)
                 rec.startSample.store (pos);
 
-            if (! rec.writer->write (&src, n))
+            if (! rec.writer->write (srcs, n))
                 rec.droppedBlocks.fetch_add (1);
 
             rec.samplesWritten.fetch_add (n);
 
             for (int i = 0; i < n; ++i)
             {
-                rec.ovPeak = juce::jmax (rec.ovPeak, std::abs (src[i]));
+                rec.ovPeak = juce::jmax (rec.ovPeak, std::abs (srcs[0][i]), rec.numChannels > 1 ? std::abs (srcs[1][i]) : 0.0f);
 
                 if (++rec.ovCount == Recorder::overviewBlock)
                 {

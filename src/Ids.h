@@ -69,6 +69,8 @@ TAW_ID (mute)
 TAW_ID (solo)
 TAW_ID (monitor)
 TAW_ID (gainDb)
+TAW_ID (pan)      // TRACK: -1 (left) to 1 (right); absent = centre
+TAW_ID (channels) // TRACK: 1 (mono) or 2 (stereo); absent = from what it plays (a stereo clip or sample: stereo)
 
 TAW_ID (file)
 TAW_ID (start)  // CLIP: timeline position, samples

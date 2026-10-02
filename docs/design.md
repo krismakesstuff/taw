@@ -346,6 +346,7 @@ TRACK { …, out? }                    # the busId it plays into; absent = the m
 
 | Command | Meaning |
 |---|---|
+| `ins` / `ins cla-2a` | the effects picker for the focused track's first free insert / the best match by name (like `inst`) |
 | `2 fx valhalla` | an effect in the first free insert (`2 fx` alone: the effects picker) |
 | `2 fx b valhalla` | into insert B (replacing what's there) |
 | `2 fx b` | open or close insert B's window (empty: the picker for B) |
@@ -360,7 +361,11 @@ TRACK { …, out? }                    # the busId it plays into; absent = the m
 | `io` | show or hide the routing column (on by default; kept in `settings.json`) |
 
 `fx` and `out` start with keys that are hotkeys on an empty line (`f`, `o`), so typed they
-need a track number (`2 fx`); on the focused track, use the column.
+need a track number (`2 fx`); `ins` works on the focused track, as `inst` does.
+
+The effects picker lists what fits the track: where a plugin comes as "X Mono", "X Mono/Stereo"
+and "X Stereo" (Waves), a mono track sees the Mono and Mono/Stereo ones, a stereo track the
+Stereo one. Typed names pick the same way.
 
 - **The routing column** sits left of the timeline, between the track panel and the meter,
   as in Pro Tools. A track's first row shows inserts A to E, its second sends A to E and then
@@ -377,12 +382,20 @@ need a track number (`2 fx`); on the focused track, use the column.
   fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped
   too, so tails ring out and monitored inputs go through them. New sends are post-fader at
   0 dB. Mute silences a track's sends too. A mono track enters a bus at the pan law.
-- **Effects run in stereo.** taw asks each effect for stereo in and out; a mono-only one gets
-  both sides summed and its output goes to both. Typed names prefer "X Stereo" over "X Mono".
+- **Effects follow the track's width.** A mono track's effects are asked for mono in and out,
+  else mono in and stereo out (a mono-to-stereo reverb: the rest of the track is stereo from
+  there); a stereo track's for stereo. A plugin that takes neither runs as it is, fed both
+  sides (a mono-only one gets them summed) with its output to both.
 - **State** is kept like an instrument's (`plugins/NN-Name.state`), so undoing a removed
   insert brings it back as it was. Bounces run their own copies of every insert.
-- **No plugin delay compensation yet.** Lookahead limiters and linear-phase EQs put their
-  track late by their latency.
+- **Delay compensation.** Each track's plugins (instrument and inserts) make it late by their
+  latency; a bus starts as late as the latest thing feeding it. Every route (an output or a
+  send) is delayed so everything meets in time at each bus and at the mix, so a dry track and
+  its send to a reverb bus with a linear-phase EQ on it still line up. The delay lines are
+  kept across graph rebuilds (a fader move doesn't empty them) and follow a plugin whose
+  latency changes. The whole mix comes out as late as its latest path: recordings, pad hits
+  and MIDI are placed that much earlier, and bounces drop it from the start. Monitoring through
+  the mix is that much later too (no low-latency monitoring mode yet). `taw --exec` prints it.
 - **No loops.** A route that would feed back (a bus feeding itself, or a chain that comes
   round) is refused, and the picker only lists buses that can take it. The graph runs every
   track before the buses it feeds. A loop in a hand-edited session is broken: the routes that
@@ -393,6 +406,24 @@ need a track number (`2 fx`); on the focused track, use the column.
 - A track whose output bus is gone (undo) plays to the mix; a send to it is shown as `?` and is silent.
 - Bounces route the same way: live playback and bounces share `routeTrack`.
 - Up to 32 buses. A bus plays even while stopped, so monitored inputs and tails reach it.
+
+## Mono, stereo and pan
+
+A track is mono or stereo. Audio tracks are mono unless they play a stereo clip, or are set:
+`2 stereo` / `2 mono`, `add Keys stereo`, or giving a pair of inputs (`2 i 3-4`). A stereo
+track records two inputs (its input and the next one) into one stereo file; its input shows as
+`i3-4`. Instrument and bus tracks are always stereo. A mono track plays one signal (a stereo
+clip on it is summed) until it's panned or an effect makes it stereo.
+
+`2 pan l30`, `2 pan 45r`, `2 pan c` (or -100 to 100); alt+[ and alt+] nudge the selected or
+focused tracks 5 at a time. Pan sits after the inserts and before the sends and fader, so sends
+follow it. A mono signal pans with the -3 dB law (0.707 each side at centre, unity hard over);
+a stereo one is balanced (centre leaves it alone). The meter panel shows pan under the volume,
+and `st` on stereo tracks.
+
+```
+TRACK { …, pan?, channels? }   # pan -1..1 (absent = centre); channels 1 or 2 (absent = from what it plays)
+```
 
 ## Editing
 

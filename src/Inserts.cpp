@@ -1,4 +1,4 @@
-// Inserts: five effect slots per track (A to E), run after the track's source (and its
+﻿// Inserts: five effect slots per track (A to E), run after the track's source (and its
 // instrument), before its sends and fader. Each is an INSERT in the track holding the same
 // plugin, pluginName and pluginState an instrument track has.
 
@@ -82,7 +82,7 @@ Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc
 
     const auto rate = engine.deviceSampleRate() > 0.0 ? engine.deviceSampleRate() : sampleRate();
     juce::String error;
-    auto plugin = plugins.create (desc, rate, engine.maxBlockSize(), error);
+    auto plugin = plugins.create (desc, rate, engine.maxBlockSize(), error, trackIsStereo (session->track (index)) ? 2 : 1);
 
     if (plugin == nullptr)
         return Result::fail (error);
@@ -295,7 +295,7 @@ Result App::editInserts (const std::vector<int>& tracks, const juce::StringArray
     if (! plugins.hasScanned())
         return Result::fail (L"no plugins scanned yet \x2014 type scan (takes a moment), then 2 fx " + rest);
 
-    const auto desc = plugins.findEffect (rest);
+    const auto desc = plugins.findEffect (rest, ! trackIsStereo (session->track (first)));
 
     if (! desc)
         return Result::fail ("no effect matches " + rest.quoted() + L" \x00b7 2 fx alone lists them \x00b7 scan finds new ones");

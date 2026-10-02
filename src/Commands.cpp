@@ -59,7 +59,8 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "scan", "midi", "fill",
-                              "bus", "out", ">", "send", "io", "count", "fx" };
+                              "bus", "out", ">", "send", "io", "count", "fx", "ins",
+                              "pan", "mono", "stereo" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -79,7 +80,8 @@ void splitVerb (const juce::String& token, juce::String& verb, juce::String& glu
             const auto next = token[candidate.length()];
             const bool takesWords = candidate == "n" || candidate == "name" || candidate == "click" || candidate == "b"
                                     || candidate == "pat" || candidate == "inst" || candidate == "bus" || candidate == "out"
-                                    || candidate == ">" || candidate == "send" || candidate == "fx";
+                                    || candidate == ">" || candidate == "send" || candidate == "fx" || candidate == "ins"
+                                    || candidate == "pan";
 
             if (takesWords || ! juce::CharacterFunctions::isLetter (next))
                 best = candidate.length();
@@ -849,31 +851,43 @@ Result App::execute (const juce::String& line)
             }
         }
 
+        // "stereo" anywhere: stereo tracks, each on a pair of inputs.
+        const bool stereo = args.contains ("stereo", true);
+        args.removeString ("stereo", true);
+        const int width = stereo ? 2 : 1;
+
         const auto baseName = args.joinIntoString (" ").unquoted();
         juce::StringArray added;
 
         for (int i = 0; i < count; ++i)
         {
-            std::vector<bool> used ((size_t) engine.numInputChannels() + 1, false);
+            std::vector<bool> used ((size_t) engine.numInputChannels() + 2, false);
 
             for (int t = 0; t < session->numTracks(); ++t)
-                if (const int in = session->track (t)[ids::input]; in > 0 && in < (int) used.size())
-                    used[(size_t) in] = true;
+                if (const int in = session->track (t)[ids::input]; in > 0)
+                    for (int k = in; k <= in + (trackIsStereo (session->track (t)) ? 1 : 0) && k < (int) used.size(); ++k)
+                        used[(size_t) k] = true;
 
             int input = 0;
 
             if (firstInput >= 0)
-                input = firstInput == 0 ? 0 : firstInput + i;
+                input = firstInput == 0 ? 0 : firstInput + i * width;
             else
-                for (int in = 1; in < (int) used.size() && input == 0; ++in)
-                    if (! used[(size_t) in])
+                for (int in = 1; in + width - 1 < (int) used.size() - 1 && input == 0; ++in)
+                    if (! used[(size_t) in] && (width == 1 || ! used[(size_t) in + 1]))
                         input = in;
 
             const auto n = session->numTracks() + 1;
             const auto name = baseName.isEmpty() ? "Track " + juce::String (n)
                                                  : (count == 1 ? baseName : baseName + " " + juce::String (i + 1));
-            session->addTrack (name, input, um());
-            added.add (juce::String (n) + " " + name + (input > 0 ? " (in" + juce::String (input) + ")" : juce::String (" (no input)")));
+            auto track = session->addTrack (name, input, um());
+
+            if (stereo)
+                track.setProperty (ids::channels, 2, um());
+
+            added.add (juce::String (n) + " " + name
+                       + (input <= 0 ? juce::String (" (no input)")
+                                     : stereo ? " (in" + juce::String (input) + "-" + juce::String (input + 1) + ")" : " (in" + juce::String (input) + ")"));
         }
 
         focusTrack (session->numTracks() - 1);
@@ -1000,27 +1014,51 @@ Result App::execute (const juce::String& line)
         return last;
     }
 
+    // 2 i 3: input 3 (a stereo track takes 3 and 4); 2 i 3-4: a pair, which makes it stereo.
     if (v == "i" || v == "in")
     {
-        if (p.args.isEmpty() || ! p.args[0].containsOnly ("0123456789"))
-            return Result::fail ("which input? e.g. 1 i 2 (0 = none)");
+        const auto arg = p.args[0];
+        const bool pair = arg.containsChar ('-');
+        const auto input = arg.upToFirstOccurrenceOf ("-", false, false).getIntValue();
 
-        const auto input = p.args[0].getIntValue();
+        if (arg.isEmpty() || ! arg.containsOnly ("0123456789-") || (pair && arg.fromFirstOccurrenceOf ("-", false, false).getIntValue() != input + 1))
+            return Result::fail ("which input? 1 i 2, or a pair for a stereo track: 1 i 3-4 (0 = none)");
 
         for (auto t : targets)
             if (Session::isBusTrack (session->track (t)))
                 return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 no input; 2 out " + juce::String (t + 1) + " feeds it");
 
         for (auto t : targets)
+        {
             session->track (t).setProperty (ids::input, input, um());
 
-        auto msg = trackList (targets) + (input == 0 ? L" \x00b7 no input" : L" \x00b7 input " + juce::String (input));
+            if (pair && ! Session::isInstrumentTrack (session->track (t)))
+                session->track (t).setProperty (ids::channels, 2, um());
+        }
 
-        if (input > engine.numInputChannels())
+        const bool stereo = trackIsStereo (session->track (targets.front()));
+        const auto last = input + (stereo ? 1 : 0);
+        auto msg = trackList (targets) + (input == 0 ? L" \x00b7 no input"
+                                          : stereo ? L" \x00b7 inputs " + juce::String (input) + "-" + juce::String (last)
+                                                   : L" \x00b7 input " + juce::String (input));
+
+        if (last > engine.numInputChannels())
             return Result::fail (msg + " (device only has " + juce::String (engine.numInputChannels()) + ")");
 
         return Result::good (msg);
     }
+
+    // 2 pan l30 / 2 pan c / 2 pan 45r (alt+[ ] nudges it); 2 mono / 2 stereo: the track's width.
+    if (v == "pan")
+        return p.args.isEmpty() ? Result::good (trackList (targets) + " pan " + panText (session->track (targets.front())[ids::pan])
+                                                + L" \x00b7 2 pan l30, 2 pan c, 2 pan 45r")
+                                : setPan (targets, p.rest);
+    if (v == "mono" || v == "stereo")
+        return setWidth (targets, v == "stereo");
+
+    // ins: an effect on the focused track, like inst: alone, the picker; with a name, the best match.
+    if (v == "ins")
+        return editInserts (targets, p.args);
 
     if (v == "v" || v == "vol")
     {

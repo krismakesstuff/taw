@@ -215,6 +215,7 @@ public:
     bool pluginPickerVisible = false;
     juce::String pluginFilter;
     int pluginPickIndex = 0, pluginPickTarget = -1, pluginPickSlot = -1;
+    bool pluginPickMono = false; // effects for a mono track
     std::vector<juce::PluginDescription> pickerChoices() const;
     Result returnPlayhead();
     Result setGridDivision (int noteValue);
@@ -366,7 +367,25 @@ private:
     bool handleIoKey (const Key&);
 
     // Routing internals (Routing.cpp)
-    void applyRouting (Graph&) const; // outputs, sends, the order tracks run in, and solo through buses
+    void applyRouting (Graph&, bool offline); // outputs, sends, the order tracks run in, delay compensation, solo through buses
+    void compensateLatency (Graph&, bool offline);
+    struct KeptDelay
+    {
+        juce::ValueTree track;
+        int edge; // -1: its output; else the n-th send
+        std::shared_ptr<RouteDelay> line;
+    };
+    std::vector<KeptDelay> routeDelays; // the live graph's, reused while a route's delay stays the same
+
+public:
+    int mixLatency = 0; // samples the plugins make the mix late by (delay compensation)
+    bool trackIsStereo (const juce::ValueTree& track); // its width: set (2 mono / 2 stereo), else from what it plays
+    Result setPan (const std::vector<int>& tracks, const juce::String& value); // "2 pan -30", "2 pan l30", "2 pan c"
+    Result nudgePan (const std::vector<int>& tracks, double delta);           // -1..1 units
+    Result setWidth (const std::vector<int>& tracks, bool stereo);            // "2 mono", "2 stereo"
+    static juce::String panText (double pan);                                 // "C", "<30", "30>"
+
+private:
     std::vector<int> routesFrom (int track, bool withMutedSends) const; // bus tracks it feeds
     bool feeds (int from, int to) const;  // from reaches to through outputs and sends
     Result checkRoute (int track, int busId) const;
@@ -392,6 +411,7 @@ private:
     void addInserts (TrackPlay&, const juce::ValueTree& track, bool offline);
     void followWindow (int track, int slot); // a plugin window is open: show this insert's instead
     int preparedGeneration = -1;
+    int lastLatencies = 0; // pollPlugins: plugin latencies last seen (a change rebuilds the graph)
     double lastStateSave = 0.0;
     void stopRecorders();
     void collectFinishedTakes();

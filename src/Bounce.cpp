@@ -312,6 +312,7 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         juce::FloatVectorOperations::clear (br, n);
         renderClips (tp, pos, n, bl, br);
         renderHits (tp, pos, n, bl, br);
+        toMono (tp, bl, br, n);
 
         if (tp.busIndex >= 0 && tp.busIndex < numBuses)
         {
@@ -335,7 +336,8 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         for (const auto& fx : tp.inserts)
             fx->process (transport, n, bl, br);
 
-        routeTrack (tp, isStereo (tp) ? 1.0f : centrePan, bl, br, n, busPtrs.data(), l, r);
+        panTrack (tp, bl, br, n);
+        routeTrack (tp, bl, br, n, busPtrs.data(), l, r);
     }
 
     out.applyGain (0, n, graph->mixGain);
@@ -371,7 +373,12 @@ void Bounce::run()
         mp3 = std::make_unique<Mp3Writer> (partial, sampleRate, error);
     }
 
-    for (auto pos = range.getStart(); error.isEmpty() && pos < range.getEnd(); pos += blockSize)
+    // Delay compensation: the mix comes out graph->latency late. Run that much first (it primes
+    // the plugins and delay lines) and keep what follows.
+    for (auto pos = range.getStart(); pos < range.getStart() + graph->latency && ! threadShouldExit(); pos += blockSize)
+        renderBlock (pos, (int) juce::jmin<juce::int64> (blockSize, range.getStart() + graph->latency - pos), block);
+
+    for (auto pos = range.getStart() + graph->latency; error.isEmpty() && pos < range.getEnd() + graph->latency; pos += blockSize)
     {
         if (threadShouldExit())
         {
@@ -379,7 +386,7 @@ void Bounce::run()
             break;
         }
 
-        const auto n = (int) juce::jmin<juce::int64> (blockSize, range.getEnd() - pos);
+        const auto n = (int) juce::jmin<juce::int64> (blockSize, range.getEnd() + graph->latency - pos);
         renderBlock (pos, n, block);
 
         const bool ok = wav != nullptr ? wav->writeFromAudioSampleBuffer (block, 0, n) : mp3->write (block, n);
@@ -387,7 +394,7 @@ void Bounce::run()
         if (! ok)
             error = "write failed: " + target.getFullPathName();
 
-        progressValue.store ((float) (pos + n - range.getStart()) / (float) range.getLength());
+        progressValue.store ((float) (pos + n - range.getStart() - graph->latency) / (float) range.getLength());
     }
 
     if (mp3 != nullptr && error.isEmpty() && ! cancelled && ! mp3->finish())

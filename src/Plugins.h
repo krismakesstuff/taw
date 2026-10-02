@@ -30,6 +30,8 @@ public:
     void setState (const juce::MemoryBlock&);
 
     const juce::PluginDescription& description() const { return desc; }
+    int latency() const { return plugin->getLatencySamples(); } // samples it delays its output by
+    int numOutputs() const { return plugin->getTotalNumOutputChannels(); }
     juce::String name() const { return desc.name; }
 
     bool hasEditor() const;
@@ -104,12 +106,18 @@ public:
 
     std::vector<juce::PluginDescription> instruments() const; // by name
     std::vector<juce::PluginDescription> effects() const;     // everything else, by name
+    // Effects for a mono or a stereo track: where a plugin comes as "X Mono", "X Mono/Stereo" and
+    // "X Stereo", only the ones that fit (a mono track: Mono and Mono/Stereo).
+    std::vector<juce::PluginDescription> effectsFor (bool monoTrack) const;
     std::optional<juce::PluginDescription> findInstrument (const juce::String& query) const { return find (query, true); }
-    std::optional<juce::PluginDescription> findEffect (const juce::String& query) const { return find (query, false); }
-    std::optional<juce::PluginDescription> find (const juce::String& query, bool instrument) const;
+    std::optional<juce::PluginDescription> findEffect (const juce::String& query, bool monoTrack = false) const { return find (query, false, monoTrack); }
+    std::optional<juce::PluginDescription> find (const juce::String& query, bool instrument, bool monoTrack = false) const;
     std::optional<juce::PluginDescription> byIdentifier (const juce::String& id) const;
 
-    std::shared_ptr<PluginSlot> create (const juce::PluginDescription&, double sampleRate, int maxBlock, juce::String& error);
+    // channels: what an effect gets fed, 1 (a mono track) or 2. A mono one is asked for mono in
+    // and mono out, else mono in and stereo out; anything else runs as it comes (fed both sides).
+    std::shared_ptr<PluginSlot> create (const juce::PluginDescription&, double sampleRate, int maxBlock, juce::String& error,
+                                        int channels = 2);
 
     // The child's side of a scan: describe the plugin(s) in one file into an XML file. Returns the
     // process exit code (0 when it found something).

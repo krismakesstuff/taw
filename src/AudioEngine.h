@@ -30,7 +30,8 @@ struct Recorder
     static constexpr int overviewBlock = 256; // samples per waveform overview point
 
     int trackIndex = -1;
-    int inputChannel = -1; // 0-based hardware input
+    int inputChannel = -1; // 0-based hardware input (a stereo track's left; its right is the next one)
+    int numChannels = 1;
     juce::File file;
     std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> writer;
 
@@ -53,10 +54,41 @@ struct ClipPlay
     juce::int64 start = 0, offset = 0, length = 0;
 };
 
+// A delay on one route (a track's output or a send), so every path reaches the mix, or a bus,
+// together however much latency the plugins on it add. The App keeps these across graph
+// rebuilds, so a fader move doesn't empty them. Audio thread only, once built.
+struct RouteDelay
+{
+    explicit RouteDelay (int samples) : length (samples), buffer (2, samples) { buffer.clear(); }
+
+    // Adds left/right * gain into destL/destR, length samples late. Runs every block, silent or
+    // not, so nothing stale comes out later.
+    void addDelayed (const float* left, const float* right, float gain, float* destL, float* destR, int n) noexcept
+    {
+        auto* bl = buffer.getWritePointer (0);
+        auto* br = buffer.getWritePointer (1);
+
+        for (int i = 0; i < n; ++i)
+        {
+            destL[i] += bl[pos];
+            destR[i] += br[pos];
+            bl[pos] = left[i] * gain;
+            br[pos] = right[i] * gain;
+
+            if (++pos == length)
+                pos = 0;
+        }
+    }
+
+    const int length;
+    juce::AudioBuffer<float> buffer;
+    int pos = 0;
+};
+
 // Everything the audio thread needs for one track. Built from the session tree.
 struct TrackPlay
 {
-    int inputChannel = -1;
+    int inputChannel = -1; // a stereo track's left input; its right is the next one
     bool audible = true;
 
     // Armed tracks monitor their input (auto-input, the pro default): while stopped and while
@@ -69,8 +101,13 @@ struct TrackPlay
     {
         return armed && (inputOnly || ! rolling || recorder != nullptr);
     }
-    bool stereo = false;     // any stereo clip makes the track stereo
+    bool stereo = false; // the track's width: a mono track keeps one signal (in both sides) until it's panned
     float gain = 1.0f;
+
+    // Pan, after the inserts: a mono signal is placed with the -3 dB pan law, a stereo one
+    // balanced. monoAtPan: still mono there (no insert turned it stereo).
+    bool monoAtPan = false;
+    float panL = 1.0f, panR = 1.0f;
 
     // Audio tracks. In session order: where clips overlap, the later one plays ("later wins").
     // Nothing is trimmed, so removing a clip uncovers whatever was underneath.
@@ -105,13 +142,16 @@ struct TrackPlay
         int bus = -1;
         float gain = 1.0f;
         bool pre = false; // before the fader: the track's volume doesn't change it (mute does)
+        std::shared_ptr<RouteDelay> delay; // delay compensation, when this route needs it
     };
 
     static constexpr int nowhere = -2; // out: only its sends are heard (it feeds a soloed bus)
 
     int busIndex = -1; // a bus track: the bus it plays
     int out = -1;      // where the track goes after its fader
+    std::shared_ptr<RouteDelay> outDelay;
     std::vector<Send> sends;
+    int latency = 0; // samples its plugins (instrument and inserts) delay it by
 };
 
 // Immutable snapshot of what to play. The message thread builds one and hands it over; the
@@ -137,6 +177,8 @@ struct Graph
     double bpm = 120.0;
     int timeSigNum = 4, timeSigDen = 4;
 
+    int latency = 0; // delay compensation: how late everything reaches the mix, in samples
+
     bool recording = false; // loops are ignored while recording (for now)
     bool loop = false;
     juce::int64 loopStart = 0, loopEnd = 0;
@@ -144,6 +186,25 @@ struct Graph
 };
 
 constexpr float centrePan = 0.70710678f; // -3 dB pan law for a mono track in a stereo mix
+
+// pan -1 (left) to 1 (right). Mono: the -3 dB pan law (each side 0.707 at centre, the near side
+// at unity when hard over). Stereo: balance (centre leaves both sides alone).
+inline void setPan (TrackPlay& tp, float pan)
+{
+    pan = juce::jlimit (-1.0f, 1.0f, pan);
+
+    if (tp.monoAtPan)
+    {
+        const auto angle = (pan + 1.0f) * juce::MathConstants<float>::pi * 0.25f;
+        tp.panL = std::cos (angle);
+        tp.panR = std::sin (angle);
+    }
+    else
+    {
+        tp.panL = pan > 0.0f ? 1.0f - pan : 1.0f;
+        tp.panR = pan < 0.0f ? 1.0f + pan : 1.0f;
+    }
+}
 
 // Stereo tracks reach the mix at unity; mono tracks are panned centre with the pan law.
 inline bool isStereo (const TrackPlay& tp) { return tp.stereo; }
@@ -168,39 +229,62 @@ inline void renderClips (const TrackPlay& tp, juce::int64 pos, int n, float* lef
     }
 }
 
-// Where a track's signal goes once it's rendered into left/right at unity: its pre-fader sends,
-// its fader (applied in place, so left/right then hold what the track plays, for its meter),
-// its post-fader sends, and its output. buses holds left and right for each bus (bus b at 2b and
-// 2b + 1). pan is the level a mono signal enters a stereo bus at. Shared by live playback and
-// bounces.
-inline void routeTrack (const TrackPlay& tp, float pan, float* left, float* right, int n, float* const* buses, float* mixL, float* mixR)
+// Pan, in place: a mono track (whose signal is in both sides) is placed with the pan law; a
+// stereo one is balanced. Centre: a mono track at -3 dB each side, a stereo one untouched.
+inline void panTrack (const TrackPlay& tp, float* left, float* right, int n)
 {
-    auto add = [&] (int bus, float g)
+    juce::FloatVectorOperations::multiply (left, tp.panL, n);
+    juce::FloatVectorOperations::multiply (right, tp.panR, n);
+}
+
+// Where a track's signal goes once it's rendered and panned: its pre-fader sends, its fader
+// (applied in place, so left/right then hold what the track plays, for its meter), its
+// post-fader sends, and its output, each through its delay compensation if it has one. buses
+// holds left and right for each bus (bus b at 2b and 2b + 1). Shared by live playback and
+// bounces.
+inline void routeTrack (const TrackPlay& tp, float* left, float* right, int n, float* const* buses, float* mixL, float* mixR)
+{
+    auto add = [&] (int bus, float g, RouteDelay* delay)
     {
-        if (g <= 0.0f || bus == TrackPlay::nowhere)
+        if (bus == TrackPlay::nowhere)
             return;
 
-        juce::FloatVectorOperations::addWithMultiply (bus < 0 ? mixL : buses[bus * 2], left, g, n);
-        juce::FloatVectorOperations::addWithMultiply (bus < 0 ? mixR : buses[bus * 2 + 1], right, g, n);
+        auto* dl = bus < 0 ? mixL : buses[bus * 2];
+        auto* dr = bus < 0 ? mixR : buses[bus * 2 + 1];
+
+        if (delay != nullptr)
+            delay->addDelayed (left, right, g, dl, dr, n); // silent or not, so it stays in step
+        else if (g > 0.0f)
+        {
+            juce::FloatVectorOperations::addWithMultiply (dl, left, g, n);
+            juce::FloatVectorOperations::addWithMultiply (dr, right, g, n);
+        }
     };
 
-    if (tp.audible)
-        for (const auto& s : tp.sends)
-            if (s.pre)
-                add (s.bus, s.gain * pan);
+    for (const auto& s : tp.sends)
+        if (s.pre)
+            add (s.bus, tp.audible ? s.gain : 0.0f, s.delay.get());
 
     const auto fader = tp.audible ? tp.gain : 0.0f;
     juce::FloatVectorOperations::multiply (left, fader, n);
     juce::FloatVectorOperations::multiply (right, fader, n);
 
-    if (fader > 0.0f)
-    {
-        for (const auto& s : tp.sends)
-            if (! s.pre)
-                add (s.bus, s.gain * pan);
+    for (const auto& s : tp.sends)
+        if (! s.pre)
+            add (s.bus, s.gain, s.delay.get());
 
-        add (tp.out, pan);
-    }
+    add (tp.out, 1.0f, tp.outDelay.get());
+}
+
+// A mono track plays one signal: a stereo clip on it is summed (each side at half).
+inline void toMono (const TrackPlay& tp, float* left, float* right, int n)
+{
+    if (tp.stereo)
+        return;
+
+    juce::FloatVectorOperations::add (left, right, n);
+    juce::FloatVectorOperations::multiply (left, 0.5f, n);
+    juce::FloatVectorOperations::copy (right, left, n);
 }
 
 // Adds a sample track's hits for [pos, pos + n) into its bus. Like clips, it depends only on
@@ -260,7 +344,8 @@ public:
     // Recording the hit is the caller's business; this is only what you hear.
     void triggerPad (int trackIndex, float velocity);
 
-    std::shared_ptr<Recorder> createRecorder (int trackIndex, int inputChannel, const juce::File&,
+    // numChannels 2: a stereo track, recording inputChannel and the one after it.
+    std::shared_ptr<Recorder> createRecorder (int trackIndex, int inputChannel, int numChannels, const juce::File&,
                                               double sampleRate, juce::String& error);
     // Recorders stop receiving audio once a graph without them is live; they are then closed.
     void finishRecorders (std::vector<std::shared_ptr<Recorder>>);

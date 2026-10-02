@@ -496,7 +496,7 @@ void Ui::drawTimeline (App& app)
                                      : juce::String (spc / app.sampleRate(), 2) + " s";
     drawTopLane (markerY, App::TopLane::markers, "markers");
     drawTopLane (rulerY, App::TopLane::ruler, "zoom " + zoomText + "/col");
-    canvas.text (meterX, rulerY, "  vol", colour::faint);
+    canvas.text (meterX, rulerY, "  vol", colour::faint); // pan under it
     canvas.text (meterX + 6, rulerY, "level", colour::faint);
     canvas.text (meterX + 12, rulerY, " peak", colour::faint);
 
@@ -841,8 +841,14 @@ void Ui::drawTimeline (App& app)
                              problem.isNotEmpty() ? colour::error : colour::dim, bg, false, fill ? 15 : 19);
         }
         else
-            canvas.text (20, y, input > 0 ? "in" + juce::String (input) : juce::String ("--"),
-                         input > app.engine.numInputChannels() ? colour::error : colour::dim, bg);
+        {
+            // A stereo track records a pair: "i3-4" (past 9 just "11-12").
+            const bool stereo = app.trackIsStereo (t);
+            const auto text = input <= 0 ? juce::String ("--")
+                              : stereo   ? (input < 10 ? "i" : "") + juce::String (input) + "-" + juce::String (input + 1)
+                                         : "in" + juce::String (input);
+            canvas.text (20, y, text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : colour::dim, bg, false, 5);
+        }
 
         // Lane
         struct LaneClip
@@ -1068,6 +1074,16 @@ void Ui::drawTimeline (App& app)
         drawVolume (meterX, y, t[ids::gainDb], bg);
         drawDb (meterX + 12, y, m.hold, m.clipped, bg);
 
+        // Pan under the volume (centre dim, like unity); "st" marks a stereo track.
+        if (rowsPerTrack > 1)
+        {
+            const double pan = t[ids::pan];
+            canvas.text (meterX, y + 1, App::panText (pan).paddedLeft (' ', 5), std::abs (pan) < 0.005 ? colour::dim : colour::text, bg);
+
+            if (app.trackIsStereo (t))
+                canvas.text (meterX + 12, y + 1, "   st", colour::faint, bg);
+        }
+
         for (int r = 0; r < rowsPerTrack; ++r)
             drawMeter (meterX + 6, y + r, 5, m.level, colour::meterBg);
     }
@@ -1274,6 +1290,7 @@ void Ui::drawHelp (App&)
         { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
         { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
         { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
+        { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"2 stereo", L"stereo: inputs 3-4 (2 i 3-4)" },
         { Heading, L"SAMPLES", nullptr, L"EDIT", nullptr },
         { Pair, L"sample f", L"new sample track", L"ctrl c x v", L"copy / cut / paste" },
         { Pair, L".  >", L"play armed (> accent)", L"snap  snap 50", L"quantize hits (%)" },
@@ -1286,7 +1303,7 @@ void Ui::drawHelp (App&)
         { Pair, L"shift+R  ed", L"arm for MIDI / its window", L"2 send verb", L"send A-E (a new name: a bus)" },
         { Pair, L"f", L"focused track fills: piano roll", L"2 send b -6", L"level; pre post off on x" },
         { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
-        { Pair, L"2 fx valhalla", L"effect in a free insert", L"2 fx b  b x", L"its window / remove it" },
+        { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },
         { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"o   io", L"inserts+sends column / hide" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },

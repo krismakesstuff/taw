@@ -504,15 +504,57 @@ std::vector<juce::PluginDescription> PluginCatalog::effects() const
     return out;
 }
 
-std::optional<juce::PluginDescription> PluginCatalog::find (const juce::String& queryIn, bool instrument) const
+namespace
+{
+// "PuigTec EQP1A Mono/Stereo" -> "PuigTec EQP1A", "Mono/Stereo". No variant: the whole name, "".
+std::pair<juce::String, juce::String> variantOf (const juce::String& name)
+{
+    for (const auto* v : { " Mono/Stereo", " Stereo", " Mono" })
+        if (name.endsWithIgnoreCase (v))
+            return { name.dropLastCharacters ((int) std::strlen (v)), juce::String (v).trim() };
+
+    return { name, {} };
+}
+} // namespace
+
+std::vector<juce::PluginDescription> PluginCatalog::effectsFor (bool monoTrack) const
+{
+    const auto all = effects();
+    juce::StringArray names;
+
+    for (const auto& d : all)
+        names.add (d.name.toLowerCase());
+
+    std::vector<juce::PluginDescription> out;
+
+    for (const auto& d : all)
+    {
+        const auto [base, variant] = variantOf (d.name);
+        const auto has = [&, b = base] (const char* v) { return names.contains ((b + " " + v).toLowerCase()); };
+
+        const bool hide = monoTrack ? variant == "Stereo" && (has ("Mono") || has ("Mono/Stereo"))
+                                    : (variant == "Mono" || variant == "Mono/Stereo") && has ("Stereo");
+
+        if (! hide)
+            out.push_back (d);
+    }
+
+    return out;
+}
+
+std::optional<juce::PluginDescription> PluginCatalog::find (const juce::String& queryIn, bool instrument, bool monoTrack) const
 {
     const auto query = queryIn.trim().unquoted();
     std::optional<juce::PluginDescription> best;
     int bestRank = 0;
 
     // Exact name, then the start of a name, then anywhere in it (or the maker); shortest wins a
-    // tie, except that "X Mono" loses to "X Stereo" (taw's tracks run in stereo).
-    auto length = [] (const juce::String& name) { return name.length() + (name.endsWithIgnoreCase (" Mono") ? 100 : 0); };
+    // tie, except that the variant that doesn't fit the track loses ("X Mono" on a stereo track).
+    auto length = [monoTrack] (const juce::String& name)
+    {
+        const auto variant = variantOf (name).second;
+        return name.length() + ((monoTrack ? variant == "Stereo" : variant.startsWith ("Mono")) ? 100 : 0);
+    };
 
     for (const auto& d : instrument ? instruments() : effects())
     {
@@ -541,7 +583,7 @@ std::optional<juce::PluginDescription> PluginCatalog::byIdentifier (const juce::
 }
 
 std::shared_ptr<PluginSlot> PluginCatalog::create (const juce::PluginDescription& desc, double sampleRate, int maxBlock,
-                                                   juce::String& error)
+                                                   juce::String& error, int channels)
 {
     auto instance = formats.createPluginInstance (desc, sampleRate, maxBlock, error);
 
@@ -553,19 +595,29 @@ std::shared_ptr<PluginSlot> PluginCatalog::create (const juce::PluginDescription
         return {};
     }
 
-    // Effects run on a stereo track: ask for stereo in and out (a plugin that can't keep its own).
+    // Effects: the track's width in; out the same, or stereo from a mono track (a mono-to-stereo
+    // reverb). A plugin that takes neither keeps its own layout.
     if (! desc.isInstrument)
     {
-        auto layout = instance->getBusesLayout();
+        auto tryLayout = [&] (const juce::AudioChannelSet& in, const juce::AudioChannelSet& out)
+        {
+            auto layout = instance->getBusesLayout();
 
-        if (layout.inputBuses.size() > 0)
-            layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+            if (layout.inputBuses.size() > 0)
+                layout.inputBuses.getReference (0) = in;
 
-        if (layout.outputBuses.size() > 0)
-            layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+            if (layout.outputBuses.size() > 0)
+                layout.outputBuses.getReference (0) = out;
 
-        if (instance->checkBusesLayoutSupported (layout))
-            instance->setBusesLayout (layout);
+            return instance->checkBusesLayoutSupported (layout) && instance->setBusesLayout (layout);
+        };
+
+        const auto mono = juce::AudioChannelSet::mono(), stereo = juce::AudioChannelSet::stereo();
+
+        if (channels == 1)
+            tryLayout (mono, mono) || tryLayout (mono, stereo) || tryLayout (stereo, stereo);
+        else
+            tryLayout (stereo, stereo);
     }
 
     auto slot = std::make_shared<PluginSlot> (std::move (instance), desc);

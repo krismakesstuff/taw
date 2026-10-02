@@ -636,8 +636,9 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
     for (auto i : tracks)
     {
         const int input = session->track (i)[ids::input];
+        const int last = input + (trackIsStereo (session->track (i)) ? 1 : 0); // a stereo track records a pair
 
-        if (input < 1 || input > numInputs)
+        if (input < 1 || last > numInputs)
             return Result::fail ("track " + juce::String (i + 1) + " has no valid input (device has " + juce::String (numInputs)
                                  + L") \x2014 try " + juce::String (i + 1) + " i 1");
     }
@@ -653,7 +654,7 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
         const auto file = session->audioFolder().getNonexistentChildFile (base, ".wav", false);
 
         juce::String error;
-        auto rec = engine.createRecorder (i, (int) t[ids::input] - 1, file, sampleRate(), error);
+        auto rec = engine.createRecorder (i, (int) t[ids::input] - 1, trackIsStereo (t) ? 2 : 1, file, sampleRate(), error);
 
         if (rec == nullptr)
         {
@@ -722,12 +723,14 @@ void App::drainLiveOverviews()
 
 juce::int64 App::latencyCompensation()
 {
-    // What was captured at playhead P was played against audio heard (in + out latency) earlier.
+    // What was captured at playhead P was played against audio heard (in + out latency) earlier,
+    // and the mix you heard was the timeline's mixLatency before P (delay compensation always
+    // counts: it's what the plugins did, not the interface).
     if (session != nullptr && (bool) session->tree()[ids::latencyComp])
         if (auto* d = engine.devices().getCurrentAudioDevice())
-            return d->getInputLatencyInSamples() + d->getOutputLatencyInSamples();
+            return d->getInputLatencyInSamples() + d->getOutputLatencyInSamples() + mixLatency;
 
-    return 0;
+    return mixLatency;
 }
 
 void App::writeTakeJournal()
@@ -1142,7 +1145,26 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
     for (int i = 0; i < n; ++i)
         addInserts (g->tracks[(size_t) i], session->track (i), offline);
 
-    applyRouting (*g);
+    // Width, pan and latency: once the inserts are known (a mono-to-stereo effect makes the
+    // rest of the track stereo).
+    for (int i = 0; i < n; ++i)
+    {
+        auto& tp = g->tracks[(size_t) i];
+        const auto t = session->track (i);
+        tp.stereo = trackIsStereo (t);
+        tp.monoAtPan = ! tp.stereo;
+        tp.latency = tp.plugin != nullptr ? tp.plugin->latency() : 0;
+
+        for (const auto& fx : tp.inserts)
+        {
+            tp.monoAtPan = tp.monoAtPan && fx->numOutputs() < 2;
+            tp.latency += fx->latency();
+        }
+
+        taw::setPan (tp, (float) (double) t[ids::pan]);
+    }
+
+    applyRouting (*g, offline);
 
     // Plugins that are gone (undo, a removed insert, a track no longer an instrument): state
     // saved, window closed. Undoing back brings the plugin back from that state.
@@ -2150,6 +2172,25 @@ void App::handleMainKey (const Key& k)
     if (k.code == Key::Char && k.alt && ! k.ctrl && k.ch == '/')
     {
         say (toggleHitAtCursor());
+        return;
+    }
+
+    // Alt+[ ] pans the selected (or focused) tracks, 5 at a time.
+    if (k.code == Key::Char && (k.ch == '[' || k.ch == ']') && k.alt && ! k.ctrl && commandLine.isEmpty() && session != nullptr)
+    {
+        if (onTopLane() || mixFocused())
+            say (Result::fail (L"alt+[ ] pans a track \x2014 \x2193 to one"));
+        else
+        {
+            juce::StringArray who;
+
+            for (auto t : defaultTargets())
+                who.add (juce::String (t));
+
+            beginEdit ("pan", "pan:" + who.joinIntoString (","));
+            say (nudgePan (defaultTargets(), k.ch == ']' ? 0.05 : -0.05));
+        }
+
         return;
     }
 

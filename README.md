@@ -105,6 +105,11 @@ sends and the output on its second. `o` steps into it: arrows pick a slot, enter
 effect's window (or picks an effect or a bus for an empty slot), `M` bypasses, shift+arrows
 reorder effects, `[ ]` set a send's level, `del` removes. An open plugin window follows you
 from slot to slot. Soloing a track keeps its reverb; soloing a bus plays just what's on it.
+`ins` (like `inst`) opens a picker of the effects that fit the focused track. Plugin latency is
+compensated, so tracks stay in time through lookahead limiters and linear-phase EQs.
+
+Tracks are mono or stereo (`2 stereo`, `add Keys stereo`, `2 i 3-4` records a pair) and pan
+with `2 pan l30` or alt+[ ].
 
 ## Roadmap
 
@@ -113,7 +118,6 @@ Next up, roughly in order:
 - **Sample groups:** gather sample tracks into a kit you can program, mix and move as one,
   while each sound keeps its own track.
 - **Note editing:** change single notes in the piano roll (recording comes first; this follows).
-- **Plugin delay compensation:** keep tracks in time when an effect adds latency.
 - **Plugins out of process and CLAP:** each plugin in its own process, so a crashing plugin is
   bypassed instead of taking the session down; CLAP alongside VST3.
 - **Cross-platform:** macOS (in progress), then Linux.

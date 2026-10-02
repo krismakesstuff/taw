@@ -64,7 +64,8 @@ std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, doub
         return {};
     }
 
-    auto slot = plugins.create (*desc, rate, block, problem);
+    const auto channels = node.hasType (ids::INSERT) && ! trackIsStereo (node.getParent()) ? 1 : 2;
+    auto slot = plugins.create (*desc, rate, block, problem, channels);
 
     if (slot == nullptr)
         return {};
@@ -174,6 +175,18 @@ void App::pollPlugins()
         for (auto& in : hosted)
             if (in.slot != nullptr)
                 in.slot->prepare (engine.deviceSampleRate(), engine.maxBlockSize());
+    }
+
+    // A plugin whose latency changed (a lookahead setting, say): delay compensation follows.
+    int latencies = 0;
+
+    for (const auto& in : hosted)
+        latencies += in.slot != nullptr ? in.slot->latency() * (int) ((&in - hosted.data()) + 1) : 0;
+
+    if (latencies != lastLatencies)
+    {
+        lastLatencies = latencies;
+        rebuildGraph();
     }
 
     // Tweaks made in a plugin's window don't touch the session, so save states now and then.
@@ -290,6 +303,7 @@ bool App::handleMidiPanelKey (const Key& k)
 void App::openPluginPicker (int targetTrack, int effectSlot)
 {
     pluginPickSlot = effectSlot;
+    pluginPickMono = effectSlot >= 0 && targetTrack >= 0 && ! trackIsStereo (session->track (targetTrack));
 
     // The first time, the list fills in while the picker is open.
     if (! plugins.hasScanned() && ! plugins.isScanning())
@@ -306,7 +320,7 @@ std::vector<juce::PluginDescription> App::pickerChoices() const
 {
     std::vector<juce::PluginDescription> out;
 
-    for (const auto& d : pluginPickSlot >= 0 ? plugins.effects() : plugins.instruments())
+    for (const auto& d : pluginPickSlot >= 0 ? plugins.effectsFor (pluginPickMono) : plugins.instruments())
         if (pluginFilter.isEmpty() || (d.manufacturerName + " " + d.name).containsIgnoreCase (pluginFilter))
             out.push_back (d);
 
@@ -488,11 +502,12 @@ juce::int64 App::heardPosition (juce::int64 playhead)
 {
     // The playhead is what's being sent out now; you heard it an output latency later, and
     // that's what you played along to.
+    // Delay compensation makes the whole mix later still.
     if (session != nullptr && (bool) session->tree()[ids::latencyComp])
         if (auto* d = engine.devices().getCurrentAudioDevice())
-            return playhead - d->getOutputLatencyInSamples();
+            return playhead - d->getOutputLatencyInSamples() - mixLatency;
 
-    return playhead;
+    return playhead - mixLatency;
 }
 
 void App::drainRecordedMidi()

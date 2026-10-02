@@ -125,7 +125,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `Shift+R` `S` `M` `I` (empty command line) | arm / solo / mute / input-monitor the selected or focused tracks | same |
 | `Shift+T` (empty command line) | the track menu for the selected or focused tracks: rename, input, output, add an effect, plugin window, mono/stereo, convert, delete. Each item has a letter and shows the command it stands for | same |
 | `Alt+C` | clear the latched clip lights (inputs, tracks, the mix); Esc doesn't, it's busy with the line, selections and stopping | same |
-| `.` / `>` (empty command line, a sample track armed) | the pad key: plays every armed sample track now (`>` = accent); while recording, writes a hit on each where you heard it (output latency taken off). Recording-first: patterns are played in; `snap` / `snap 50` quantize afterwards, `snap input` snaps while recording (off by default) | same |
+| `.` / `>` (empty command line, a sample track armed) | the pad key: plays every armed sample track now (`>` = accent); while recording, writes a hit on each where you heard it (output latency taken off). Held down it's one hit, not a roll: the samples are one-shots, so the key's auto-repeat is ignored (Windows; terminals elsewhere don't report releases). Recording-first: patterns are played in; `snap` / `snap 50` quantize afterwards, `snap input` snaps while recording (off by default) | same |
 | `Space` (empty command line) | play / stop | same |
 
 **During playback the arrows never move the playhead.** They move the cursor (drawn apart from

@@ -333,7 +333,8 @@ public:
 
     // The pad key (.): plays every armed sample track now and, while recording, writes a hit on
     // each where you heard it. Returns false when no sample track is armed (the key types).
-    bool playPads (float velocity);
+    // A held key is one hit: its repeats are swallowed (repeat: true), not played.
+    bool playPads (float velocity, bool repeat = false);
     Result quantizeHits (const juce::String& arg, const std::vector<int>& tracks); // "snap [percent]" / "snap input"
     void zoom (int delta);
     void showSelectionEdge (bool end);

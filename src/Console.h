@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <string>
 #include <vector>
@@ -30,6 +30,7 @@ struct Key
     Code code = None;
     wchar_t ch = 0; // for Char
     bool shift = false, ctrl = false, alt = false;
+    bool repeat = false; // the key is being held (auto-repeat); Windows only, terminals can't tell
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.
@@ -62,6 +63,7 @@ private:
     void* in = nullptr;
     void* out = nullptr;
     unsigned long oldInMode = 0, oldOutMode = 0;
+    std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
 #else
     std::string pending; // bytes of a key sequence still arriving
     int pendingPolls = 0;

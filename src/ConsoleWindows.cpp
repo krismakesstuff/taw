@@ -1,4 +1,4 @@
-#include "Console.h"
+﻿#include "Console.h"
 #include "Safety.h"
 
 #define WIN32_LEAN_AND_MEAN
@@ -6,6 +6,7 @@
  #define NOMINMAX
 #endif
 #include <windows.h>
+#include <algorithm>
 #include <cstring>
 
 namespace taw
@@ -105,15 +106,31 @@ std::vector<Key> Console::poll()
 
     for (DWORD i = 0; i < read; ++i)
     {
+        // Keys released while the window was in the background never report it.
+        if (records[i].EventType == FOCUS_EVENT)
+            held.clear();
+
         if (records[i].EventType != KEY_EVENT)
             continue;
 
         const auto& e = records[i].Event.KeyEvent;
+        const auto wasHeld = std::find (held.begin(), held.end(), e.wVirtualKeyCode);
 
         if (! e.bKeyDown)
-            continue;
+        {
+            if (wasHeld != held.end())
+                held.erase (wasHeld);
 
+            continue;
+        }
+
+        // Held down, a key repeats: more downs, no up in between.
         Key k;
+        k.repeat = wasHeld != held.end();
+
+        if (! k.repeat)
+            held.push_back (e.wVirtualKeyCode);
+
         k.shift = (e.dwControlKeyState & SHIFT_PRESSED) != 0;
         k.ctrl = (e.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
         k.alt = (e.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
@@ -177,7 +194,10 @@ std::vector<Key> Console::poll()
             continue;
 
         for (WORD r = 0; r < (e.wRepeatCount > 0 ? e.wRepeatCount : 1); ++r)
+        {
             keys.push_back (k);
+            k.repeat = true; // a count above one is repeats too
+        }
     }
 
     return keys;

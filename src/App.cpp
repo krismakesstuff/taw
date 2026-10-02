@@ -1802,7 +1802,7 @@ void App::tapTempo()
                        + L" bpm \x00b7 enter sets it \x00b7 esc leaves it"));
 }
 
-bool App::playPads (float velocity)
+bool App::playPads (float velocity, bool repeat)
 {
     if (session == nullptr)
         return false;
@@ -1815,6 +1815,9 @@ bool App::playPads (float velocity)
 
     if (armed.empty())
         return false;
+
+    if (repeat)
+        return true;
 
     // While recording, the hit goes where you heard the music when you pressed: the playhead
     // is what's being sent out now, which reaches your ears an output latency later.
@@ -2450,8 +2453,9 @@ void App::handleMainKey (const Key& k)
             else if (lineEmpty && k.ch == '?')
                 helpVisible = ! helpVisible, settingsVisible = false;
             // The pad key: plays (and while recording, records) every armed sample track.
-            // Shift+. (>) is an accent. With none armed, . types as usual.
-            else if (lineEmpty && (k.ch == '.' || k.ch == '>') && playPads (k.ch == '>' ? 1.0f : 0.8f))
+            // Shift+. (>) is an accent. With none armed, . types as usual. Held, it's one hit
+            // (the samples are one-shots), not a stream of them.
+            else if (lineEmpty && (k.ch == '.' || k.ch == '>') && playPads (k.ch == '>' ? 1.0f : 0.8f, k.repeat))
                 return;
             // Pro Tools keys on an empty line: r t zoom, q w show the selection's ends, and
             // shift+R S M I arm / solo / mute / monitor the selected (or focused) tracks. Typed

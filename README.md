@@ -85,7 +85,7 @@ add Vox       new track                 ?           all commands
 Plug in a MIDI controller and type `inst` (or `inst vital`). The first time, taw scans your VST3
 plugins, each in a separate process, so one that crashes or hangs is just skipped. The new instrument track is
 armed, so the controller plays it straight away; `ctrl+space` records what you play as notes,
-`ed` opens the plugin's window, `f` fills the view with the focused track (a piano roll on
+`|` (shift+`\`) opens and closes the plugin's window, even while playing, `f` fills the view with the focused track (a piano roll on
 instrument tracks), and `snap` quantizes. Every MIDI input is opened and armed instrument
 tracks hear all of them; `midi` shows them, switches ones you don't use off, and shows what
 each is sending. Plugin settings are saved next to the session in `plugins/`.
@@ -102,7 +102,7 @@ and naming a bus that doesn't exist yet creates it. `3 fx valhalla` puts an effe
 
 The routing column sits left of the timeline, as in Pro Tools: inserts on a track's first row,
 sends and the output on its second (the R I S M flags sit under the track's name, and the
-meter is on the right). `\` steps into it: arrows pick a slot, enter opens an
+meter is on the right). `\` steps into it: arrows pick a slot (up and down go row by row), `|` opens an
 effect's window (or picks an effect or a bus for an empty slot), `M` bypasses, shift+arrows
 reorder effects, `[ ]` set a send's level, `del` removes. An open plugin window follows you
 from slot to slot. Soloing a track keeps its reverb; soloing a bus plays just what's on it.

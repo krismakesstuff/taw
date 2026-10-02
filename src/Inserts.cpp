@@ -170,16 +170,53 @@ Result App::toggleInsertEditor (int index, int slot)
     }
 
     // One plugin window at a time: it follows you from slot to slot.
-    for (auto& other : hosted)
-        if (other.slot != nullptr && other.slot->editorShowing())
-        {
-            other.slot->closeEditor();
-            writePluginState (other);
-        }
-
+    closePluginWindows();
     in->slot->showEditor (juce::String (index + 1) + " " + track[ids::name].toString() + L" \x00b7 " + Session::slotName (slot) + L" \x00b7 "
                           + in->slot->name() + L" \x00b7 taw");
-    return Result::good (in->slot->name() + L" window open \x00b7 enter again (or its close button) closes it");
+    return Result::good (in->slot->name() + L" window open \x00b7 | again (or its close button) closes it");
+}
+
+void App::closePluginWindows()
+{
+    for (auto& in : hosted)
+        if (in.slot != nullptr && in.slot->editorShowing())
+        {
+            in.slot->closeEditor();
+            writePluginState (in);
+        }
+}
+
+// | (shift+\): open or close the plugin under the cursor, playing or not. In the routing column,
+// the slot there: an insert's window (empty: the effects picker), or the bus picker on a send or
+// the output. On a track: its instrument, else its first insert, else the effects picker for
+// insert A.
+Result App::togglePluginHere()
+{
+    if (session == nullptr || mixFocused() || onTopLane() || focused >= session->numTracks())
+        return Result::fail (L"| opens a track's plugin \x2014 \x2193 to one");
+
+    const auto track = session->track (focused);
+
+    if (ioCell >= ioFirstSend)
+    {
+        openBusPicker (focused, ioCell == ioOutput ? 0 : ioCell - ioFirstSend + 1);
+        return Result::good();
+    }
+
+    if (ioCell < 0 && Session::isInstrumentTrack (track))
+        return toggleEditor (focused);
+
+    int slot = ioCell;
+
+    for (int k = 0; slot < 0 && k < Session::numSends; ++k)
+        if (Session::insert (track, k).isValid())
+            slot = k;
+
+    if (slot >= 0 && Session::insert (track, slot).isValid())
+        return toggleInsertEditor (focused, slot);
+
+    openPluginPicker (focused, std::max (0, slot));
+    return Result::good();
 }
 
 void App::followWindow (int index, int slot)

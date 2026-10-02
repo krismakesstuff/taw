@@ -2443,6 +2443,9 @@ void App::handleMainKey (const Key& k)
                     say (Result::good (describeIoCell (focused, ioCell)));
                 }
             }
+            // | (shift+\): open or close the plugin under the cursor, playing or not.
+            else if (lineEmpty && k.ch == '|' && session != nullptr)
+                say (togglePluginHere());
             // f: the focused track fills the track area (a piano roll on instrument tracks).
             else if (lineEmpty && k.ch == 'f' && session != nullptr)
                 say (execute ("fill"));

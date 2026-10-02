@@ -548,8 +548,9 @@ Result App::toggleEditor (int index)
     }
 
     const auto t = session->track (index);
+    closePluginWindows(); // one at a time
     slot->showEditor (juce::String (index + 1) + " " + t[ids::name].toString() + L" \x00b7 " + slot->name() + L" \x00b7 taw");
-    return Result::good (slot->name() + L" window open \x00b7 ed again (or its close button) closes it");
+    return Result::good (slot->name() + L" window open \x00b7 | again (or its close button) closes it");
 }
 
 //==============================================================================

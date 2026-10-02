@@ -1282,14 +1282,14 @@ void Ui::drawBottom (App& app)
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
         hints = app.ioCell < App::ioFirstSend
-                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 enter opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves"
+                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 | opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves"
                 : app.ioCell == App::ioOutput
-                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 enter picks a bus \x00b7 del: back to the mix \x00b7 [ ] track volume \x00b7 esc or \\ leaves"
-                    : L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 enter picks a bus \x00b7 [ ] send level \x00b7 M off \x00b7 P pre/post \x00b7 del removes \x00b7 esc or \\ leaves";
+                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 | picks a bus \x00b7 del: back to the mix \x00b7 [ ] track volume \x00b7 esc or \\ leaves"
+                    : L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 | picks a bus \x00b7 [ ] send level \x00b7 M off \x00b7 P pre/post \x00b7 del removes \x00b7 esc or \\ leaves";
     else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isBusTrack (app.session->track (app.focused)))
         hints = L"a bus plays what's sent to it \x00b7 2 send <name> or 2 out <name> feeds it \x00b7 \\ routes \x00b7 [ ] its volume \x00b7 shift+S solo (keeps what feeds it) \x00b7 ? help";
     else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isInstrumentTrack (app.session->track (app.focused)))
-        hints = L"shift+R arms (your controller plays it) \x00b7 ctrl+space records \x00b7 ed plugin window \x00b7 f piano roll \x00b7 snap quantizes \x00b7 inst swaps the plugin \x00b7 ? help";
+        hints = L"shift+R arms (your controller plays it) \x00b7 ctrl+space records \x00b7 | plugin window \x00b7 f piano roll \x00b7 snap quantizes \x00b7 inst swaps the plugin \x00b7 ? help";
     else if (app.session != nullptr && ! app.mixFocused() && Session::isSampleTrack (app.session->track (app.focused)))
         hints = L"shift+R arms \x00b7 . plays armed (shift: accent), ctrl+space records it \x00b7 snap quantizes \x00b7 alt+/ toggles a hit \x00b7 pat x...x... \x00b7 ? help";
     else
@@ -1332,7 +1332,7 @@ void Ui::drawHelp (App&)
         { Pair, L"alt+/", L"toggle a hit at cursor", L"sel 3 5", L"select bars 3 to 5" },
         { Heading, L"INSTRUMENTS", nullptr, L"ROUTING", nullptr },
         { Pair, L"inst  inst juno", L"instrument track (picker)", L"bus Verb", L"new bus track" },
-        { Pair, L"shift+R  ed", L"arm for MIDI / its window", L"2 send verb", L"send A-E (a new name: a bus)" },
+        { Pair, L"shift+R  |", L"arm for MIDI / plugin window", L"2 send verb", L"send A-E (a new name: a bus)" },
         { Pair, L"f", L"focused track fills: piano roll", L"2 send b -6", L"level; pre post off on x" },
         { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
         { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },

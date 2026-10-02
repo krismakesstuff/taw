@@ -150,6 +150,8 @@ public:
     Result loadEffect (int track, int slot, const juce::PluginDescription&);
     Result removeInsert (int track, int slot);
     Result toggleInsertEditor (int track, int slot);
+    Result togglePluginHere();  // |: the plugin under the cursor (instrument, insert, or a picker)
+    void closePluginWindows(); // their state written first
     Result swapInserts (int track, int slot, int other);
     Result toggleBypass (int track, int slot);
     juce::String insertProblem (const juce::ValueTree& insert) const; // why it isn't loaded

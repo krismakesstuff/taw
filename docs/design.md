@@ -295,8 +295,11 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   time, 60 s each): one that crashes or hangs only takes its child down and is skipped from
   then on; `scan retry` tries those again. The list is cached in `plugins.xml` in the config
   folder, saved after every file.
-- `ed` opens the plugin's own window (JUCE's generic sliders if it has none), kept above the
-  terminal; `ed` again or its close button closes it.
+- `|` (shift+`\`) opens the plugin under the cursor in its own window (JUCE's generic sliders
+  if it has none), kept above the terminal; `|` again or its close button closes it. It works
+  while playing, so enter keeps its one job (back to the start). On a track that's its
+  instrument, else its first insert, else the effects picker; in the routing column, the slot
+  under the cursor. `ed` is the typed version.
 - **MIDI in.** Every input is opened at startup and as devices come and go (up to 32), unless
   switched off. `midi` opens the MIDI panel, like the audio device picker: each input on or off
   (kept by name in `settings.json`, for every session), whether it opened (Windows doesn't
@@ -373,10 +376,10 @@ Stereo one. Typed names pick the same way.
   sends A to E and then the output, and a third row the send levels (pre-fader in the accent
   colour). A track one row tall shows its inserts and output. `\` steps into the column: ←→ walk the inserts, the
   sends, then the output; ↑↓ go row by row (a track's inserts, its sends, the next track's
-  inserts; on the output, track to track). On an insert, enter opens its window (an empty one:
+  inserts; on the output, track to track). On an insert, `|` opens its window (an empty one:
   the effects picker, type to filter), `M` bypasses it, shift+←→ moves it along the chain, del
-  removes it. On a send, enter picks its bus (a name nothing matches makes that bus), `[ ]`
-  ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, enter
+  removes it. On a send, `|` picks its bus (a name nothing matches makes that bus), `[ ]`
+  ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, `|`
   picks a bus and del puts it back on the mix. Esc or `\` leaves. `ed` there opens the insert.
 - **Plugin windows.** Loading an effect opens its window. One window at a time: opening
   another closes the first, and while one is open it follows you as you move between inserts.

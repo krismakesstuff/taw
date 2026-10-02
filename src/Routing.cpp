@@ -550,7 +550,7 @@ Result App::nudgeSend (int track, int slot, double deltaDb)
     auto send = Session::send (session->track (track), slot);
 
     if (! send.isValid())
-        return Result::fail ("send " + Session::slotName (slot) + L" is empty \x2014 enter picks a bus");
+        return Result::fail ("send " + Session::slotName (slot) + L" is empty \x2014 | picks a bus");
 
     const auto db = (double) send[ids::db];
     send.setProperty (ids::db, juce::jlimit (-96.0, 12.0, db <= -96.0 && deltaDb > 0 ? -60.0 : std::round (db + deltaDb)), um());
@@ -563,7 +563,7 @@ juce::String App::describeIoCell (int track, int cell) const
     const auto label = "track " + juce::String (track + 1);
 
     if (cell == ioOutput)
-        return label + L" output \x2192 " + busName (t[ids::out]) + L" \x00b7 enter changes \x00b7 del: the mix";
+        return label + L" output \x2192 " + busName (t[ids::out]) + L" \x00b7 | changes \x00b7 del: the mix";
 
     if (cell < ioFirstSend)
     {
@@ -571,19 +571,19 @@ juce::String App::describeIoCell (int track, int cell) const
         const auto slot = Session::slotName (cell);
 
         if (! insert.isValid())
-            return label + " insert " + slot + L" empty \x00b7 enter picks an effect";
+            return label + " insert " + slot + L" empty \x00b7 | picks an effect";
 
         const auto problem = insertProblem (insert);
         return label + " insert " + slot + ": " + insert[ids::pluginName].toString()
                + (problem.isNotEmpty() ? L" \x2014 " + problem : (bool) insert[ids::bypass] ? juce::String (" (bypassed)") : juce::String())
-               + L" \x00b7 enter opens it \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes";
+               + L" \x00b7 | opens it \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes";
     }
 
     const auto send = Session::send (t, cell - ioFirstSend);
     const auto slot = Session::slotName (cell - ioFirstSend);
 
     if (! send.isValid())
-        return label + " send " + slot + L" empty \x00b7 enter picks a bus";
+        return label + " send " + slot + L" empty \x00b7 | picks a bus";
 
     const bool missing = session->findBus (send[ids::to]) < 0;
     return label + " send " + slot + L" \x2192 " + (missing ? juce::String ("a bus that's gone") : busName (send[ids::to])) + " "
@@ -866,11 +866,11 @@ bool App::handleBusPickerKey (const Key& k)
 }
 
 // In the routing column (after \): left/right walk inserts A-E, sends A-E, then the output;
-// up/down go row by row (inserts, sends, the next track's inserts). On an insert: enter opens its window (empty: the effects
-// picker), M bypasses, shift+left/right moves it along the chain, del removes it. On a send:
-// enter picks its bus, [ ] ride its level, M turns it off, P flips pre/post, del removes it. On
-// the output: enter picks a bus, del puts it back on the mix. Esc or \ leaves. An open plugin
-// window follows you from insert to insert.
+// up/down go row by row (inserts, sends, the next track's inserts). | opens what's under the
+// cursor (togglePluginHere); enter keeps its one meaning, back to the start. On an insert: M
+// bypasses, shift+left/right moves it along the chain, del removes it. On a send: [ ] ride its
+// level, M turns it off, P flips pre/post, del removes it. On the output: del puts it back on
+// the mix. Esc or \ leaves. An open plugin window follows you from insert to insert.
 bool App::handleIoKey (const Key& k)
 {
     if (ioCell < 0 || session == nullptr || ! commandLine.isEmpty())
@@ -950,20 +950,6 @@ bool App::handleIoKey (const Key& k)
             return true;
         }
 
-        case Key::Enter:
-            if (insertSlot >= 0)
-            {
-                if (Session::insert (session->track (track), insertSlot).isValid())
-                    say (toggleInsertEditor (track, insertSlot));
-                else
-                    openPluginPicker (track, insertSlot);
-            }
-            else
-            {
-                openBusPicker (track, ioCell == ioOutput ? 0 : sendSlot + 1);
-            }
-            return true;
-
         case Key::Delete:
         case Key::Backspace:
             if (insertSlot >= 0)
@@ -1020,7 +1006,7 @@ bool App::handleIoKey (const Key& k)
 
                 if (! send.isValid())
                 {
-                    say (Result::fail ("send " + Session::slotName (sendSlot) + L" is empty \x2014 enter picks a bus"));
+                    say (Result::fail ("send " + Session::slotName (sendSlot) + L" is empty \x2014 | picks a bus"));
                     return true;
                 }
 

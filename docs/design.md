@@ -514,8 +514,13 @@ over the time selection, offline on its own thread, faster than real time. `Esc`
 With no session given, taw lists recent sessions (newest first, and any sessions in the
 launch folder) above the templates. Enter on a recent session opens it; typing a name jumps to
 the templates to create a new one. The recent list lives in `%APPDATA%\taw\recent.json`.
-Opening a session loads its audio and plugins a few per frame, with a box saying what's loading
-and how far along it is (plugins can take seconds each); keys wait until it's open. Closing
+Opening a session loads its audio a few files per frame, with a box saying what's loading and
+how far along it is; keys wait until it's open. Plugins come after, once the session is on
+screen: one a frame (a slow one, like a Roland Cloud instrument, still holds its frame), most
+wanted first: an armed instrument, other instruments, then inserts that are on. A bypassed
+insert isn't loaded until it's switched on or its window is opened. Until its plugin is in, a
+track is silent and shows dim (`loading…` under an instrument's name); the transport bar
+counts what's left. Opening a plugin's window, or bounce, loads what it needs at once. Closing
 (`close`, or quitting with a session open) does the same in reverse: each plugin's state is
 saved and the plugin unloaded under a closing box.
 

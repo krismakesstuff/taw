@@ -24,7 +24,7 @@ void App::addInserts (TrackPlay& tp, const juce::ValueTree& track, bool offline)
         if (! node.isValid() || (bool) node[ids::bypass])
             continue;
 
-        auto* in = hostedEntry (node);
+        auto* in = offline ? hostedEntry (node) : liveEntry (node);
 
         if (in == nullptr || in->slot == nullptr)
             continue;

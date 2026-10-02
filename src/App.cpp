@@ -77,6 +77,7 @@ void App::releaseSession()
 
         // Plugins: their state to disk, their windows closed. The instances themselves go with
         // the last graph that plays them.
+        pluginQueue.clear();
         savePluginStates();
 
         for (auto& in : hosted)
@@ -249,6 +250,9 @@ int App::run()
 
         if (opening != nullptr)
             stepOpening();
+
+        if (opening == nullptr && closing == nullptr)
+            loadNextPlugin();
 
         if (closing != nullptr)
         {
@@ -1009,6 +1013,8 @@ Result App::redoEdit()
 
 void App::pumpBackgroundWork()
 {
+    while (loadNextPlugin()) {}
+
     collectFinishedTakes();
     pollPlugins();
     pollBounce();
@@ -1134,7 +1140,8 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             tp.stereo = true;
             tp.sequence = buildSequence (t, session->samplesPerBeat());
 
-            if (auto* in = hostedEntry (t); in != nullptr && in->slot != nullptr)
+            // Live: a plugin not loaded yet is queued and the track is silent until it is.
+            if (auto* in = offline ? hostedEntry (t) : liveEntry (t); in != nullptr && in->slot != nullptr)
             {
                 if (offline)
                 {
@@ -2511,13 +2518,9 @@ void App::startOpening (const juce::File& dir)
         for (const auto& c : Session::clips (t))
             opening->steps.push_back ({ "audio", c[ids::file].toString(), [this, c] { clipFor (c); } });
 
-        if (Session::isInstrumentTrack (t))
-            opening->steps.push_back ({ "plugin", t[ids::pluginName].toString(), [this, t] { hostedEntry (t); } });
-
-        for (const auto& c : t)
-            if (c.hasType (ids::INSERT))
-                opening->steps.push_back ({ "plugin", c[ids::pluginName].toString(), [this, c] { hostedEntry (c); } });
     }
+
+    // Plugins aren't steps: they load after the session is up (loadNextPlugin).
 }
 
 void App::stepOpening()
@@ -2533,7 +2536,9 @@ void App::stepOpening()
 
     opening.reset();
     proceedToSession();
-    say (Result::good ("opened " + session->name() + L" \x00b7 " + session->folder().getFullPathName()));
+    say (Result::good ("opened " + session->name()
+                       + (pluginQueue.empty() ? L" \x00b7 " + session->folder().getFullPathName()
+                                              : L" \x00b7 loading " + juce::String ((int) pluginQueue.size()) + L" plugins (their tracks are silent until they're in)")));
 }
 
 void App::handleTemplatePickerKey (const Key& k)

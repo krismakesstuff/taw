@@ -377,6 +377,13 @@ void Ui::drawTransport (App& app)
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
     }
 
+    // Plugins still loading after the session opened.
+    if (! app.pluginQueue.empty())
+    {
+        gap();
+        add ("loading " + juce::String ((int) app.pluginQueue.size()) + (app.pluginQueue.size() == 1 ? " plugin" : " plugins"), colour::accent);
+    }
+
     // Low latency mode changes what you hear, so it's shown while it's on.
     if (app.lowLatency)
     {
@@ -853,10 +860,11 @@ void Ui::drawTimeline (App& app)
         {
             // "inst", red when its plugin didn't load; the plugin's name after the flags.
             const auto problem = app.instrumentProblem (i);
-            canvas.text (kindX, y, "inst", problem.isNotEmpty() ? colour::error : colour::note, bg);
+            const bool pending = app.pluginPending (t);
+            canvas.text (kindX, y, "inst", problem.isNotEmpty() ? colour::error : pending ? colour::dim : colour::note, bg);
 
             if (twoRows)
-                canvas.text (9, y + 1, problem.isNotEmpty() ? problem : t[ids::pluginName].toString(),
+                canvas.text (9, y + 1, problem.isNotEmpty() ? problem : pending ? juce::String (L"loading\x2026") : t[ids::pluginName].toString(),
                              problem.isNotEmpty() ? colour::error : colour::dim, bg, false, fill ? 6 : leftW - 10);
         }
         else
@@ -1050,6 +1058,7 @@ void Ui::drawTimeline (App& app)
                     canvas.text (x, y, insert[ids::pluginName].toString(),
                                  app.insertProblem (insert).isNotEmpty() ? colour::error
                                  : (bool) insert[ids::bypass]           ? colour::faint
+                                 : app.pluginPending (insert)           ? colour::dim // still loading
                                  : app.insertSittingOut (insert)        ? colour::meterYellow // low latency mode
                                                                          : colour::note,
                                  cbg, false, ioSlotW - 1);

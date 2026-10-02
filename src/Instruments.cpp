@@ -105,6 +105,63 @@ App::Hosted* App::hostedEntry (const juce::ValueTree& node)
     return &hosted.back();
 }
 
+// Plugins load after a session opens, one a frame, most wanted first: an armed instrument, other
+// instruments, inserts that are on, then bypassed ones. Until then a track is silent; opening a
+// plugin's window or bouncing loads what it needs at once.
+App::Hosted* App::liveEntry (const juce::ValueTree& node)
+{
+    for (auto& in : hosted)
+        if (in.node == node)
+            return &in;
+
+    if ((Session::isInstrumentTrack (node) || node.hasType (ids::INSERT))
+        && std::find (pluginQueue.begin(), pluginQueue.end(), node) == pluginQueue.end())
+        pluginQueue.push_back (node);
+
+    return nullptr;
+}
+
+bool App::pluginPending (const juce::ValueTree& node) const
+{
+    return std::find (pluginQueue.begin(), pluginQueue.end(), node) != pluginQueue.end();
+}
+
+bool App::loadNextPlugin()
+{
+    // Gone (undo) or loaded some other way meanwhile: nothing to do for those.
+    pluginQueue.erase (std::remove_if (pluginQueue.begin(), pluginQueue.end(),
+                                       [this] (const juce::ValueTree& node)
+                                       {
+                                           const auto track = node.hasType (ids::INSERT) ? node.getParent() : node;
+                                           return ! track.getParent().isValid() || (node.hasType (ids::INSERT) && ! node.getParent().isValid())
+                                                  || std::any_of (hosted.begin(), hosted.end(), [&] (const auto& in) { return in.node == node; });
+                                       }),
+                       pluginQueue.end());
+
+    if (pluginQueue.empty() || session == nullptr)
+        return false;
+
+    auto rank = [] (const juce::ValueTree& node)
+    {
+        if (! node.hasType (ids::INSERT))
+            return (bool) node[ids::armed] ? 0 : 1;
+
+        return (bool) node[ids::bypass] ? 3 : 2;
+    };
+
+    const auto next = std::min_element (pluginQueue.begin(), pluginQueue.end(),
+                                        [&] (const auto& a, const auto& b) { return rank (a) < rank (b); });
+    const auto node = *next;
+    pluginQueue.erase (next);
+    hostedEntry (node);
+
+    if (pluginQueue.empty() && console.isOpen())
+        say (Result::good ("plugins loaded"));
+
+    rebuildGraph(); // the track plays now
+    return true;
+}
+
 PluginSlot* App::instrumentFor (int track)
 {
     if (session == nullptr || track < 0 || track >= session->numTracks())

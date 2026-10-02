@@ -96,7 +96,7 @@ public:
 
     // Headless use (taw --exec): finish background work (imports, bounces, takes) the way the
     // UI loop would.
-    bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning(); }
+    bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning() || ! pluginQueue.empty(); }
     void pumpBackgroundWork();
     void pressKey (const Key& k) { handleKey (k); } // as if typed (taw --exec ":key o")
     juce::String screenText (int w, int h) { return ui.snapshot (*this, w, h); }
@@ -458,6 +458,14 @@ private:
     };
     std::vector<Hosted> hosted;
     Hosted* hostedEntry (const juce::ValueTree& node); // loads it the first time
+    Hosted* liveEntry (const juce::ValueTree& node);   // for the live graph: not loaded yet, it's queued (nullptr meanwhile)
+
+public:
+    std::vector<juce::ValueTree> pluginQueue; // plugins still to load after opening (one a frame)
+    bool pluginPending (const juce::ValueTree& node) const;
+    bool loadNextPlugin(); // the most wanted one; false when none are waiting
+
+private:
     std::shared_ptr<PluginSlot> createPlugin (const juce::ValueTree& node, double rate, int block, juce::String& problem);
     void savePluginStates();
     void writePluginState (Hosted&);

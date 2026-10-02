@@ -865,11 +865,11 @@ bool App::handleBusPickerKey (const Key& k)
     }
 }
 
-// In the routing column (after o): left/right walk inserts A-E, sends A-E, then the output;
+// In the routing column (after \): left/right walk inserts A-E, sends A-E, then the output;
 // up/down go row by row (inserts, sends, the next track's inserts). On an insert: enter opens its window (empty: the effects
 // picker), M bypasses, shift+left/right moves it along the chain, del removes it. On a send:
 // enter picks its bus, [ ] ride its level, M turns it off, P flips pre/post, del removes it. On
-// the output: enter picks a bus, del puts it back on the mix. Esc or o leaves. An open plugin
+// the output: enter picks a bus, del puts it back on the mix. Esc or \ leaves. An open plugin
 // window follows you from insert to insert.
 bool App::handleIoKey (const Key& k)
 {
@@ -993,7 +993,7 @@ bool App::handleIoKey (const Key& k)
             if (k.ctrl || k.alt)
                 return false;
 
-            if (k.ch == 'o')
+            if (k.ch == '\\')
             {
                 ioCell = -1;
                 message.clear();

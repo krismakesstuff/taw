@@ -2429,11 +2429,11 @@ void App::handleMainKey (const Key& k)
                 else
                     topLane = TopLane::markers, trackAnchor = -1;
             }
-            // o: into the routing column on the focused track (inserts, sends, then the output).
-            else if (lineEmpty && k.ch == 'o' && session != nullptr)
+            // \: into the routing column on the focused track (inserts, sends, then the output).
+            else if (lineEmpty && k.ch == '\\' && session != nullptr)
             {
                 if (mixFocused() || onTopLane() || session->numTracks() == 0)
-                    say (Result::fail (L"o routes a track \x2014 \x2193 to one"));
+                    say (Result::fail (L"\\ routes a track \x2014 \x2193 to one"));
                 else
                 {
                     if (! ioVisible)

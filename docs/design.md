@@ -358,11 +358,11 @@ TRACK { …, out? }                    # the busId it plays into; absent = the m
 | `2 send b -12` / `pre` / `post` / `off` / `on` / `x` | level (a sign or 0: `-12`, `+3`, `0`, `-inf`), before or after the fader, off, remove |
 | `2 send` | list track 2's inserts, output and sends |
 | `2 out drums` / `2 > drums` / `2 out mix` | where the track goes after its fader; `2 out` alone opens the picker |
-| `o` | into the routing column on the focused track (see below) |
+| `\` | into the routing column on the focused track (see below) |
 | `io` | show or hide the routing column (on by default; kept in `settings.json`) |
 
-`fx` and `out` start with keys that are hotkeys on an empty line (`f`, `o`), so typed they
-need a track number (`2 fx`); `ins` works on the focused track, as `inst` does.
+`fx` starts with a key that's a hotkey on an empty line (`f`), so typed it needs a track
+number (`2 fx`); `ins` works on the focused track, as `inst` does.
 
 The effects picker lists what fits the track: where a plugin comes as "X Mono", "X Mono/Stereo"
 and "X Stereo" (Waves), a mono track sees the Mono and Mono/Stereo ones, a stereo track the
@@ -371,13 +371,13 @@ Stereo one. Typed names pick the same way.
 - **The routing column** sits left of the timeline, after the track header, as in Pro Tools
   (the meter is right of the timeline). A track's first row shows inserts A to E, its second
   sends A to E and then the output, and a third row the send levels (pre-fader in the accent
-  colour). A track one row tall shows its inserts and output. `o` steps into the column: ←→ walk the inserts, the
+  colour). A track one row tall shows its inserts and output. `\` steps into the column: ←→ walk the inserts, the
   sends, then the output; ↑↓ go row by row (a track's inserts, its sends, the next track's
   inserts; on the output, track to track). On an insert, enter opens its window (an empty one:
   the effects picker, type to filter), `M` bypasses it, shift+←→ moves it along the chain, del
   removes it. On a send, enter picks its bus (a name nothing matches makes that bus), `[ ]`
   ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, enter
-  picks a bus and del puts it back on the mix. Esc or `o` leaves. `ed` there opens the insert.
+  picks a bus and del puts it back on the mix. Esc or `\` leaves. `ed` there opens the insert.
 - **Plugin windows.** Loading an effect opens its window. One window at a time: opening
   another closes the first, and while one is open it follows you as you move between inserts.
 - **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →

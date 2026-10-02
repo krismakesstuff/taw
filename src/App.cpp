@@ -102,6 +102,75 @@ Result App::closeSession()
     if (bounce != nullptr || import != nullptr)
         return Result::fail (L"wait for the bounce or import to finish (esc cancels it)");
 
+    // On screen: in steps, with the closing box (plugins can take a while to save and unload).
+    if (console.isOpen())
+    {
+        startClosing (false);
+        return Result::good();
+    }
+
+    return finishClosing();
+}
+
+// Closing (close, or quitting): recording stopped and the engine silent at once, then each
+// plugin's state saved and the plugin let go of, a few per frame, under the closing box.
+void App::startClosing (bool thenQuit)
+{
+    if (recording || engine.isRolling())
+    {
+        stop();
+
+        // Give the audio thread a moment to let go of the recorders so takes get saved.
+        for (int i = 0; i < 50 && ! live.empty(); ++i)
+        {
+            juce::Thread::sleep (10);
+            collectFinishedTakes();
+        }
+    }
+
+    engine.setGraph (std::make_unique<Graph>()); // silence: nothing of the session plays on
+    closing = std::make_unique<Closing>();
+    closing->thenQuit = thenQuit;
+    closing->total = hosted.size() + 1; // and the session file
+    helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = false;
+    ioCell = -1;
+}
+
+void App::stepClosing()
+{
+    const auto until = juce::Time::getMillisecondCounterHiRes() + 40.0;
+
+    while (! hosted.empty() && juce::Time::getMillisecondCounterHiRes() < until)
+    {
+        auto& in = hosted.back();
+        closing->current = in.node[ids::pluginName].toString();
+        writePluginState (in);
+
+        if (in.slot != nullptr)
+            in.slot->closeEditor();
+
+        hosted.pop_back(); // the plugin goes once the silent graph has replaced the old one
+        ++closing->done;
+    }
+
+    if (! hosted.empty())
+        return;
+
+    const bool thenQuit = closing->thenQuit;
+    closing.reset();
+
+    if (thenQuit)
+    {
+        releaseSession();
+        quitRequested = true;
+        return;
+    }
+
+    say (finishClosing());
+}
+
+Result App::finishClosing()
+{
     const auto name = session->name();
 
     // Opened by folder, the start screen still lists the sessions next to this one.
@@ -181,7 +250,15 @@ int App::run()
         if (opening != nullptr)
             stepOpening();
 
-        if (treeDirty && session != nullptr && opening == nullptr)
+        if (closing != nullptr)
+        {
+            stepClosing();
+
+            if (closing == nullptr && quitRequested)
+                break;
+        }
+
+        if (treeDirty && session != nullptr && opening == nullptr && closing == nullptr)
         {
             treeDirty = false;
 
@@ -2034,8 +2111,8 @@ juce::String App::formatTime (juce::int64 pos) const
 
 void App::handleKey (const Key& k)
 {
-    if (opening != nullptr)
-        return; // keys wait until the session is open
+    if (opening != nullptr || closing != nullptr)
+        return; // keys wait until the session is open (or closed)
 
     switch (mode)
     {

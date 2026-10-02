@@ -14,14 +14,14 @@ namespace layout
 {
 // Left to right: the track header, the routing column, the timeline, then the meter.
 //
-// The header holds focus, number, name and input; the R M S I flags go on a track's second row
+// The header holds focus, number, name and input; the R I S M flags go on a track's second row
 // (twoRows: tracks two or more rows tall), else after the name, which takes a wider header.
 inline int leftPanel (bool twoRows) { return twoRows ? 20 : 25; }
-constexpr int ioPanel = 42;    // inserts A-E on a track's first row; sends A-E and the output on its second
+constexpr int ioPanel = 27;    // inserts A-E on a track's first row; sends A-E and the output on its second
 constexpr int meterPanel = 18; // volume (pan under it), meter bar, peak readout
 
 inline int ioWidth (bool io) { return io ? ioPanel + 1 : 0; } // with its border
-constexpr int ioSlots = 1, ioSlotW = 7, ioOut = 36;            // offsets in the panel, slot cell width (6 letters and a gap)
+constexpr int ioSlots = 1, ioSlotW = 4, ioOut = 21;            // offsets in the panel, slot cell width (3 letters and a gap)
 
 inline int laneStart (bool io, bool twoRows) { return leftPanel (twoRows) + 1 + ioWidth (io); }
 
@@ -84,6 +84,8 @@ private:
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawOpening (App&);
+    void drawClosing (App&);
+    void drawProgress (App&, const juce::String& title, const juce::String& doing, size_t done, size_t total);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
     void drawDb (int x, int y, float hold, bool clipped, int bg = -1);
     void drawVolume (int x, int y, double db, int bg = -1);

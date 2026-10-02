@@ -185,7 +185,12 @@ void Ui::render (App& app)
             drawOpening (app);
     }
     else
+    {
         drawMain (app);
+
+        if (app.closing != nullptr)
+            drawClosing (app);
+    }
 
     previous.resize ((size_t) h);
     std::wstring frame;
@@ -806,7 +811,7 @@ void Ui::drawTimeline (App& app)
         // The row stays lit all the way along the timeline, so you can see which track you're on.
         const int laneBg = selectedRow ? colour::laneSelBg : focusedRow ? colour::laneFocusBg : -1;
 
-        // Header: focus, number, name and input on the first row; the R M S I flags on the second
+        // Header: focus, number, name and input on the first row; the R I S M flags on the second
         // (or after the name when tracks are one row tall); the rest is its colour.
         for (int r = 0; r < rowsPerTrack; ++r)
         {
@@ -823,17 +828,17 @@ void Ui::drawTimeline (App& app)
 
         const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y, kindX = leftW - 5;
         auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, flagY, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
-        // A bus has nothing to arm or monitor: just mute and solo.
+        // R I S M: arm, input, solo, mute. A bus has nothing to arm or monitor: just solo and mute.
         const bool busRow = Session::isBusTrack (t);
 
         if (! busRow)
+        {
             flag (flagX, t[ids::armed], L'R', colour::rec);
+            flag (flagX + 1, t[ids::monitor], L'I', colour::wave);
+        }
 
-        flag (flagX + 1, t[ids::mute], L'M', colour::meterYellow);
         flag (flagX + 2, t[ids::solo], L'S', colour::play);
-
-        if (! busRow)
-            flag (flagX + 3, t[ids::monitor], L'I', colour::wave);
+        flag (flagX + 3, t[ids::mute], L'M', colour::meterYellow);
 
         const bool sampleTrack = Session::isSampleTrack (t);
         const bool instrumentTrack = Session::isInstrumentTrack (t);
@@ -1616,33 +1621,45 @@ void Ui::drawDevicePicker (App& app)
     canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
 }
 
-// Opening a session: what's loading, and how far along.
-void Ui::drawOpening (App& app)
+// Opening or closing a session: what it's doing, and how far along.
+void Ui::drawProgress (App& app, const juce::String& title, const juce::String& doing, size_t done, size_t total)
 {
-    const auto& job = *app.opening;
     const int w = canvas.width();
     const int boxW = std::min (w - 4, 64), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
 
     for (int y = 0; y < 6; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
-    canvas.text (x0 + 2, y0 + 1, "OPENING", colour::text, bg, true);
-    canvas.text (x0 + 10, y0 + 1, app.session != nullptr ? app.session->name() : juce::String(), colour::accent, bg, true, boxW - 12);
-
-    const auto total = juce::jmax<size_t> (1, job.steps.size());
-    const auto done = juce::jmin (job.done, job.steps.size());
-    const auto now = done < job.steps.size() ? job.steps[done].kind + " " + juce::File (job.steps[done].name).getFileName()
-                                             : juce::String ("starting");
-    canvas.text (x0 + 2, y0 + 2, L"loading " + now + L"\x2026", colour::dim, bg, false, boxW - 4);
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1, app.session != nullptr ? app.session->name() : juce::String(), colour::accent, bg, true,
+                 boxW - title.length() - 5);
+    canvas.text (x0 + 2, y0 + 2, doing + L"\x2026", colour::dim, bg, false, boxW - 4);
 
     // A bar of steps done.
     const int barW = boxW - 12;
-    const int filled = (int) ((double) barW * (double) done / (double) total);
+    const auto shown = juce::jmin (done, total);
+    const int filled = total > 0 ? (int) ((double) barW * (double) shown / (double) total) : 0;
 
     for (int i = 0; i < barW; ++i)
         canvas.put (x0 + 2 + i, y0 + 4, i < filled ? L'\x2588' : L'\x2591', i < filled ? colour::accent : colour::faint, bg);
 
-    canvas.text (x0 + 3 + barW, y0 + 4, juce::String ((int) done) + "/" + juce::String ((int) job.steps.size()), colour::dim, bg);
+    canvas.text (x0 + 3 + barW, y0 + 4, juce::String ((int) shown) + "/" + juce::String ((int) total), colour::dim, bg);
+}
+
+void Ui::drawOpening (App& app)
+{
+    const auto& job = *app.opening;
+    const auto done = juce::jmin (job.done, job.steps.size());
+    const auto now = done < job.steps.size() ? job.steps[done].kind + " " + juce::File (job.steps[done].name).getFileName()
+                                             : juce::String ("starting");
+    drawProgress (app, "OPENING", "loading " + now, done, job.steps.size());
+}
+
+void Ui::drawClosing (App& app)
+{
+    const auto& job = *app.closing;
+    drawProgress (app, job.thenQuit ? "SAVING AND QUITTING" : "CLOSING",
+                  job.current.isNotEmpty() ? "saving " + job.current : juce::String ("saving the session"), job.done, job.total);
 }
 
 void Ui::drawTemplatePicker (App& app)

@@ -189,6 +189,18 @@ public:
     std::unique_ptr<Opening> opening;
     void startOpening (const juce::File& dir);
     void stepOpening();
+
+    // Closing (close, or quitting with a session open), likewise.
+    struct Closing
+    {
+        bool thenQuit = false;
+        size_t done = 0, total = 0;
+        juce::String current; // the plugin being saved
+    };
+    std::unique_ptr<Closing> closing;
+    void startClosing (bool thenQuit);
+    void stepClosing();
+    Result finishClosing();
     Result scanPlugins (bool retryFailed); // "scan", "scan retry"
     // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
     // opened, and the last message it sent, to see a controller is getting through.
@@ -270,7 +282,14 @@ public:
     bool isBouncing() const { return bounce != nullptr; }
     void openDevicePicker();
     Result showControlPanel();
-    void quit() { quitRequested = true; }
+    // Quitting saves and closes the session first: on screen, in steps under the closing box.
+    void quit()
+    {
+        if (session != nullptr && console.isOpen() && closing == nullptr)
+            startClosing (true);
+        else if (closing == nullptr)
+            quitRequested = true;
+    }
     Result closeSession(); // save, close, back to the recent sessions / new session screen
     void releaseSession();
     // Tells you the last run didn't end cleanly, ahead of anything opening the session said.

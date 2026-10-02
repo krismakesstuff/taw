@@ -232,8 +232,13 @@ void App::pollPlugins()
                 windows.push_back (w);
     }
 
-    // Clicking in a plugin's window takes the keyboard; it comes back to taw once the mouse is done.
+    // Clicking in a plugin's window takes the keyboard; it comes back to taw once the mouse is
+    // done, unless its title was double-clicked (then it keeps it, and says so).
     console.reclaimKeyboard (windows);
+
+    for (auto& in : hosted)
+        if (in.slot != nullptr)
+            in.slot->markKeyboard (in.slot->editorHandle() != nullptr && in.slot->editorHandle() == console.keyboardHeldBy());
 
     // A new device (or new settings): every plugin gets prepared for its rate and block size.
     if (engine.isDeviceRunning() && engine.deviceGeneration() != preparedGeneration)

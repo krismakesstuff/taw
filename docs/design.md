@@ -387,7 +387,9 @@ Stereo one. Typed names pick the same way.
 - **Plugin windows.** They sit over the terminal but never keep the keyboard: click and drag
   in one, and a moment after the mouse lets go the terminal has the keyboard again, so keys
   keep reaching taw (not while a menu is open or a button is held; a plugin's own dialogs, like
-  naming a preset, keep it). Windows only. Loading an effect opens its window. One window at a time: opening
+  naming a preset, keep it). Double-click a plugin window's title bar to let it keep the
+  keyboard (typing into the plugin): its title and the transport bar say `keys → plugin` until
+  you click the terminal, close it, or double-click the title again. Windows only. Loading an effect opens its window. One window at a time: opening
   another closes the first, and while one is open it follows you as you move between inserts.
 - **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →
   fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped

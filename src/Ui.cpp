@@ -386,6 +386,13 @@ void Ui::drawTransport (App& app)
         add ("loading " + juce::String ((int) app.pluginQueue.size()) + (app.pluginQueue.size() == 1 ? " plugin" : " plugins"), colour::accent);
     }
 
+    // A plugin keeping the keyboard (its title double-clicked): keys aren't reaching taw.
+    if (app.console.keyboardHeldBy() != nullptr)
+    {
+        gap();
+        add (L" keys !92 plugin ", 16, colour::accent, true);
+    }
+
     // Low latency mode changes what you hear, so it's shown while it's on.
     if (app.lowLatency)
     {
@@ -1561,7 +1568,7 @@ void Ui::drawTrackMenu (App& app)
         if (chosen)
             canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
 
-        canvas.put (x0 + 3, y, item.key, colour::accent, rowBg, true);
+        canvas.put (x0 + 3, y, (wchar_t) item.key, colour::accent, rowBg, true);
         canvas.text (x0 + 5, y, item.label, item.danger ? colour::error : colour::text, rowBg, chosen, 22);
         canvas.text (x0 + 28, y, item.typed, colour::dim, rowBg, false, boxW - 30);
     }

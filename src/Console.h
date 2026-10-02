@@ -57,6 +57,11 @@ public:
     // click and drag in a plugin. Windows only; elsewhere it does nothing. Call once a frame.
     void reclaimKeyboard (const std::vector<void*>& pluginWindows);
 
+    // Double-clicking a plugin window's title bar gives it the keyboard to keep (typing into the
+    // plugin); this is that window until the terminal is clicked, it closes, or it's
+    // double-clicked again. nullptr: taw has the keyboard.
+    void* keyboardHeldBy() const;
+
     // Puts text on the system clipboard.
     static void setClipboardText (const char* text);
     int height() const;
@@ -71,6 +76,8 @@ private:
     std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
     void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
     double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
+    void* held_by = nullptr;          // a plugin window keeping the keyboard (keyboardHeldBy)
+    void* hook = nullptr;             // watches title-bar double-clicks on taw's windows
 #else
     std::string pending; // bytes of a key sequence still arriving
     int pendingPolls = 0;

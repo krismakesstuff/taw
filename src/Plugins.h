@@ -40,6 +40,7 @@ public:
     void closeEditor();
     bool editorWantsToClose() const; // its close button was pressed; the owner calls closeEditor
     void* editorHandle() const;      // its native window (nullptr when closed)
+    void markKeyboard (bool held);   // its title says when it's keeping the keyboard
 
     // audio thread (or a bounce thread) ---------------------------------------------
     // Plays [pos, pos + n) into left/right (added). Rolling: the sequence plays; any transport

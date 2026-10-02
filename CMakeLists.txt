@@ -33,6 +33,7 @@ target_sources(taw PRIVATE
     src/Safety.cpp
     src/Editing.cpp
     src/Instruments.cpp
+    src/Routing.cpp
     src/Midi.cpp
     src/Plugins.cpp
     src/Ui.cpp)

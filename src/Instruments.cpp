@@ -389,6 +389,9 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     {
         track = session->track (index);
 
+        if (Session::isBusTrack (track))
+            return Result::fail ("track " + juce::String (index + 1) + L" is a bus \x2014 inst alone makes a new instrument track");
+
         if (Session::isSampleTrack (track) || (Session::isAudioTrack (track) && ! Session::clips (track).empty()))
             return Result::fail ("track " + juce::String (index + 1) + L" has audio on it \x2014 inst alone makes a new instrument track");
     }

@@ -1045,6 +1045,16 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             continue;
         }
 
+        // A bus plays what's sent to it (applyRouting, below): no input, no clips, never armed.
+        if (Session::isBusTrack (t))
+        {
+            tp.inputChannel = -1;
+            tp.armed = tp.inputOnly = false;
+            tp.stereo = true;
+            g->tracks.push_back (std::move (tp));
+            continue;
+        }
+
         if (Session::isSampleTrack (t))
         {
             // Armed means "listening to the pad key", not to an input: its hits keep playing.
@@ -1099,6 +1109,8 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
 
         g->tracks.push_back (std::move (tp));
     }
+
+    applyRouting (*g);
 
     // Plugins of tracks that are gone (undo) or no longer instruments: state saved, window
     // closed. Undoing back brings the plugin back from that state.
@@ -1246,6 +1258,9 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
 #else
         return Result::fail (L"import what? import ~/stems/kick.wav \x00b7 or drop files here");
 #endif
+
+    if (targetTrack >= 0 && targetTrack < session->numTracks() && Session::isBusTrack (session->track (targetTrack)))
+        return Result::fail ("track " + juce::String (targetTrack + 1) + L" is a bus \x2014 import alone makes new tracks");
 
     juce::StringArray notFound;
     auto files = Import::expand (paths, juce::File::getCurrentWorkingDirectory(), notFound);
@@ -1540,7 +1555,7 @@ void App::setCursor (juce::int64 pos)
 
 void App::keepInView (juce::int64 pos)
 {
-    const auto span = (juce::int64) (samplesPerColumn() * layout::laneWidth (console.width()));
+    const auto span = (juce::int64) (samplesPerColumn() * layout::laneWidth (console.width(), ioVisible));
 
     if (pos < viewStart || pos >= viewStart + span)
     {
@@ -1815,6 +1830,9 @@ void App::loadSettings()
     if (const auto t = json["theme"].toString(); t == "light" || t == "grey")
         theme = t;
 
+    if (json.hasProperty ("io"))
+        ioVisible = (bool) json["io"];
+
     if (const auto* off = json["midiOff"].getArray())
         for (const auto& name : *off)
             midiOff.add (name.toString());
@@ -1824,6 +1842,7 @@ void App::saveSettings() const
 {
     auto* o = new juce::DynamicObject();
     o->setProperty ("theme", theme);
+    o->setProperty ("io", ioVisible);
 
     juce::Array<juce::var> off;
 
@@ -1876,7 +1895,7 @@ void App::showSelectionEdge (bool end)
     setCursor (pos);
 
     const auto spc = samplesPerColumn();
-    const auto columns = layout::laneWidth (console.width());
+    const auto columns = layout::laneWidth (console.width(), ioVisible);
     const auto first = std::floor ((double) pos / spc) - columns / 2;
     viewStart = juce::jmax<juce::int64> (0, (juce::int64) (first * spc));
 }
@@ -2011,7 +2030,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handlePluginPickerKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k))
+    if (handlePluginPickerKey (k) || handleBusPickerKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
@@ -2241,6 +2260,20 @@ void App::handleMainKey (const Key& k)
                     focusTrack (focused);
                 else
                     topLane = TopLane::markers, trackAnchor = -1;
+            }
+            // o: into the routing column on the focused track (the output, then sends A to E).
+            else if (lineEmpty && k.ch == 'o' && session != nullptr)
+            {
+                if (mixFocused() || onTopLane() || session->numTracks() == 0)
+                    say (Result::fail (L"o routes a track \x2014 \x2193 to one"));
+                else
+                {
+                    if (! ioVisible)
+                        ioVisible = true, saveSettings();
+
+                    ioCell = 0;
+                    say (Result::good (describeIoCell (focused, 0)));
+                }
             }
             // f: the focused track fills the track area (a piano roll on instrument tracks).
             else if (lineEmpty && k.ch == 'f' && session != nullptr)

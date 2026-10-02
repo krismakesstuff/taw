@@ -98,6 +98,8 @@ public:
     // UI loop would.
     bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning(); }
     void pumpBackgroundWork();
+    void pressKey (const Key& k) { handleKey (k); } // as if typed (taw --exec ":key o")
+    juce::String screenText (int w, int h) { return ui.snapshot (*this, w, h); }
 
     // Commands ----------------------------------------------------------------
     // One line of the command language. Used by the command line now and by agents later.
@@ -145,6 +147,36 @@ public:
     bool midiPanelVisible = false;
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
+    // Routing (Routing.cpp): bus tracks, and each track's output and five sends (A to E).
+    // Buses are named in commands by track number or name; a name nothing matches makes a new bus.
+    Result addBus (const juce::String& name);                                         // "bus Verb"
+    Result setOutput (const std::vector<int>& tracks, const juce::String& where);      // "2 out verb", "2 out mix"
+    Result editSend (const std::vector<int>& tracks, const juce::StringArray& args);   // "2 send b verb -6 pre"
+    Result setOutputBus (int track, int busId);                   // busId 0: the mix
+    Result setSendBus (int track, int slot, int busId);
+    Result nudgeSend (int track, int slot, double deltaDb);
+    juce::String describeSends (int track) const;
+    juce::String describeIoCell (int track, int cell) const;
+    juce::String busName (int busId) const; // "6 Verb", or "Mix" for 0
+    std::vector<int> busFeeders (int busTrack) const; // tracks whose output or a send goes to it
+
+    // The routing column, right of the timeline ("io" shows or hides it; settings.json). o steps
+    // into it on the focused track: left/right pick the output or a send, enter picks its bus.
+    bool ioVisible = true;
+    int ioCell = -1; // -1: not in the column; 0: output; 1-5: sends A to E
+
+    // The bus picker: where the output or a send goes. Type to filter (a new name makes a bus).
+    struct BusChoice
+    {
+        juce::String label;
+        int busId = 0; // 0: the mix, -1: a new bus
+    };
+    bool busPickerVisible = false;
+    juce::String busFilter;
+    int busPickIndex = 0, busPickTrack = -1, busPickCell = 0;
+    std::vector<BusChoice> busChoices() const;
+    void openBusPicker (int track, int cell);
+
     PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr
     juce::String instrumentProblem (int track) const; // why it isn't loaded
     void openPluginPicker (int targetTrack);
@@ -316,6 +348,16 @@ private:
     void drainRecordedMidi();
     void finishHeldNotes (juce::int64 at);
     bool handlePluginPickerKey (const Key&);
+    bool handleBusPickerKey (const Key&);
+    bool handleIoKey (const Key&);
+
+    // Routing internals (Routing.cpp)
+    void applyRouting (Graph&) const; // outputs, sends, the order tracks run in, and solo through buses
+    std::vector<int> routesFrom (int track, bool withMutedSends) const; // bus tracks it feeds
+    bool feeds (int from, int to) const;  // from reaches to through outputs and sends
+    Result checkRoute (int track, int busId) const;
+    int makeBus (const juce::String& name, juce::String& error); // a new bus track's busId, 0 on failure
+    int resolveBus (const juce::String& query, juce::String& made, juce::String& error); // busId; may make one
 
     // Live plugin instances, by track (found by tree identity, so they follow tracks around).
     struct Instrument

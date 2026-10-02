@@ -134,6 +134,29 @@ static juce::String padRight (const juce::String& s, int width)
 
 static float toDb (float gain) { return juce::Decibels::gainToDecibels (gain, -100.0f); }
 
+// The frame as plain text, w by h, without touching the console (taw --exec ":screen").
+juce::String Ui::snapshot (App& app, int w, int h)
+{
+    colour::apply (app.theme);
+    canvas.resize (w, h);
+    drawMain (app);
+
+    juce::String out;
+
+    for (int y = 0; y < h; ++y)
+    {
+        juce::String line;
+
+        for (int x = 0; x < w; ++x)
+            line << juce::String::charToString ((juce::juce_wchar) canvas.at (x, y).ch);
+
+        out << line.trimEnd() << "\n";
+    }
+
+    previous.clear(); // the next real render repaints everything
+    return out;
+}
+
 void Ui::render (App& app)
 {
     const auto w = app.console.width() - 1; // keep the last column free so nothing wraps
@@ -200,6 +223,8 @@ void Ui::drawMain (App& app)
         drawHelp (app);
     else if (app.pluginPickerVisible && app.session != nullptr)
         drawPluginPicker (app);
+    else if (app.busPickerVisible && app.session != nullptr)
+        drawBusPicker (app);
     else if (app.midiPanelVisible && app.midiInputs != nullptr)
         drawMidiPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
@@ -388,7 +413,8 @@ void Ui::drawTimeline (App& app)
     using namespace layout;
     auto& s = *app.session;
     const int w = canvas.width(), h = canvas.height();
-    const int laneX = leftPanel + 1, laneW = laneWidth (w + 1), meterX = laneX + laneW + 1;
+    const bool io = app.ioVisible;
+    const int laneX = leftPanel + 1, laneW = laneWidth (w + 1, io), ioX = laneX + laneW + 1, meterX = ioX + ioWidth (io);
     const auto spc = app.samplesPerColumn();
     const auto rolling = app.engine.isRolling();
     const auto playhead = app.engine.playhead();
@@ -440,6 +466,9 @@ void Ui::drawTimeline (App& app)
         canvas.put (laneX - 1, y, L'\x2502', colour::faint);
         canvas.put (meterX - 1, y, L'\x2502', colour::faint);
 
+        if (io)
+            canvas.put (ioX - 1, y, L'\x2502', colour::faint);
+
         if (focusedLane)
             for (int c = 0; c < laneW; ++c)
                 canvas.put (laneX + c, y, L' ', -1,
@@ -451,6 +480,14 @@ void Ui::drawTimeline (App& app)
     drawTopLane (markerY, App::TopLane::markers, "markers");
     drawTopLane (rulerY, App::TopLane::ruler, "zoom " + zoomText + "/col");
     canvas.text (meterX + 1, rulerY, "  vol", colour::faint);
+
+    if (io)
+    {
+        canvas.text (ioX + ioOut, rulerY, "out", colour::faint);
+
+        for (int k = 0; k < Session::numSends; ++k)
+            canvas.text (ioX + ioSends + k * ioSendW, rulerY, Session::slotName (k), colour::faint);
+    }
     canvas.text (meterX + 7, rulerY, "level", colour::faint);
     canvas.text (meterX + 20, rulerY, " peak", colour::faint);
 
@@ -744,6 +781,9 @@ void Ui::drawTimeline (App& app)
             canvas.fill (0, y + r, leftPanel, L' ', -1, bg);
             canvas.put (laneX - 1, y + r, L'\x2502', colour::faint);
             canvas.put (meterX - 1, y + r, L'\x2502', colour::faint);
+
+            if (io)
+                canvas.put (ioX - 1, y + r, L'\x2502', colour::faint);
         }
 
         if (focusedRow)
@@ -753,16 +793,26 @@ void Ui::drawTimeline (App& app)
         canvas.text (4, y, padRight (t[ids::name].toString(), 10), colour::text, bg);
 
         auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, y, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
-        flag (15, t[ids::armed], L'R', colour::rec);
+        // A bus has nothing to arm or monitor: just mute and solo.
+        const bool busRow = Session::isBusTrack (t);
+
+        if (! busRow)
+            flag (15, t[ids::armed], L'R', colour::rec);
+
         flag (16, t[ids::mute], L'M', colour::meterYellow);
         flag (17, t[ids::solo], L'S', colour::play);
-        flag (18, t[ids::monitor], L'I', colour::wave);
+
+        if (! busRow)
+            flag (18, t[ids::monitor], L'I', colour::wave);
 
         const bool sampleTrack = Session::isSampleTrack (t);
         const bool instrumentTrack = Session::isInstrumentTrack (t);
+        const bool busTrack = Session::isBusTrack (t);
         const int input = t[ids::input];
 
-        if (sampleTrack)
+        if (busTrack)
+            canvas.text (20, y, "bus", colour::accent, bg);
+        else if (sampleTrack)
             canvas.text (20, y, "smp", colour::hit, bg);
         else if (instrumentTrack)
         {
@@ -923,6 +973,61 @@ void Ui::drawTimeline (App& app)
             }
         }
 
+        // A bus lane says what feeds it.
+        if (busTrack)
+        {
+            juce::StringArray from;
+
+            for (auto f : app.busFeeders (i))
+                from.add (juce::String (f + 1) + " " + s.track (f)[ids::name].toString());
+
+            canvas.text (laneX + 1, y, from.isEmpty() ? juce::String (L"bus \x00b7 nothing feeds it yet \x00b7 2 send " + t[ids::name].toString().toLowerCase())
+                                                      : L"\x2190 " + from.joinIntoString (juce::String (L" \x00b7 ")),
+                         colour::dim, laneBg, false, laneW - 2);
+        }
+
+        // Routing: the output, then sends A to E (names on the first row, levels under them).
+        if (io)
+        {
+            const bool inColumn = focusedRow && app.ioCell >= 0;
+
+            for (int r = 0; r < rowsPerTrack; ++r)
+                canvas.fill (ioX, y + r, ioPanel, L' ', -1, bg);
+
+            auto cellBg = [&] (int cell) { return inColumn && app.ioCell == cell ? colour::selBg : bg; };
+            const int outBus = s.findBus (t[ids::out]);
+            const auto outName = outBus < 0 ? juce::String ("Mix") : s.track (outBus)[ids::name].toString();
+            canvas.fill (ioX + ioOut - 1, y, 6, L' ', -1, cellBg (0));
+            canvas.text (ioX + ioOut, y, outName, outBus < 0 ? colour::dim : colour::accent, cellBg (0), outBus >= 0, 5);
+
+            for (int k = 0; k < Session::numSends; ++k)
+            {
+                const int x = ioX + ioSends + k * ioSendW, cbg = cellBg (k + 1);
+                const auto send = Session::send (t, k);
+                canvas.fill (x - 1, y, ioSendW, L' ', -1, cbg);
+
+                if (! send.isValid())
+                {
+                    canvas.put (x, y, L'\x00b7', colour::faint, cbg);
+                    continue;
+                }
+
+                const int dest = s.findBus (send[ids::to]);
+                const bool off = send[ids::mute];
+                canvas.text (x, y, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(), dest < 0 ? colour::error : off ? colour::faint : colour::text,
+                             cbg, false, 3);
+
+                // The level under the name; pre-fader sends in the accent colour.
+                if (rowsPerTrack > 1)
+                {
+                    const double db = send[ids::db];
+                    const auto level = db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
+                    canvas.fill (x - 1, y + 1, ioSendW, L' ', -1, cbg);
+                    canvas.text (x, y + 1, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, 3);
+                }
+            }
+        }
+
         // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
         // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
@@ -958,6 +1063,9 @@ void Ui::drawTimeline (App& app)
         canvas.text (laneX - 3, y, ch == 0 ? "L" : "R", colour::dim, bg);
         canvas.put (laneX - 1, y, L'\x2502', colour::faint);
         canvas.put (meterX - 1, y, L'\x2502', colour::faint);
+
+        if (io)
+            canvas.put (ioX - 1, y, L'\x2502', colour::faint);
 
         if (ch == 0 && fill)
             canvas.text (laneX + 1, y, "track " + juce::String (app.focused + 1) + " of " + juce::String (n) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
@@ -1094,6 +1202,11 @@ void Ui::drawBottom (App& app)
                                        : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ctrl+k marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
+    else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
+        hints = app.ioCell == 0 ? L"\x2190\x2192 output / sends A-E \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 del: back to the mix \x00b7 [ ] track volume \x00b7 esc or o leaves"
+                                : L"\x2190\x2192 output / sends A-E \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 [ ] send level \x00b7 M off \x00b7 P pre/post \x00b7 del removes \x00b7 esc or o leaves";
+    else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isBusTrack (app.session->track (app.focused)))
+        hints = L"a bus plays what's sent to it \x00b7 2 send <name> or 2 out <name> feeds it \x00b7 o routes \x00b7 [ ] its volume \x00b7 shift+S solo (keeps what feeds it) \x00b7 ? help";
     else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isInstrumentTrack (app.session->track (app.focused)))
         hints = L"shift+R arms (your controller plays it) \x00b7 ctrl+space records \x00b7 ed plugin window \x00b7 f piano roll \x00b7 snap quantizes \x00b7 inst swaps the plugin \x00b7 ? help";
     else if (app.session != nullptr && ! app.mixFocused() && Session::isSampleTrack (app.session->track (app.focused)))
@@ -1135,9 +1248,12 @@ void Ui::drawHelp (App&)
         { Pair, L"3 pat x...", L"pattern: X x o .", L"delete", L"clear the range" },
         { Pair, L"grid 16", L"steps of a 16th", L"ctrl z / y", L"undo / redo" },
         { Pair, L"alt+/", L"toggle a hit at cursor", L"sel 3 5", L"select bars 3 to 5" },
-        { Heading, L"INSTRUMENTS", nullptr, nullptr, nullptr },
-        { Pair, L"inst  inst juno", L"instrument track (picker)", L"f", L"focused track fills: piano roll" },
-        { Pair, L"shift+R  ed", L"arm for MIDI / its window", L"scan  midi", L"find plugins / MIDI inputs on" },
+        { Heading, L"INSTRUMENTS", nullptr, L"ROUTING", nullptr },
+        { Pair, L"inst  inst juno", L"instrument track (picker)", L"bus Verb", L"new bus track" },
+        { Pair, L"shift+R  ed", L"arm for MIDI / its window", L"2 send verb", L"send A-E (a new name: a bus)" },
+        { Pair, L"f", L"focused track fills: piano roll", L"2 send b -6", L"level; pre post off on x" },
+        { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
+        { Pair, nullptr, nullptr, L"o   io", L"routing column / show, hide" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
@@ -1279,6 +1395,47 @@ void Ui::drawPluginPicker (App& app)
 
     canvas.text (x0 + 2, y0 + boxH - 2, L"type to filter \x00b7 \x2191\x2193 choose \x00b7 enter loads \x00b7 esc closes",
                  colour::dim, bg, false, boxW - 4);
+}
+
+// Where the output or a send goes: the mix (outputs only), the buses it can feed without a loop,
+// and a new bus named by what's typed.
+void Ui::drawBusPicker (App& app)
+{
+    const auto choices = app.busChoices();
+    const int w = canvas.width(), h = canvas.height();
+    const int boxW = std::min (w - 4, 56), boxH = std::min (h - 2, std::max (10, (int) choices.size() + 7));
+    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+    const int listRows = boxH - 7;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const auto title = app.busPickCell == 0 ? juce::String ("OUTPUT") : "SEND " + Session::slotName (app.busPickCell - 1);
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1, "of track " + juce::String (app.busPickTrack + 1) + " "
+                                                       + app.session->track (app.busPickTrack)[ids::name].toString(), colour::dim, bg, false, boxW - title.length() - 5);
+
+    const int fx = canvas.text (x0 + 2, y0 + 2, L"\x203a ", colour::accent, bg);
+    canvas.text (canvas.text (fx, y0 + 2, app.busFilter, colour::text, bg, true), y0 + 2, L"\x2581", colour::accent, bg);
+
+    const int first = juce::jlimit (0, std::max (0, (int) choices.size() - listRows), app.busPickIndex - listRows / 2);
+
+    for (int row = 0; row < listRows && first + row < (int) choices.size(); ++row)
+    {
+        const int i = first + row, y = y0 + 4 + row;
+        const auto& c = choices[(size_t) i];
+        const bool chosen = i == app.busPickIndex;
+        const int rowBg = chosen ? colour::selBg : bg;
+
+        canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+
+        if (chosen)
+            canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+
+        canvas.text (x0 + 3, y, c.label, c.busId < 0 ? colour::accent : colour::text, rowBg, chosen, boxW - 5);
+    }
+
+    canvas.text (x0 + 2, y0 + boxH - 2, L"type to filter or name a new bus \x00b7 \x2191\x2193 \x00b7 enter \x00b7 esc", colour::dim, bg, false, boxW - 4);
 }
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).

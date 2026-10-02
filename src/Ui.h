@@ -14,9 +14,13 @@ namespace layout
 {
 constexpr int leftPanel = 25;  // focus, number, name, flags, input
 constexpr int meterPanel = 25; // volume, meter bar, peak readout
+constexpr int ioPanel = 27;    // routing, right of the lane: the output, then sends A to E
+
+inline int ioWidth (bool io) { return io ? ioPanel + 1 : 0; } // with its border
+constexpr int ioOut = 1, ioSends = 7, ioSendW = 4;             // offsets in the panel, send cell width
 
 // Console width minus the one-column gutter, the panels and the two lane borders.
-inline int laneWidth (int consoleWidth) { return std::max (10, consoleWidth - 1 - leftPanel - 2 - meterPanel); }
+inline int laneWidth (int consoleWidth, bool io) { return std::max (10, consoleWidth - 1 - leftPanel - 2 - meterPanel - ioWidth (io)); }
 } // namespace layout
 
 struct Cell
@@ -53,6 +57,7 @@ class Ui
 {
 public:
     void render (App&);
+    juce::String snapshot (App&, int w, int h);
 
 private:
     void drawMain (App&);
@@ -64,6 +69,7 @@ private:
     void drawHelp (App&);
     void drawSettings (App&);
     void drawPluginPicker (App&);
+    void drawBusPicker (App&);
     void drawMidiPanel (App&);
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);

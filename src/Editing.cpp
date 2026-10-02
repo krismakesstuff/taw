@@ -172,6 +172,12 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
 
         auto track = session->track (t);
 
+        if (Session::isBusTrack (track))
+        {
+            skipped.add ("track " + juce::String (t + 1) + " (a bus)");
+            continue;
+        }
+
         if (lane.sample != Session::isSampleTrack (track) || lane.instrument != Session::isInstrumentTrack (track))
         {
             skipped.add ("track " + juce::String (t + 1) + " ("

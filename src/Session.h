@@ -57,7 +57,16 @@ public:
 
     // Instrument tracks: a plugin plays the track's NOTEs and CCs (positions in beats).
     static bool isInstrumentTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "instrument"; }
-    static bool isAudioTrack (const juce::ValueTree& track) { return ! isSampleTrack (track) && ! isInstrumentTrack (track); }
+    static bool isAudioTrack (const juce::ValueTree& track) { return ! isSampleTrack (track) && ! isInstrumentTrack (track) && ! isBusTrack (track); }
+
+    // Bus tracks play what other tracks send them (their output or a send), through their own
+    // fader. They have no clips and no input.
+    static bool isBusTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "bus"; }
+    int findBus (int busId) const; // the bus track's index, or -1
+    int nextBusId() const;
+    static constexpr int numSends = 5; // slots a to e
+    static juce::ValueTree send (const juce::ValueTree& track, int slot); // invalid when the slot is empty
+    static juce::String slotName (int slot) { return juce::String::charToString ((juce::juce_wchar) ('A' + slot)); }
     static std::vector<juce::ValueTree> notes (const juce::ValueTree& track);
     static std::vector<juce::ValueTree> controls (const juce::ValueTree& track);
     static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);

@@ -277,6 +277,32 @@ int main (int argc, char** argv)
 
         for (int i = 2; i < args.size(); ++i)
         {
+            // ":screen" prints the screen as text (160x44); ":key o", ":key right", ":key ]" press a key.
+            if (args[i] == ":screen")
+            {
+                std::printf ("%s", app.screenText (160, 44).toRawUTF8());
+                continue;
+            }
+
+            if (args[i].startsWith (":key "))
+            {
+                const auto name = args[i].substring (5);
+                taw::Key k;
+                const std::pair<const char*, taw::Key::Code> named[] = { { "enter", taw::Key::Enter }, { "esc", taw::Key::Escape }, { "left", taw::Key::Left },
+                                                                         { "right", taw::Key::Right }, { "up", taw::Key::Up }, { "down", taw::Key::Down },
+                                                                         { "del", taw::Key::Delete }, { "tab", taw::Key::Tab }, { "backspace", taw::Key::Backspace } };
+                k.code = taw::Key::Char;
+                k.ch = name[0];
+
+                for (const auto& [n, code] : named)
+                    if (name.equalsIgnoreCase (n))
+                        k.code = code;
+
+                app.pressKey (k);
+                std::printf ("key  %-24s %s\n", name.toRawUTF8(), app.message.toRawUTF8());
+                continue;
+            }
+
             auto r = app.execute (args[i]);
 
             // Imports and bounces finish on their own threads; wait so results are in order.
@@ -338,6 +364,15 @@ int main (int argc, char** argv)
                 for (const auto& c : clips)
                     what << " " << (juce::int64) c[taw::ids::start] << "+" << (juce::int64) c[taw::ids::length];
             }
+
+            if (taw::Session::isBusTrack (track))
+                what = "bus";
+
+            // Routing, when it isn't just "to the mix".
+            const auto routing = app.describeSends (t).fromFirstOccurrenceOf (" ", false, false).fromFirstOccurrenceOf (" ", false, false);
+
+            if (! routing.startsWith (juce::String (L"\x2192 Mix \x00b7 no sends")))
+                what << " | " << routing;
 
             std::printf ("  %2d %-16s in%-2d %6s dB  %s\n", t + 1, track[taw::ids::name].toString().toRawUTF8(),
                          (int) track[taw::ids::input], taw::formatDb (track[taw::ids::gainDb]).toRawUTF8(), what.toRawUTF8());

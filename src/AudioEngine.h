@@ -95,6 +95,20 @@ struct TrackPlay
     bool midiLive = false;
 
     std::shared_ptr<Recorder> recorder;
+
+    // Routing. Buses are numbered in the graph (Graph::numBuses); -1 is the mix.
+    struct Send
+    {
+        int bus = -1;
+        float gain = 1.0f;
+        bool pre = false; // before the fader: the track's volume doesn't change it (mute does)
+    };
+
+    static constexpr int nowhere = -2; // out: only its sends are heard (it feeds a soloed bus)
+
+    int busIndex = -1; // a bus track: the bus it plays
+    int out = -1;      // where the track goes after its fader
+    std::vector<Send> sends;
 };
 
 // Immutable snapshot of what to play. The message thread builds one and hands it over; the
@@ -110,7 +124,11 @@ struct ClickSettings
 
 struct Graph
 {
+    static constexpr int maxBuses = 32;
+
     std::vector<TrackPlay> tracks;
+    std::vector<int> order; // tracks in the order they run: every track before the buses it feeds
+    int numBuses = 0;
     ClickSettings click;
     float mixGain = 1.0f;
     double bpm = 120.0;
@@ -144,6 +162,41 @@ inline void renderClips (const TrackPlay& tp, juce::int64 pos, int n, float* lef
         const auto lastChannel = c.audio->getNumChannels() - 1;
         juce::FloatVectorOperations::copy (left + (from - pos), c.audio->getReadPointer (0, src), count);
         juce::FloatVectorOperations::copy (right + (from - pos), c.audio->getReadPointer (juce::jmin (1, lastChannel), src), count);
+    }
+}
+
+// Where a track's signal goes once it's rendered into left/right at unity: its pre-fader sends,
+// its fader (applied in place, so left/right then hold what the track plays, for its meter),
+// its post-fader sends, and its output. buses holds left and right for each bus (bus b at 2b and
+// 2b + 1). pan is the level a mono signal enters a stereo bus at. Shared by live playback and
+// bounces.
+inline void routeTrack (const TrackPlay& tp, float pan, float* left, float* right, int n, float* const* buses, float* mixL, float* mixR)
+{
+    auto add = [&] (int bus, float g)
+    {
+        if (g <= 0.0f || bus == TrackPlay::nowhere)
+            return;
+
+        juce::FloatVectorOperations::addWithMultiply (bus < 0 ? mixL : buses[bus * 2], left, g, n);
+        juce::FloatVectorOperations::addWithMultiply (bus < 0 ? mixR : buses[bus * 2 + 1], right, g, n);
+    };
+
+    if (tp.audible)
+        for (const auto& s : tp.sends)
+            if (s.pre)
+                add (s.bus, s.gain * pan);
+
+    const auto fader = tp.audible ? tp.gain : 0.0f;
+    juce::FloatVectorOperations::multiply (left, fader, n);
+    juce::FloatVectorOperations::multiply (right, fader, n);
+
+    if (fader > 0.0f)
+    {
+        for (const auto& s : tp.sends)
+            if (! s.pre)
+                add (s.bus, s.gain * pan);
+
+        add (tp.out, pan);
     }
 }
 
@@ -299,6 +352,8 @@ private:
     std::array<AtomicPeak, 2> masterPeaks;
 
     juce::AudioBuffer<float> scratch; // see audioDeviceAboutToStart
+    juce::AudioBuffer<float> busScratch; // left and right for each bus
+    std::array<float*, Graph::maxBuses * 2> busPtrs {};
 
     // Click voice, audio thread only.
     double deviceRate = 48000.0, clickPhase = 0.0, clickPhaseInc = 0.0;

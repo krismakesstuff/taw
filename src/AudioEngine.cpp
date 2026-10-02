@@ -189,6 +189,11 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     const auto blockSize = juce::jmax (device->getCurrentBufferSizeSamples() * 2, 8192);
     scratch.setSize (5, blockSize); // [0] track L, [1] silence, [2] mix L, [3] mix R, [4] track R
     scratch.clear();
+    busScratch.setSize (Graph::maxBuses * 2, blockSize);
+
+    for (int ch = 0; ch < Graph::maxBuses * 2; ++ch)
+        busPtrs[(size_t) ch] = busScratch.getWritePointer (ch);
+
     deviceRate = device->getCurrentSampleRate();
     clickSamplesLeft = 0;
     numInputs.store (device->getActiveInputChannels().countNumberOfSetBits());
@@ -306,8 +311,8 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     transport.rolling = isRolling;
     transport.recording = isRolling && current->recording;
 
-    auto* busL = scratch.getWritePointer (0);
-    auto* busR = scratch.getWritePointer (4);
+    auto* trackL = scratch.getWritePointer (0);
+    auto* trackR = scratch.getWritePointer (4);
     auto* silence = scratch.getWritePointer (1);
     auto* mixL = scratch.getWritePointer (2);
     auto* mixR = scratch.getWritePointer (3);
@@ -315,15 +320,28 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     juce::FloatVectorOperations::clear (mixL, n);
     juce::FloatVectorOperations::clear (mixR, n);
 
-    for (size_t t = 0; t < current->tracks.size() && t < (size_t) maxTracks; ++t)
+    const auto numBuses = juce::jmin (current->numBuses, Graph::maxBuses);
+
+    for (int ch = 0; ch < numBuses * 2; ++ch)
+        juce::FloatVectorOperations::clear (busPtrs[(size_t) ch], n);
+
+    const auto numTracks = (int) juce::jmin (current->tracks.size(), (size_t) maxTracks);
+
+    for (int k = 0; k < numTracks; ++k)
     {
-        auto& tp = current->tracks[t];
+        // Every track runs before the buses it feeds; a graph without an order runs them as listed.
+        const auto t = current->order.size() == current->tracks.size() ? current->order[(size_t) k] : k;
+
+        if (t < 0 || t >= numTracks)
+            continue;
+
+        auto& tp = current->tracks[(size_t) t];
         const float* input = (tp.inputChannel >= 0 && tp.inputChannel < numIn && in[tp.inputChannel] != nullptr)
                                  ? in[tp.inputChannel]
                                  : nullptr;
 
-        juce::FloatVectorOperations::clear (busL, n);
-        juce::FloatVectorOperations::clear (busR, n);
+        juce::FloatVectorOperations::clear (trackL, n);
+        juce::FloatVectorOperations::clear (trackR, n);
 
         // A track either monitors its input or plays its lane, never both.
         const bool monitoring = tp.monitoringInput (isRolling);
@@ -332,42 +350,44 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         {
             if (input != nullptr)
             {
-                juce::FloatVectorOperations::copy (busL, input, n);
-                juce::FloatVectorOperations::copy (busR, input, n);
+                juce::FloatVectorOperations::copy (trackL, input, n);
+                juce::FloatVectorOperations::copy (trackR, input, n);
             }
         }
         else if (isRolling)
         {
-            renderClips (tp, pos, n, busL, busR);
-            renderHits (tp, pos, n, busL, busR);
+            renderClips (tp, pos, n, trackL, trackR);
+            renderHits (tp, pos, n, trackL, trackR);
         }
 
-        renderPads (tp, (int) t, busL, busR, n);
+        // A bus plays what was sent to it, stopped or rolling (an input monitored into it, a reverb tail).
+        if (tp.busIndex >= 0 && tp.busIndex < numBuses)
+        {
+            juce::FloatVectorOperations::copy (trackL, busPtrs[(size_t) tp.busIndex * 2], n);
+            juce::FloatVectorOperations::copy (trackR, busPtrs[(size_t) tp.busIndex * 2 + 1], n);
+        }
+
+        renderPads (tp, t, trackL, trackR, n);
 
         if (tp.plugin != nullptr)
-            tp.plugin->render (tp.sequence, transport, n, tp.midiLive ? liveMidi.data() : nullptr, numLive, busL, busR);
+            tp.plugin->render (tp.sequence, transport, n, tp.midiLive ? liveMidi.data() : nullptr, numLive, trackL, trackR);
 
-        const auto gain = tp.audible ? tp.gain : 0.0f;
-        juce::FloatVectorOperations::multiply (busL, gain, n);
-        juce::FloatVectorOperations::multiply (busR, gain, n);
+        const auto pan = (isStereo (tp) && ! monitoring) ? 1.0f : centrePan; // a mono input pans centre
+        routeTrack (tp, pan, trackL, trackR, n, busPtrs.data(), mixL, mixR);
 
         // The meter shows what you hear from the track: the input (pre-fader, for setting
         // levels) while monitoring, otherwise its playback.
         if (monitoring && input != nullptr)
         {
             const auto range = juce::FloatVectorOperations::findMinAndMax (input, n);
-            trackPeaks[t].push (juce::jmax (range.getEnd(), -range.getStart()));
+            trackPeaks[(size_t) t].push (juce::jmax (range.getEnd(), -range.getStart()));
         }
         else
         {
-            const auto l = juce::FloatVectorOperations::findMinAndMax (busL, n);
-            const auto r = juce::FloatVectorOperations::findMinAndMax (busR, n);
-            trackPeaks[t].push (juce::jmax (l.getEnd(), -l.getStart(), r.getEnd(), -r.getStart()));
+            const auto l = juce::FloatVectorOperations::findMinAndMax (trackL, n);
+            const auto r = juce::FloatVectorOperations::findMinAndMax (trackR, n);
+            trackPeaks[(size_t) t].push (juce::jmax (l.getEnd(), -l.getStart(), r.getEnd(), -r.getStart()));
         }
-
-        const auto toMix = (isStereo (tp) && ! monitoring) ? 1.0f : centrePan; // a mono input pans centre
-        juce::FloatVectorOperations::addWithMultiply (mixL, busL, toMix, n);
-        juce::FloatVectorOperations::addWithMultiply (mixR, busR, toMix, n);
 
         if (isRolling && tp.recorder != nullptr)
         {

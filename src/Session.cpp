@@ -253,6 +253,44 @@ int Session::numTracks() const
     return n;
 }
 
+int Session::findBus (int busId) const
+{
+    int n = 0;
+
+    for (const auto& c : state)
+        if (c.hasType (ids::TRACK))
+        {
+            if (busId > 0 && isBusTrack (c) && (int) c[ids::busId] == busId)
+                return n;
+
+            ++n;
+        }
+
+    return -1;
+}
+
+int Session::nextBusId() const
+{
+    int top = 0;
+
+    for (const auto& c : state)
+        if (c.hasType (ids::TRACK))
+            top = juce::jmax (top, (int) c[ids::busId]);
+
+    return top + 1;
+}
+
+juce::ValueTree Session::send (const juce::ValueTree& track, int slot)
+{
+    const auto name = slotName (slot).toLowerCase();
+
+    for (const auto& c : track)
+        if (c.hasType (ids::SEND) && c[ids::slot].toString().equalsIgnoreCase (name))
+            return c;
+
+    return {};
+}
+
 juce::ValueTree Session::track (int index) const
 {
     int n = 0;

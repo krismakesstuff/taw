@@ -93,6 +93,15 @@ each is sending. Plugin settings are saved next to the session in `plugins/`.
 Plugins run inside taw for now, so a plugin that crashes takes taw with it (the session is
 saved on the way down). Running them in their own process is planned.
 
+## Buses and sends
+
+`bus Verb` adds a bus track. `2 send verb` sends track 2 to it (sends A to E per track, post-fader
+at 0 dB; `2 send a -12 pre` sets one up), and `2 out drums` sends a whole track into a bus.
+Naming a bus that doesn't exist yet creates it. The routing column right of the timeline shows each
+track's output and sends. `o` steps into it: arrows pick a slot, enter picks a bus, `[ ]` set
+the send level, `del` removes it. Soloing a track keeps its reverb; soloing a bus plays just
+what's on it.
+
 ## Roadmap
 
 Next up, roughly in order:
@@ -100,8 +109,10 @@ Next up, roughly in order:
 - **Sample groups:** gather sample tracks into a kit you can program, mix and move as one,
   while each sound keeps its own track.
 - **Note editing:** change single notes in the piano roll (recording comes first; this follows).
-- **Plugins out of process, effects and CLAP:** each plugin in its own process, so a crashing
-  plugin is bypassed instead of taking the session down; insert effects; CLAP alongside VST3.
+- **Insert effects:** five plugin slots per track (after the instrument on instrument tracks),
+  added, reordered, bypassed and opened from the routing column.
+- **Plugins out of process and CLAP:** each plugin in its own process, so a crashing plugin is
+  bypassed instead of taking the session down; CLAP alongside VST3.
 - **Cross-platform:** macOS (in progress), then Linux.
 
 ## License

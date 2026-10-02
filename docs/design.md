@@ -318,6 +318,49 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
 - `taw --plugintest <file.vst3>` loads one plugin and plays it the way the engine does (a chord
   from the timeline, a stop, a controller key, a disarm), and checks its state round-trips.
 
+## Routing
+
+Bus tracks, and for every track an output and five sends (A to E), the way a console has
+them. Buses are where time-based effects (reverb, delay) will sit once insert slots exist,
+fed by sends. They're also how you submix a group.
+
+```
+TRACK { kind: "bus", busId, … }      # busId: what outputs and sends call it (stable across moves and renames)
+TRACK { …, out? }                    # the busId it plays into; absent = the mix
+  SEND { slot: "a"-"e", to, db, pre?, mute? }
+```
+
+| Command | Meaning |
+|---|---|
+| `bus Verb` / `add bus Verb` | new bus track (no input, no clips, nothing to arm) |
+| `2 send verb` | a send to Verb: the slot already going there, else the first free one; a name no bus has makes the bus |
+| `2 send b verb` / `2 send b 6` | slot B to Verb / to bus track 6 |
+| `2 send b -12` / `pre` / `post` / `off` / `on` / `x` | level (a sign or 0: `-12`, `+3`, `0`, `-inf`), before or after the fader, off, remove |
+| `2 send` | list track 2's output and sends |
+| `2 out drums` / `2 > drums` / `2 out mix` | where the track goes after its fader; `2 out` alone opens the picker |
+| `o` | into the routing column on the focused track (see below) |
+| `io` | show or hide the routing column (on by default; kept in `settings.json`) |
+
+- **The routing column** sits right of the timeline: the output, then sends A to E, each a
+  bus name, with the send's level under it (pre-fader sends in the accent colour). `o` steps
+  into it: ←→ pick the output or a send, ↑↓ change tracks, enter opens the bus picker (type
+  to filter; a name nothing matches makes that bus), del removes a send (or puts the output
+  back on the mix), `[ ]` ride a send's level, `M` turns a send off, `P` flips pre/post, esc or `o`
+  leaves.
+- **Signal flow.** Source (clips, hits, instrument, input) → pre-fader sends → fader →
+  post-fader sends → output. New sends are post-fader at 0 dB. Mute silences a track's sends too.
+  A mono track enters a bus at the pan law, as it does the mix.
+- **No loops.** A route that would feed back (a bus feeding itself, or a chain that comes
+  round) is refused, and the picker only lists buses that can take it. The graph runs every
+  track before the buses it feeds. A loop in a hand-edited session is broken: the routes that
+  close it are dropped.
+- **Solo follows the signal.** Buses a soloed track feeds stay audible (soloing a vocal keeps
+  its reverb). Tracks feeding a soloed bus keep feeding it but stay out of the mix (soloing the
+  reverb plays only the reverb; soloing a drum bus plays the drums).
+- A track whose output bus is gone (undo) plays to the mix; a send to it is shown as `?` and is silent.
+- Bounces route the same way: live playback and bounces share `routeTrack`.
+- Up to 32 buses. A bus plays even while stopped, so monitored inputs and tails reach it.
+
 ## Editing
 
 Select a range with Shift+arrows (time) and Shift+↑↓ (tracks); with no track selection the
@@ -347,7 +390,8 @@ tracks.
 prints each result and a summary, and saves (waiting for imports, bounces and plugin scans to
 finish). `TAW_CONFIG=<folder>` uses another config folder (templates, device, plugin list). It's
 the first way in for scripts and agents. Device-dependent commands (record, input checks)
-report what they can't do.
+report what they can't do. For testing the screen, `:key o` (or `:key right`, `:key enter`,
+`:key ]`, …) presses a key and `:screen` prints the screen as plain text (160×44).
 
 ## Importing
 
@@ -427,7 +471,7 @@ the templates to create a new one. The recent list lives in `%APPDATA%\taw\recen
  (blank)
  transport: ■ STOP · bars.beats · time · tempo/sig · click · loop   (centred)
  ruler
- tracks:    number · name · arm/mute/solo/mon · input │ timeline lane │ volume · meter · peak dB
+ tracks:    number · name · arm/mute/solo/mon · input │ timeline lane │ out · sends A-E │ volume · meter · peak dB
  mix
  message:   feedback from the last command
  command:   : 1-3 r

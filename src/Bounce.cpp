@@ -275,6 +275,10 @@ Bounce::Bounce (std::unique_ptr<Graph> g, juce::Range<juce::int64> r, double rat
     : juce::Thread ("taw bounce"), graph (std::move (g)), range (r), sampleRate (rate), format (f), target (std::move (file))
 {
     bus.setSize (2, blockSize);
+    buses.setSize (juce::jmax (1, juce::jmin (graph->numBuses, Graph::maxBuses) * 2), blockSize);
+
+    for (int ch = 0; ch < buses.getNumChannels(); ++ch)
+        busPtrs[(size_t) ch] = buses.getWritePointer (ch);
 }
 
 Bounce::~Bounce()
@@ -289,9 +293,18 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
     auto* r = out.getWritePointer (1);
     auto* bl = bus.getWritePointer (0);
     auto* br = bus.getWritePointer (1);
+    const auto numBuses = juce::jmin (graph->numBuses, Graph::maxBuses);
 
-    for (const auto& tp : graph->tracks)
+    for (int ch = 0; ch < numBuses * 2; ++ch)
+        juce::FloatVectorOperations::clear (busPtrs[(size_t) ch], n);
+
+    const auto numTracks = (int) graph->tracks.size();
+
+    for (int k = 0; k < numTracks; ++k)
     {
+        const auto t = graph->order.size() == graph->tracks.size() ? graph->order[(size_t) k] : k;
+        const auto& tp = graph->tracks[(size_t) t];
+
         if (! tp.audible)
             continue;
 
@@ -299,6 +312,12 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         juce::FloatVectorOperations::clear (br, n);
         renderClips (tp, pos, n, bl, br);
         renderHits (tp, pos, n, bl, br);
+
+        if (tp.busIndex >= 0 && tp.busIndex < numBuses)
+        {
+            juce::FloatVectorOperations::copy (bl, busPtrs[(size_t) tp.busIndex * 2], n);
+            juce::FloatVectorOperations::copy (br, busPtrs[(size_t) tp.busIndex * 2 + 1], n);
+        }
 
         // Instruments: the graph has its own plugin instances (copies of the live ones), so the
         // live ones keep playing while this renders.
@@ -314,9 +333,7 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
             tp.plugin->render (tp.sequence, t, n, nullptr, 0, bl, br);
         }
 
-        const auto g = tp.gain * (isStereo (tp) ? 1.0f : centrePan);
-        juce::FloatVectorOperations::addWithMultiply (l, bl, g, n);
-        juce::FloatVectorOperations::addWithMultiply (r, br, g, n);
+        routeTrack (tp, isStereo (tp) ? 1.0f : centrePan, bl, br, n, busPtrs.data(), l, r);
     }
 
     out.applyGain (0, n, graph->mixGain);

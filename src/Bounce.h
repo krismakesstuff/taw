@@ -1,11 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioEngine.h"
 
 namespace taw
 {
 // Offline render of the mix bus over a time range, on its own thread, faster than real time.
-// Prints what the mix bus plays (track volume, mute/solo, mix volume); never the click or
+// Prints what the mix bus plays (track volume, mute/solo, buses and sends, mix volume); never the click or
 // live inputs.
 class Bounce final : private juce::Thread
 {
@@ -42,6 +42,8 @@ private:
     juce::File target;
 
     juce::AudioBuffer<float> bus;
+    juce::AudioBuffer<float> buses; // left and right for each bus track
+    std::array<float*, Graph::maxBuses * 2> busPtrs {};
     std::atomic<float> progressValue { 0.0f };
     std::atomic<bool> done { false };
     juce::String error;

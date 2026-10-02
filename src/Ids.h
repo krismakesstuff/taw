@@ -16,6 +16,7 @@ TAW_ID (HIT) // sample tracks: one trigger of the track's sample
 TAW_ID (MARKER)
 TAW_ID (NOTE) // instrument tracks: one MIDI note
 TAW_ID (CC)   // instrument tracks: a controller, pitch bend or pressure change
+TAW_ID (SEND) // a track's send to a bus: one of five slots, a to e
 
 TAW_ID (version)
 TAW_ID (name)
@@ -37,7 +38,13 @@ TAW_ID (loopEnd)
 TAW_ID (bounceFormat) // "wav" | "mp3"
 TAW_ID (bounceFolder) // relative to the session folder, or absolute
 
-TAW_ID (kind)         // TRACK: "audio" (default) | "sample" | "instrument". Never "type": that key is the node type in JSON.
+TAW_ID (kind)         // TRACK: "audio" (default) | "sample" | "instrument" | "bus". Never "type": that key is the node type in JSON.
+TAW_ID (busId)        // bus track: what outputs and sends call it (stays put when tracks move or get renamed)
+TAW_ID (out)          // TRACK: the busId it plays into; absent or 0 = the mix
+TAW_ID (slot)         // SEND: "a" to "e"
+TAW_ID (to)           // SEND: the busId it feeds
+TAW_ID (db)           // SEND: level in dB
+TAW_ID (pre)          // SEND: before the track's fader (default after)
 TAW_ID (plugin)       // instrument track: the plugin's identifier (PluginDescription::createIdentifierString)
 TAW_ID (pluginName)   // ...and its name, to find it again if the identifier changes
 TAW_ID (pluginState)  // ...and the file its state is kept in, relative to the session folder

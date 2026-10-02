@@ -58,7 +58,8 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
-                              "inst", "ed", "scan", "midi", "fill" };
+                              "inst", "ed", "scan", "midi", "fill",
+                              "bus", "out", ">", "send", "io" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -77,7 +78,8 @@ void splitVerb (const juce::String& token, juce::String& verb, juce::String& glu
         {
             const auto next = token[candidate.length()];
             const bool takesWords = candidate == "n" || candidate == "name" || candidate == "click" || candidate == "b"
-                                    || candidate == "pat" || candidate == "inst";
+                                    || candidate == "pat" || candidate == "inst" || candidate == "bus" || candidate == "out"
+                                    || candidate == ">" || candidate == "send";
 
             if (takesWords || ! juce::CharacterFunctions::isLetter (next))
                 best = candidate.length();
@@ -360,6 +362,9 @@ Result App::convertTrack (int index, bool toSample)
 {
     auto track = session->track (index);
     const auto label = "track " + juce::String (index + 1);
+
+    if (Session::isBusTrack (track))
+        return Result::fail (label + " is a bus");
 
     if (Session::isInstrumentTrack (track))
         return Result::fail (label + L" is an instrument track \x2014 inst swaps its plugin");
@@ -653,6 +658,23 @@ Result App::execute (const juce::String& line)
     }
     if (v == "close")              return closeSession();
 
+    // Routing: bus <name> adds a bus track; io shows or hides the routing column (o steps into it).
+    if (v == "bus" || ((v == "add" || v == "new") && p.args[0].equalsIgnoreCase ("bus")))
+    {
+        if (p.hasSelector)
+            return Result::fail ("bus <name> adds a bus track; 2 out <bus> sends track 2 to it");
+
+        return addBus (v == "bus" ? p.rest : p.rest.fromFirstOccurrenceOf (" ", false, false));
+    }
+
+    if (v == "io")
+    {
+        ioVisible = ! ioVisible;
+        ioCell = ioVisible ? ioCell : -1;
+        saveSettings();
+        return Result::good (ioVisible ? juce::String (L"routing column on \x00b7 o steps into it") : juce::String ("routing column off"));
+    }
+
     // Not in the help: crashes on purpose, to check what a crash leaves behind.
     if (v == "crashtest")
     {
@@ -863,6 +885,10 @@ Result App::execute (const juce::String& line)
     // Armed audio tracks monitor their input; armed sample tracks listen to the pad key (.).
     if (v == "r" || v == "a" || v == "arm")
     {
+        for (auto t : targets)
+            if (Session::isBusTrack (session->track (t)))
+                return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 it plays what's sent to it, nothing to record");
+
         const auto r = toggle (ids::armed, "armed");
 
         if (! (bool) session->track (targets.front())[ids::armed])
@@ -888,6 +914,14 @@ Result App::execute (const juce::String& line)
         return Result::good (trackList (targets) + (on ? L": input during playback too (while armed) \x00b7 mon again for auto"
                                                       : L": auto input (input when stopped or recording, clips on playback)"));
     }
+
+    // 2 out verb / 2 > verb / 2 out mix: where the track goes after its fader. Alone: the picker.
+    if (v == "out" || v == ">")
+        return setOutput (targets, p.rest);
+
+    // 2 send verb / 2 send b -6 / 2 send b pre|post|off|on|x / 2 send (lists them)
+    if (v == "send")
+        return editSend (targets, p.args);
 
     if (v == "audio")
     {
@@ -936,6 +970,10 @@ Result App::execute (const juce::String& line)
             return Result::fail ("which input? e.g. 1 i 2 (0 = none)");
 
         const auto input = p.args[0].getIntValue();
+
+        for (auto t : targets)
+            if (Session::isBusTrack (session->track (t)))
+                return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 no input; 2 out " + juce::String (t + 1) + " feeds it");
 
         for (auto t : targets)
             session->track (t).setProperty (ids::input, input, um());

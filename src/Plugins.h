@@ -39,6 +39,7 @@ public:
     void showEditor (const juce::String& title);
     void closeEditor();
     bool editorWantsToClose() const; // its close button was pressed; the owner calls closeEditor
+    void* editorHandle() const;      // its native window (nullptr when closed)
 
     // audio thread (or a bounce thread) ---------------------------------------------
     // Plays [pos, pos + n) into left/right (added). Rolling: the sequence plays; any transport

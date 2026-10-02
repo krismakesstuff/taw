@@ -52,6 +52,11 @@ public:
     std::vector<Key> poll(); // non-blocking
     int width() const;
 
+    // Plugin windows (their native handles): when one of them has the keyboard and the mouse
+    // is done with it, the terminal gets the keyboard back, so keys keep reaching taw while you
+    // click and drag in a plugin. Windows only; elsewhere it does nothing. Call once a frame.
+    void reclaimKeyboard (const std::vector<void*>& pluginWindows);
+
     // Puts text on the system clipboard.
     static void setClipboardText (const char* text);
     int height() const;
@@ -64,6 +69,8 @@ private:
     void* out = nullptr;
     unsigned long oldInMode = 0, oldOutMode = 0;
     std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
+    void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
+    double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
 #else
     std::string pending; // bytes of a key sequence still arriving
     int pendingPolls = 0;

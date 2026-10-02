@@ -384,7 +384,10 @@ Stereo one. Typed names pick the same way.
   removes it. On a send, `|` picks its bus (a name nothing matches makes that bus), `[ ]`
   ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, `|`
   picks a bus and del puts it back on the mix. Esc or `\` leaves. `ed` there opens the insert.
-- **Plugin windows.** Loading an effect opens its window. One window at a time: opening
+- **Plugin windows.** They sit over the terminal but never keep the keyboard: click and drag
+  in one, and a moment after the mouse lets go the terminal has the keyboard again, so keys
+  keep reaching taw (not while a menu is open or a button is held; a plugin's own dialogs, like
+  naming a preset, keep it). Windows only. Loading an effect opens its window. One window at a time: opening
   another closes the first, and while one is open it follows you as you move between inserts.
 - **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →
   fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped

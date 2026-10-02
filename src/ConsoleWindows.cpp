@@ -72,6 +72,14 @@ bool Console::open()
     }
 
     opened = true;
+
+    // The window keys arrive through: conhost's own, or (Windows Terminal, whose console
+    // window is hidden) whatever's in front as taw starts, which is the terminal taw was run from.
+    terminal = GetConsoleWindow();
+
+    if (terminal == nullptr || ! IsWindowVisible ((HWND) terminal))
+        terminal = GetForegroundWindow();
+
     edgeGlyphs = useEdgeFont (out);
     write (L"\x1b[?1049h\x1b[?25l\x1b[2J");
     return true;
@@ -88,6 +96,44 @@ Console::~Console()
 
     if (fontChanged)
         SetCurrentConsoleFontEx (out, FALSE, &oldFont);
+}
+
+void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
+{
+    const auto front = GetForegroundWindow();
+
+    if (! opened || terminal == nullptr || front == nullptr || front == (HWND) terminal
+        || std::find (pluginWindows.begin(), pluginWindows.end(), (void*) front) == pluginWindows.end())
+    {
+        readySince = 0.0;
+        return; // not one of ours (a plugin's own dialog keeps the keyboard, so you can type a preset name)
+    }
+
+    // Not while the mouse is busy in it: a button held (dragging a knob), something captured,
+    // a menu open, the window being moved.
+    GUITHREADINFO gui {};
+    gui.cbSize = sizeof (gui);
+    const bool busy = (GetAsyncKeyState (VK_LBUTTON) & 0x8000) != 0 || (GetAsyncKeyState (VK_RBUTTON) & 0x8000) != 0
+                      || (GetAsyncKeyState (VK_MBUTTON) & 0x8000) != 0
+                      || (GetGUIThreadInfo (GetWindowThreadProcessId (front, nullptr), &gui)
+                          && (gui.hwndCapture != nullptr || gui.hwndMenuOwner != nullptr
+                              || (gui.flags & (GUI_INMENUMODE | GUI_POPUPMENUMODE | GUI_SYSTEMMENUMODE | GUI_INMOVESIZE)) != 0));
+    const auto now = (double) GetTickCount64();
+
+    if (busy)
+    {
+        readySince = 0.0;
+        return;
+    }
+
+    // A moment after the click, so a double-click or a menu that opens on release still works.
+    if (readySince == 0.0)
+        readySince = now;
+    else if (now - readySince > 250.0)
+    {
+        SetForegroundWindow ((HWND) terminal);
+        readySince = 0.0;
+    }
 }
 
 std::vector<Key> Console::poll()

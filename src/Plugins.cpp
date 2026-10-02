@@ -11,8 +11,10 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
         setUsingNativeTitleBar (true);
         setContentOwned (editor, true);
         setResizable (editor->isResizable(), false);
-        // Over the terminal, so it stays in view while you go back to typing.
+        // Over the terminal, so it stays in view while you go back to typing. It never wants
+        // the keyboard: that stays with taw (App hands it back if a click takes it).
         setAlwaysOnTop (true);
+        setWantsKeyboardFocus (false);
         centreWithSize (getWidth(), getHeight());
         setVisible (true);
     }
@@ -78,13 +80,14 @@ void PluginSlot::setState (const juce::MemoryBlock& state)
 bool PluginSlot::hasEditor() const { return plugin->hasEditor(); }
 bool PluginSlot::editorShowing() const { return window != nullptr && window->isVisible(); }
 bool PluginSlot::editorWantsToClose() const { return window != nullptr && window->closeRequested; }
+void* PluginSlot::editorHandle() const { return editorShowing() ? window->getWindowHandle() : nullptr; }
 
 void PluginSlot::showEditor (const juce::String& title)
 {
     if (window != nullptr)
     {
         window->setVisible (true);
-        window->toFront (true);
+        window->toFront (false); // in front, but the keyboard stays with taw
         return;
     }
 

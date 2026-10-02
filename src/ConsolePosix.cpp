@@ -1,4 +1,4 @@
-#include "Console.h"
+﻿#include "Console.h"
 #include "Safety.h"
 
 #include <juce_core/juce_core.h>
@@ -293,6 +293,8 @@ Console::~Console()
     writeAll (leave, std::strlen (leave));
     tcsetattr (STDIN_FILENO, TCSAFLUSH, &oldMode);
 }
+
+void Console::reclaimKeyboard (const std::vector<void*>&) {}
 
 std::vector<Key> Console::poll()
 {

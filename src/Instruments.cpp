@@ -217,12 +217,23 @@ void App::pollPlugins()
     if (session == nullptr)
         return;
 
+    std::vector<void*> windows;
+
     for (auto& in : hosted)
+    {
         if (in.slot != nullptr && in.slot->editorWantsToClose())
         {
             in.slot->closeEditor();
             writePluginState (in);
         }
+
+        if (in.slot != nullptr)
+            if (auto* w = in.slot->editorHandle())
+                windows.push_back (w);
+    }
+
+    // Clicking in a plugin's window takes the keyboard; it comes back to taw once the mouse is done.
+    console.reclaimKeyboard (windows);
 
     // A new device (or new settings): every plugin gets prepared for its rate and block size.
     if (engine.isDeviceRunning() && engine.deviceGeneration() != preparedGeneration)

@@ -247,12 +247,8 @@ void Ui::drawTitle (App& app)
 {
     int x = canvas.text (1, 0, "taw", colour::accent, -1, true);
 
-    // Before a session's open (the session list): which build, the version, the commit (+:
-    // changes on top of it) and when it was built.
     if (auto* s = app.session.get())
         canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);
-    else
-        canvas.text (x + 1, 0, juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime(), colour::faint);
 
     // MIDI inputs on the right, with a light that blinks as messages come in.
     if (app.midiInputs != nullptr)
@@ -1726,6 +1722,11 @@ void Ui::drawTemplatePicker (App& app)
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
     canvas.text (5, 0, L"\x25b8 sessions", colour::text, colour::headerBg);
+
+    // Which build, out of the way on the right: the version, the commit (+: changes on top of
+    // it) and when it was built.
+    const auto build = juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime();
+    canvas.text (std::max (16, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
 
     int y = 2;
 

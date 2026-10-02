@@ -181,6 +181,17 @@ void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
 
     const auto front = GetForegroundWindow();
 
+    // With the terminal in front, plugin windows stay over it. JUCE drops a window's
+    // always-on-top when its app goes to the background, which is what handing the keyboard
+    // back looks like; put it back, without taking the keyboard. (In another app they're let go.)
+    if (front != nullptr && front == (HWND) terminal)
+        for (auto* w : pluginWindows)
+            if ((GetWindowLongPtrW ((HWND) w, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0)
+            {
+                SetWindowPos ((HWND) w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+                logFocus ("put " + describeWindow ((HWND) w) + " back on top");
+            }
+
     // Held by a plugin until its window closes or the terminal is clicked.
     if (held_by != nullptr)
     {

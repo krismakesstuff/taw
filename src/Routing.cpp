@@ -437,7 +437,7 @@ Result App::addBus (const juce::String& name)
     const auto lower = session->track (session->findBus (id))[ids::name].toString().toLowerCase();
     focusTrack (session->findBus (id));
     return Result::good ("added bus " + busName (id) + L" \x00b7 feed it: 1 send " + lower + " (a send) or 1 out " + lower
-                         + L" (all of track 1) \x00b7 o on a track routes it");
+                         + L" (all of track 1) \x00b7 \\ on a track routes it");
 }
 
 juce::String App::busName (int busId) const

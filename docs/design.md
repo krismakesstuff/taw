@@ -123,6 +123,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `q` / `w` (empty command line) | cursor to the selection's start / end, centred in the view; the selection stays (select, `snap`, `q`, play) | same |
 | `Tab` / `Shift+Tab` | cursor to the next clip start or end, or the next hit on sample tracks, on the selected or focused tracks / extend the selection to it | same |
 | `Shift+R` `S` `M` `I` (empty command line) | arm / solo / mute / input-monitor the selected or focused tracks | same |
+| `Shift+T` (empty command line) | the track menu for the selected or focused tracks: rename, input, output, add an effect, plugin window, mono/stereo, convert, delete. Each item has a letter and shows the command it stands for | same |
 | `.` / `>` (empty command line, a sample track armed) | the pad key: plays every armed sample track now (`>` = accent); while recording, writes a hit on each where you heard it (output latency taken off). Recording-first: patterns are played in; `snap` / `snap 50` quantize afterwards, `snap input` snaps while recording (off by default) | same |
 | `Space` (empty command line) | play / stop | same |
 
@@ -167,6 +168,7 @@ records the selected tracks, else whatever is armed.
 | `3 i 4` | track 3 takes hardware input 4 |
 | `2 v -6` | set volume to −6 dB |
 | `2 n Vox` | rename |
+| `2 remove` / `2-4 remove` | delete tracks (`rm` too); a bus's feeds go back to the mix and sends to it go; ctrl+z brings it all back |
 | `@17` / `@17.3` / `@1:30` | move cursor to bar 17 / bar 17 beat 3 / 1 min 30 s |
 | `mix v -3` | set the mix volume |
 | `add` / `add 3` / `add Vox` / `add 2 Gtr` | new tracks; each takes the lowest unused input |

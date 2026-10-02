@@ -8,6 +8,7 @@
 #include "Session.h"
 #include "Ui.h"
 
+#include <functional>
 #include <map>
 
 namespace taw
@@ -240,6 +241,22 @@ public:
     int busPickIndex = 0, busPickTrack = -1, busPickCell = 0;
     std::vector<BusChoice> busChoices() const;
     void openBusPicker (int track, int cell);
+
+    // The track menu (shift+T): what can be done to the focused or selected tracks.
+    struct TrackMenuItem
+    {
+        juce::juce_wchar key;
+        juce::String label, typed; // typed: the command it stands for
+        std::function<Result()> run;
+        bool danger = false;
+    };
+    bool trackMenuVisible = false;
+    int trackMenuIndex = 0;
+    std::vector<int> trackMenuTracks;
+    std::vector<TrackMenuItem> trackMenuItems();
+    Result openTrackMenu();
+    bool handleTrackMenuKey (const Key&);
+    Result removeTracks (std::vector<int> tracks); // "2 remove"
 
     PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr
     juce::String instrumentProblem (int track) const; // why it isn't loaded

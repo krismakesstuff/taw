@@ -133,7 +133,7 @@ void App::startClosing (bool thenQuit)
     closing = std::make_unique<Closing>();
     closing->thenQuit = thenQuit;
     closing->total = hosted.size() + 1; // and the session file
-    helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = false;
+    helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = trackMenuVisible = false;
     ioCell = -1;
 }
 
@@ -2217,7 +2217,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handlePluginPickerKey (k) || handleBusPickerKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
+    if (handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
@@ -2487,6 +2487,9 @@ void App::handleMainKey (const Key& k)
             // f: the focused track fills the track area (a piano roll on instrument tracks).
             else if (lineEmpty && k.ch == 'f' && session != nullptr)
                 say (execute ("fill"));
+            // shift+T: the track menu (rename, input, output, effects, width, delete...).
+            else if (lineEmpty && k.ch == 'T' && session != nullptr)
+                say (openTrackMenu());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

@@ -84,6 +84,7 @@ private:
     void drawSettings (App&);
     void drawPluginPicker (App&);
     void drawBusPicker (App&);
+    void drawTrackMenu (App&);
     void drawMidiPanel (App&);
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);

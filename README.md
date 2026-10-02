@@ -78,6 +78,7 @@ ctrl+space    record the armed tracks   ← →         move a bar (ctrl: 4, alt
 2i3           track 2 <- input 3        shift ← →   select a range
 2v-6          track 2 at -6 dB          ctrl c / v  copy / paste the range
 add Vox       new track                 ?           all commands
+shift+T       track menu (rename, delete...)
 ```
 
 ## Instruments

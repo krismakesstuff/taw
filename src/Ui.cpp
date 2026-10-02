@@ -235,6 +235,8 @@ void Ui::drawMain (App& app)
         drawPluginPicker (app);
     else if (app.busPickerVisible && app.session != nullptr)
         drawBusPicker (app);
+    else if (app.trackMenuVisible && app.session != nullptr)
+        drawTrackMenu (app);
     else if (app.midiPanelVisible && app.midiInputs != nullptr)
         drawMidiPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
@@ -245,11 +247,12 @@ void Ui::drawTitle (App& app)
 {
     int x = canvas.text (1, 0, "taw", colour::accent, -1, true);
 
-    // Which build: the version, the commit (+: changes on top of it) and when it was built.
-    x = canvas.text (x + 1, 0, juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime(), colour::faint);
-
+    // Before a session's open (the session list): which build, the version, the commit (+:
+    // changes on top of it) and when it was built.
     if (auto* s = app.session.get())
         canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);
+    else
+        canvas.text (x + 1, 0, juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime(), colour::faint);
 
     // MIDI inputs on the right, with a light that blinks as messages come in.
     if (app.midiInputs != nullptr)
@@ -1329,6 +1332,7 @@ void Ui::drawHelp (App&)
         { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
         { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
         { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
+        { Pair, L"shift+T", L"track menu", L"2 remove", L"delete track 2 (ctrl+z back)" },
         { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"2 stereo", L"stereo: inputs 3-4 (2 i 3-4)" },
         { Heading, L"SAMPLES", nullptr, L"EDIT", nullptr },
         { Pair, L"sample f", L"new sample track", L"ctrl c x v", L"copy / cut / paste" },
@@ -1530,6 +1534,43 @@ void Ui::drawBusPicker (App& app)
     }
 
     canvas.text (x0 + 2, y0 + boxH - 2, L"type to filter or name a new bus \x00b7 \x2191\x2193 \x00b7 enter \x00b7 esc", colour::dim, bg, false, boxW - 4);
+}
+
+// The track menu: a letter, what it does, and the command it stands for.
+void Ui::drawTrackMenu (App& app)
+{
+    const auto items = app.trackMenuItems();
+    const int w = canvas.width(), h = canvas.height();
+    const int boxW = std::min (w - 4, 56), boxH = std::min (h - 2, (int) items.size() + 6);
+    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const auto& tracks = app.trackMenuTracks;
+    const auto title = tracks.size() == 1 ? juce::String ("TRACK ") + juce::String (tracks.front() + 1) : juce::String ("TRACKS");
+    const auto what = tracks.size() == 1 ? app.session->track (tracks.front())[ids::name].toString() : trackList (tracks).fromFirstOccurrenceOf (" ", false, false);
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1, what, colour::dim, bg, false, boxW - title.length() - 5);
+
+    for (int i = 0; i < (int) items.size() && i < boxH - 5; ++i)
+    {
+        const auto& item = items[(size_t) i];
+        const int y = y0 + 3 + i;
+        const bool chosen = i == app.trackMenuIndex;
+        const int rowBg = chosen ? colour::selBg : bg;
+
+        canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+
+        if (chosen)
+            canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+
+        canvas.put (x0 + 3, y, item.key, colour::accent, rowBg, true);
+        canvas.text (x0 + 5, y, item.label, item.danger ? colour::error : colour::text, rowBg, chosen, 22);
+        canvas.text (x0 + 28, y, item.typed, colour::dim, rowBg, false, boxW - 30);
+    }
+
+    canvas.text (x0 + 2, y0 + boxH - 2, L"a letter, or \x2191\x2193 enter \x00b7 esc", colour::dim, bg, false, boxW - 4);
 }
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).

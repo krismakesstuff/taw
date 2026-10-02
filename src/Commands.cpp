@@ -57,7 +57,7 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "import", "imp", "undo", "redo", "dev", "panel",
                               "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
-                              "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
+                              "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
                               "pan", "mono", "stereo", "lowlat" };
@@ -1103,6 +1103,10 @@ Result App::execute (const juce::String& line)
 
         return Result::good (trackList (targets) + L" \x00b7 " + formatDb (db) + " dB");
     }
+
+    // 2 remove, 2-4 remove: the tracks go (ctrl+z brings them back).
+    if (v == "remove" || v == "rm")
+        return removeTracks (targets);
 
     if (v == "n" || v == "name")
     {

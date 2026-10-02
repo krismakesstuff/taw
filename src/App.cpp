@@ -479,8 +479,34 @@ Result App::play()
     // With the loop on, play always starts at the loop; the cursor stays where you left it.
     playStart = cursor;
     cursorMovedWhileRolling = false;
-    engine.play (loopActive() ? (juce::int64) session->tree()[ids::loopStart] : cursor);
+    const auto from = loopActive() ? (juce::int64) session->tree()[ids::loopStart] : cursor;
+    engine.play (from, countInSamples (from, false));
     return Result::good();
+}
+
+// The count-in before the transport moves: the session's clicks on the beats just before
+// from, so they lead in on the grid even from mid-beat. Recording counts in unless it's off;
+// plain playback only with "count always".
+juce::int64 App::countInSamples (juce::int64 from, bool forRecording) const
+{
+    const auto& s = session->tree();
+    const int clicks = juce::jlimit (0, 16, (int) s[ids::countIn]);
+
+    if (clicks == 0 || (! forRecording && s[ids::countInWhen].toString() != "always"))
+        return 0;
+
+    const auto spb = session->samplesPerBeat();
+    const auto firstBeat = std::ceil ((double) from / spb - 1e-9) - clicks;
+    return from - (juce::int64) std::llround (firstBeat * spb);
+}
+
+juce::String App::countInStatus() const
+{
+    const auto& s = session->tree();
+    const int clicks = s[ids::countIn];
+    return clicks <= 0 ? juce::String ("count-in off")
+                       : "count-in " + juce::String (clicks) + (clicks == 1 ? " click" : " clicks")
+                             + (s[ids::countInWhen].toString() == "always" ? " (recording and playback)" : " (recording)");
 }
 
 bool App::loopActive() const
@@ -532,8 +558,9 @@ Result App::record (const std::vector<int>& tracks)
     if (session == nullptr)
         return Result::fail ("no session");
 
+    // Ctrl+space again while recording punches out (and keeps playing).
     if (recording)
-        return Result::fail ("already recording");
+        return engine.isRolling() ? punch() : Result::fail ("already recording");
 
     if (engine.devices().getCurrentAudioDevice() == nullptr)
         return Result::fail (L"no audio device \x2014 type dev");
@@ -557,10 +584,12 @@ Result App::record (const std::vector<int>& tracks)
     if (auto r = startRecorders (armed); ! r.ok)
         return r;
 
+    const auto countIn = countInSamples (cursor, true);
+
     if (! engine.isRolling())
     {
         playStart = cursor;
-        engine.play (cursor);
+        engine.play (cursor, countIn);
     }
 
     juce::StringArray names;
@@ -568,7 +597,7 @@ Result App::record (const std::vector<int>& tracks)
     for (auto i : armed)
         names.add (juce::String (i + 1));
 
-    return Result::good ("recording " + names.joinIntoString (","));
+    return Result::good ((countIn > 0 ? "counting in, then recording " : "recording ") + names.joinIntoString (","));
 }
 
 Result App::punch()
@@ -576,7 +605,7 @@ Result App::punch()
     if (recording)
     {
         stopRecorders();
-        return Result::good ("punched out");
+        return Result::good (L"punched out \x00b7 still playing \x00b7 ctrl+space punches in again");
     }
 
     std::vector<int> armed;
@@ -1634,7 +1663,7 @@ bool App::playPads (float velocity)
 
     // While recording, the hit goes where you heard the music when you pressed: the playhead
     // is what's being sent out now, which reaches your ears an output latency later.
-    const bool rec = recording && engine.isRolling();
+    const bool rec = recording && engine.isRolling() && engine.countInRemaining() == 0; // not while counting in
     double beat = 0.0;
     bool landsAhead = false;
 

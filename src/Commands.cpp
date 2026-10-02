@@ -59,7 +59,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "scan", "midi", "fill",
-                              "bus", "out", ">", "send", "io" };
+                              "bus", "out", ">", "send", "io", "count" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -255,6 +255,29 @@ Result App::setClick (const juce::String& argIn)
     return Result::good (clickStatus());
 }
 
+// count 4 | count off (or 0) | count rec (only when recording starts) | count always (play too)
+Result App::setCountIn (const juce::String& argIn)
+{
+    auto s = session->tree();
+    const auto arg = argIn.trim().toLowerCase();
+
+    if (arg.isEmpty())
+        return Result::good (countInStatus() + L" \x00b7 count 2, count off, count always");
+
+    if (arg == "off")
+        s.setProperty (ids::countIn, 0, um());
+    else if (arg == "on")
+        s.setProperty (ids::countIn, (int) s[ids::countIn] > 0 ? (int) s[ids::countIn] : 4, um());
+    else if (arg == "rec" || arg == "always")
+        s.setProperty (ids::countInWhen, arg, um());
+    else if (arg.containsOnly ("0123456789"))
+        s.setProperty (ids::countIn, juce::jlimit (0, 16, arg.getIntValue()), um());
+    else
+        return Result::fail ("count [4|off|rec|always]");
+
+    return Result::good (countInStatus());
+}
+
 //==============================================================================
 // Project settings panel ("project")
 
@@ -275,6 +298,8 @@ std::vector<App::Setting> App::projectSettings() const
         { "Input quantize (pads)", onOff (s[ids::inputQuantize]), {} },
         { "Click", ! (bool) s[ids::click] ? juce::String ("off") : s[ids::clickWhen].toString() == "rec" ? juce::String ("recording only") : juce::String ("always"), {} },
         { "Click level", juce::String ((double) s[ids::clickDb], 1) + " dB", "click " },
+        { "Count-in", (int) s[ids::countIn] <= 0 ? juce::String ("off") : s[ids::countIn].toString() + ((int) s[ids::countIn] == 1 ? " click" : " clicks"), "count " },
+        { "Count-in when", s[ids::countInWhen].toString() == "always" ? juce::String ("recording and playback") : juce::String ("recording"), {} },
         { "Latency compensation", onOff (s[ids::latencyComp]), {} },
         { "Track height", juce::String (height) + (height == 1 ? " row" : " rows"), "height " },
         { "Bounce format", s[ids::bounceFormat].toString(), {} },
@@ -309,6 +334,8 @@ Result App::stepSetting (int index, int direction)
     if (name.startsWith ("Input quantize")) return execute ("snap input");
     if (name == "Click")          return execute ("click " + cycle ({ "off", "always", "rec" }, ! (bool) s[ids::click] ? juce::String ("off") : s[ids::clickWhen].toString()));
     if (name == "Click level")    return execute ("click " + juce::String (juce::jlimit (-60.0, 6.0, std::round ((double) s[ids::clickDb]) + direction), 1));
+    if (name == "Count-in")       return execute ("count " + juce::String (juce::jlimit (0, 16, (int) s[ids::countIn] + direction)));
+    if (name == "Count-in when")  return execute (juce::String ("count ") + (s[ids::countInWhen].toString() == "always" ? "rec" : "always"));
     if (name == "Latency compensation") return execute ("lat");
     if (name == "Track height")   return execute ("height " + juce::String (juce::jlimit (1, 4, session->trackHeight() + direction)));
     if (name.startsWith ("Theme")) return execute (cycle ({ "dark", "light", "grey" }, theme));
@@ -619,6 +646,7 @@ Result App::execute (const juce::String& line)
     if (v == "stop")               return stop();
     if (v == "mark")               return addMarker (engine.isRolling() ? engine.playhead() : cursor, p.rest.trim());
     if (v == "click" || v == "c")  return setClick (p.args[0]);
+    if (v == "count")              return setCountIn (p.args[0]);
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
     if (v == "import" || v == "imp")

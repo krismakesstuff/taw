@@ -180,6 +180,8 @@ records the selected tracks, else whatever is armed.
 | `click` | toggle the click (metronome) |
 | `click rec` / `click always` | click only while recording / during playback too |
 | `click -12` | click level in dB |
+| `count 4` / `count off` | count-in: clicks before recording starts (default 4; also in `project`) |
+| `count always` / `count rec` | count in on plain playback too / only when recording starts (default) |
 | `height 3` | rows per track, 1-4 (default 2); saved with the session |
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device |
@@ -193,7 +195,7 @@ records the selected tracks, else whatever is armed.
 |---|---|
 | `Space` / `Esc` (empty command line) | stop (cursor returns to where play started) |
 | `Enter` (empty command line) | back to where play started, still playing |
-| `Ctrl+Space` | punch: toggle recording on armed tracks without stopping |
+| `Ctrl+Space` | punch: toggle recording on armed tracks without stopping (in, out, in again…) |
 | `Ctrl+K` (or `Ctrl+M`) | drop a marker at the playhead (stopped: at the cursor); `Ctrl+K` because macOS Terminal sends `Ctrl+M` as Enter |
 | `Ctrl+C` / `X` / `D`, `Delete` | edit the selection, as when stopped |
 | `←` `→` (any modifier) | move the cursor / selection, not the playhead |
@@ -204,7 +206,7 @@ records the selected tracks, else whatever is armed.
 ### Planned (not in the POC)
 
 - Ranges: `@17-25 L` (loop), `2 @17-21 r` (auto-punch with pre-roll), `1-3 @9-13 x` (clear).
-- Pre-roll / count-in / metronome as session defaults.
+- Pre-roll (count-in is done: the transport holds while the click counts, then rolls).
 - Takes: keep/discard, take stack, comping.
 - Retroactive capture (`R`: keep what was just played while not recording).
 - Queries: `1 ?`, `? inputs`.
@@ -221,6 +223,17 @@ tracks from the cursor; while playing it punches in and out. `2 mon` keeps an ar
 input in your ears during playback too, to audition a part against the mix (its clips are
 silent meanwhile). A track monitors its input or plays its lane, never both. Sample tracks
 can't be armed.
+
+**Count-in.** Recording from a stop counts in first: 4 clicks by default (`count`, or the
+project panel). The transport holds at the cursor while the click counts, then rolls and
+records from exactly there. Armed tracks monitor their input meanwhile, and the transport bar
+shows `COUNT 3`. The clicks fall on the grid beats just before the cursor, so from mid-beat
+they still lead in on time. The count-in clicks even with the click off, at the click level.
+Punching in while playing never counts in. `count always` counts in on plain playback too.
+
+**Punching.** While playing, `Ctrl+Space` punches in. Pressed again, it punches out:
+recording stops and the take is saved, but playback carries on and the armed tracks go back
+to playing their clips. Press it again to punch in again; each pass is its own take.
 
 ## Undo
 

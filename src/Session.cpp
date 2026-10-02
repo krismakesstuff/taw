@@ -110,6 +110,8 @@ static void applyDefaults (juce::ValueTree& s)
     def (ids::click, false);
     def (ids::clickWhen, "rec");
     def (ids::clickDb, -6.0);
+    def (ids::countIn, 4);
+    def (ids::countInWhen, "rec");
     def (ids::mixDb, 0.0);
     def (ids::loop, false);
     def (ids::loopStart, (juce::int64) 0);

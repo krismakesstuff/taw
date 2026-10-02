@@ -381,6 +381,90 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --counttest   count-in without a device: the clicks land on the beats before the start,
+    // the playhead holds until they're done, and a recording starts exactly at the start.
+    if (args[0] == "--counttest")
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 256;
+        int failures = 0;
+
+        // From a bar line, and from mid-beat: 4 clicks either way.
+        for (const juce::int64 from : { (juce::int64) 96000, (juce::int64) 100000 })
+        {
+            taw::AudioEngine engine;
+            engine.runWithoutDevice (rate, block);
+
+            const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-counttest.wav");
+            juce::String err;
+            auto rec = engine.createRecorder (0, 0, file, rate, err);
+
+            auto g = std::make_unique<taw::Graph>();
+            g->click.samplesPerBeat = rate / 2.0; // 120 bpm
+            g->click.beatsPerBar = 4;
+            g->click.enabled = false; // the count-in clicks anyway
+            g->recording = true;
+            g->tracks.push_back ({});
+            g->tracks[0].inputChannel = 0;
+            g->tracks[0].recorder = rec;
+            engine.setGraph (std::move (g));
+
+            const auto spb = rate / 2.0;
+            const auto firstBeat = std::ceil ((double) from / spb - 1e-9) - 4;
+            const auto countIn = from - (juce::int64) std::llround (firstBeat * spb);
+            engine.play (from, countIn);
+
+            std::vector<float> l (block), r (block);
+            float* outs[] = { l.data(), r.data() };
+            std::vector<juce::int64> onsets;
+            juce::int64 heldUntil = -1;
+            juce::int64 lastSound = -100000;
+
+            for (juce::int64 at = 0; at < countIn + (juce::int64) rate; at += block)
+            {
+                engine.renderWithoutDevice (outs, 2, block);
+
+                // A click starts after silence (its sine crosses zero all the time inside).
+                for (int i = 0; i < block; ++i)
+                    if (std::abs (l[(size_t) i]) > 1.0e-4f)
+                    {
+                        if (at + i - lastSound > 1000)
+                            onsets.push_back (at + i);
+
+                        lastSound = at + i;
+                    }
+
+                if (heldUntil < 0 && engine.playhead() != from)
+                    heldUntil = at;
+            }
+
+            engine.stop();
+            const auto started = rec->startSample.load();
+
+            juce::StringArray clicks;
+            for (auto o : onsets)
+                clicks.add (juce::String (o));
+
+            // Clicks every beat from the start of the count-in on the grid; the playhead moves in the
+            // block holding countIn; the recording starts at from.
+            bool ok = onsets.size() == 4 && started == from && heldUntil >= 0 && heldUntil <= countIn && heldUntil + block > countIn;
+
+            for (size_t k = 0; ok && k < onsets.size(); ++k)
+                ok = std::abs (onsets[k] - ((juce::int64) std::llround ((firstBeat + (double) k) * spb) - (from - countIn))) <= 1; // sin (0) is silent
+
+            std::printf ("%s from %lld: count-in %lld samples, clicks at %s, playhead moves at block %lld, take starts at %lld\n",
+                         ok ? "ok  " : "FAIL", (long long) from, (long long) countIn, clicks.joinIntoString (" ").toRawUTF8(), (long long) heldUntil,
+                         (long long) started);
+            failures += ok ? 0 : 1;
+            engine.setGraph (std::make_unique<taw::Graph>());
+            engine.finishRecorders ({ rec });
+            engine.poll();
+            file.deleteFile();
+        }
+
+        return failures;
+    }
+
     // taw --cliptest [session-dir]   check clip rendering rules; optionally load (and migrate) a
     //                                session and list its clips. Never saves.
     if (args[0] == "--cliptest")

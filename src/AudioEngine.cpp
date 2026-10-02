@@ -81,16 +81,18 @@ void AudioEngine::renderPads (const TrackPlay& tp, int trackIndex, float* left, 
     }
 }
 
-void AudioEngine::play (juce::int64 from)
+void AudioEngine::play (juce::int64 from, juce::int64 countIn)
 {
     playPos.store (juce::jmax<juce::int64> (0, from));
     seekTo.store (-1);
+    countInLeft.store (juce::jmax<juce::int64> (0, countIn));
     rolling.store (true);
 }
 
 void AudioEngine::stop()
 {
     rolling.store (false);
+    countInLeft.store (0);
 }
 
 void AudioEngine::seek (juce::int64 position)
@@ -186,7 +188,22 @@ std::vector<FinishedTake> AudioEngine::poll()
 //==============================================================================
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    const auto blockSize = juce::jmax (device->getCurrentBufferSizeSamples() * 2, 8192);
+    startRunning (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(), device->getActiveInputChannels().countNumberOfSetBits());
+}
+
+void AudioEngine::runWithoutDevice (double rate, int bufferSize)
+{
+    startRunning (rate, bufferSize, 0);
+}
+
+void AudioEngine::renderWithoutDevice (float* const* out, int numOut, int numSamples)
+{
+    audioDeviceIOCallbackWithContext (nullptr, 0, out, numOut, numSamples, {});
+}
+
+void AudioEngine::startRunning (double rate, int bufferSize, int inputs)
+{
+    const auto blockSize = juce::jmax (bufferSize * 2, 8192);
     scratch.setSize (5, blockSize); // [0] track L, [1] silence, [2] mix L, [3] mix R, [4] track R
     scratch.clear();
     busScratch.setSize (Graph::maxBuses * 2, blockSize);
@@ -194,9 +211,9 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     for (int ch = 0; ch < Graph::maxBuses * 2; ++ch)
         busPtrs[(size_t) ch] = busScratch.getWritePointer (ch);
 
-    deviceRate = device->getCurrentSampleRate();
+    deviceRate = rate;
     clickSamplesLeft = 0;
-    numInputs.store (device->getActiveInputChannels().countNumberOfSetBits());
+    numInputs.store (inputs);
     maxBlock.store (blockSize);
     liveRate.store (deviceRate);
     generation.fetch_add (1);
@@ -236,6 +253,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
     {
         auto n = juce::jmin (numSamples - offset, scratch.getNumSamples());
 
+        // A count-in ends at an exact sample: the rest of the block rolls.
+        if (const auto counting = countInLeft.load(); counting > 0 && rolling.load())
+            n = (int) juce::jmin<juce::int64> (n, counting);
+
         const auto pos = playPos.load();
         const bool looping = current != nullptr && current->loop && ! current->recording && rolling.load()
                              && current->loopEnd > current->loopStart && pos < current->loopEnd;
@@ -272,7 +293,10 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     if (current == nullptr)
         return;
 
-    const bool isRolling = rolling.load();
+    // Counting in: the transport is started but holds still, so tracks behave as stopped (armed
+    // ones monitor their input) and only the count-in clicks play.
+    const auto counting = rolling.load() ? countInLeft.load() : (juce::int64) 0;
+    const bool isRolling = rolling.load() && counting <= 0;
     const auto pos = playPos.load();
 
     // New pad presses take a free voice (or the oldest-started one when all 32 are ringing).
@@ -433,7 +457,11 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
 
     const auto& click = current->click;
 
-    if (isRolling && click.enabled && (anyRecording || ! click.recordOnly))
+    // The count-in clicks on the beats before the start position (it may be negative), so they
+    // lead into the music in time even from mid-beat. It clicks whether the click is on or not.
+    if (counting > 0)
+        renderClick (click, pos - counting, mixL, mixR, n);
+    else if (isRolling && click.enabled && (anyRecording || ! click.recordOnly))
         renderClick (click, pos, mixL, mixR, n);
     else
         clickSamplesLeft = 0;
@@ -448,7 +476,9 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         juce::FloatVectorOperations::copy (out[0], mixL, n);
     }
 
-    if (isRolling)
+    if (counting > 0)
+        countInLeft.store (juce::jmax<juce::int64> (0, counting - n));
+    else if (isRolling)
         playPos.store (pos + n);
 }
 

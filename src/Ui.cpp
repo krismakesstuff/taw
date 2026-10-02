@@ -335,7 +335,13 @@ void Ui::drawTransport (App& app)
     auto add = [&] (juce::String t, int fg, int pieceBg = colour::headerBg, bool bold = false) { pieces.push_back ({ std::move (t), fg, pieceBg, bold }); };
     auto gap = [&] { add ("   ", -1); };
 
-    if (app.recording)
+    // Counting in: the clicks still to come, then it rolls.
+    const auto countIn = app.engine.countInRemaining();
+    const auto clicksLeft = countIn > 0 ? (int) std::ceil ((double) countIn / s->samplesPerBeat() - 1e-6) : 0;
+
+    if (clicksLeft > 0)
+        add (L" \x25cf COUNT " + juce::String (clicksLeft) + " ", 231, app.recording ? colour::rec : colour::playBg, true);
+    else if (app.recording)
         add (L" \x25cf REC ", 231, colour::rec, true);
     else if (rolling)
         add (L" \x25ba PLAY ", 231, colour::playBg, true);
@@ -354,6 +360,12 @@ void Ui::drawTransport (App& app)
         add (s->tree()[ids::clickWhen].toString() == "rec" ? "click rec" : "click", colour::accent, bg, true);
     else
         add ("no click", colour::faint);
+
+    if ((int) s->tree()[ids::countIn] > 0)
+    {
+        gap();
+        add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
+    }
 
     if ((bool) s->tree()[ids::loop])
     {
@@ -1228,7 +1240,7 @@ void Ui::drawHelp (App&)
         { Pair, L"\x2190 \x2192", L"next grid line (zoom)", L"space", L"play / stop" },
         { Pair, L"ctrl \x2190 \x2192", L"4 bars", L"shift+R  1r", L"arm (+ hear input)" },
         { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
-        { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch" },
+        { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch in/out" },
         { Pair, L"home / end", L"start / end", L"shift+I 2mon", L"hear input on playback too" },
         { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"ctrl k  k", L"add marker / markers row" },
         { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
@@ -1256,6 +1268,7 @@ void Ui::drawHelp (App&)
         { Pair, nullptr, nullptr, L"o   io", L"routing column / show, hide" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
+        { Pair, L"count 4", L"count-in clicks (off)", L"count always", L"...on play too (rec: not)" },
         { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
         { Pair, L"height 3", L"rows per track (1-4)", L"dark  light", L"themes (also: grey)" },
 #if JUCE_WINDOWS

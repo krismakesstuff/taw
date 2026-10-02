@@ -31,6 +31,8 @@ TAW_ID (inputQuantize) // bool: pad hits snap to the grid step as they're record
 TAW_ID (click)     // bool
 TAW_ID (clickWhen) // "always" | "rec"
 TAW_ID (clickDb)
+TAW_ID (countIn)     // clicks before recording starts (0 = none)
+TAW_ID (countInWhen) // "rec" (starting a recording) | "always" (plain playback too)
 TAW_ID (mixDb)
 TAW_ID (loop) // bool
 TAW_ID (loopStart)

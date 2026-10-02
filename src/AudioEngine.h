@@ -248,7 +248,8 @@ public:
 
     // message thread ------------------------------------------------------------
     void setGraph (std::unique_ptr<Graph>);
-    void play (juce::int64 from);
+    // countIn: samples of clicks before the playhead moves (the transport counts as rolling).
+    void play (juce::int64 from, juce::int64 countIn = 0);
     void stop();
     void seek (juce::int64 position);
 
@@ -266,6 +267,7 @@ public:
 
     // any thread ----------------------------------------------------------------
     bool isRolling() const noexcept { return rolling.load(); }
+    juce::int64 countInRemaining() const noexcept { return rolling.load() ? countInLeft.load() : 0; } // samples
     juce::int64 playhead() const noexcept { return playPos.load(); }
 
     // Where the playhead is going: a seek not yet applied by the audio thread, else the playhead.
@@ -286,6 +288,10 @@ public:
     double deviceSampleRate() const noexcept { return liveRate.load(); }
     int maxBlockSize() const noexcept { return maxBlock.load(); }
 
+    // Tests: run the engine the way a device would, with no device (taw --counttest).
+    void runWithoutDevice (double rate, int bufferSize);
+    void renderWithoutDevice (float* const* out, int numOut, int numSamples);
+
     float takeInputPeak (int ch) noexcept { return inputPeaks[(size_t) ch].take(); }
     float takeTrackPeak (int t) noexcept { return trackPeaks[(size_t) t].take(); }
     float takeMasterPeak (int ch) noexcept { return masterPeaks[(size_t) ch].take(); }
@@ -297,6 +303,7 @@ private:
     void audioDeviceAboutToStart (juce::AudioIODevice*) override;
     void audioDeviceStopped() override;
 
+    void startRunning (double rate, int bufferSize, int numInputs);
     void process (const float* const* in, int numIn, float* const* out, int numOut, int numSamples);
     void renderClick (const ClickSettings&, juce::int64 pos, float* left, float* right, int numSamples);
 
@@ -344,7 +351,7 @@ private:
     std::atomic<juce::uint64> liveSerial { 0 }; // serial of the graph the audio thread is running
 
     std::atomic<bool> rolling { false }, deviceRunning { false };
-    std::atomic<juce::int64> playPos { 0 }, seekTo { -1 };
+    std::atomic<juce::int64> playPos { 0 }, seekTo { -1 }, countInLeft { 0 };
     std::atomic<int> numInputs { 0 };
 
     std::array<AtomicPeak, maxInputs> inputPeaks;

@@ -106,7 +106,10 @@ public:
     Result execute (const juce::String& line);
 
     Result record (const std::vector<int>& tracks); // empty = whatever is armed
-    Result punch();
+    Result punch(); // while playing: recording on or off, playback carries on
+    juce::int64 countInSamples (juce::int64 from, bool forRecording) const;
+    juce::String countInStatus() const;
+    Result setCountIn (const juce::String& arg); // "count 4", "count off", "count rec", "count always"
     Result play();
     Result stop();
     Result addMarker (juce::int64 position, const juce::String& name = {}); // unnamed: numbered

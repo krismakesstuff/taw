@@ -77,6 +77,7 @@ private:
     void drawMidiPanel (App&);
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
+    void drawOpening (App&);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
     void drawDb (int x, int y, float hold, bool clipped, int bg = -1);
     void drawVolume (int x, int y, double db, int bg = -1);

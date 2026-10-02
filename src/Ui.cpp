@@ -178,7 +178,12 @@ void Ui::render (App& app)
     else if (app.mode == Mode::DevicePicker)
         drawDevicePicker (app);
     else if (app.mode == Mode::TemplatePicker)
+    {
         drawTemplatePicker (app);
+
+        if (app.opening != nullptr)
+            drawOpening (app);
+    }
     else
         drawMain (app);
 
@@ -327,7 +332,7 @@ void Ui::drawTransport (App& app)
 
     const int w = canvas.width(), y = 3, bg = colour::headerBg;
     const auto rolling = app.engine.isRolling();
-    const auto pos = rolling ? app.engine.playhead() : app.cursor;
+    const auto pos = rolling ? app.heardPlayhead() : app.cursor;
 
     // Built as a list of coloured pieces, then centred as a whole.
     struct Piece { juce::String text; int fg, bg; bool bold; };
@@ -365,6 +370,13 @@ void Ui::drawTransport (App& app)
     {
         gap();
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
+    }
+
+    // Low latency mode changes what you hear, so it's shown while it's on.
+    if (app.lowLatency)
+    {
+        gap();
+        add (" LOW LAT ", 16, colour::meterYellow, true);
     }
 
     if ((bool) s->tree()[ids::loop])
@@ -438,7 +450,7 @@ void Ui::drawTimeline (App& app)
     };
     const auto spc = app.samplesPerColumn();
     const auto rolling = app.engine.isRolling();
-    const auto playhead = app.engine.playhead();
+    const auto playhead = app.heardPlayhead(); // where you hear it (delay compensation makes the mix late)
 
     // Where column 0 starts. Grid lines can fall between samples (99 bpm: a beat is 26727.27
     // samples), so positions snapped to them are rounded either way; reading every sample from
@@ -1029,8 +1041,11 @@ void Ui::drawTimeline (App& app)
                     canvas.put (x, y, L'\x00b7', colour::faint, cbg);
                 else
                     canvas.text (x, y, insert[ids::pluginName].toString(),
-                                 app.insertProblem (insert).isNotEmpty() ? colour::error : (bool) insert[ids::bypass] ? colour::faint : colour::note, cbg,
-                                 false, 3);
+                                 app.insertProblem (insert).isNotEmpty() ? colour::error
+                                 : (bool) insert[ids::bypass]           ? colour::faint
+                                 : app.insertSittingOut (insert)        ? colour::meterYellow // low latency mode
+                                                                         : colour::note,
+                                 cbg, false, 3);
             }
 
             if (rowsPerTrack > 1)
@@ -1157,7 +1172,7 @@ void Ui::drawBottom (App& app)
             if (! l.finishing)
                 tracks.add (juce::String (l.recorder->trackIndex + 1));
 
-        x = canvas.text (0, cmdY, L" \x25cf RECORDING  " + tracks.joinIntoString (" ") + "   " + app.formatTime (app.engine.playhead() - app.playStart) + " ",
+        x = canvas.text (0, cmdY, L" \x25cf RECORDING  " + tracks.joinIntoString (" ") + "   " + app.formatTime (app.heardPlayhead() - app.playStart) + " ",
                          231, colour::rec, true);
     }
     else if (rolling)
@@ -1309,6 +1324,7 @@ void Ui::drawHelp (App&)
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"count 4", L"count-in clicks (off)", L"count always", L"...on play too (rec: not)" },
         { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
+        { Pair, L"lowlat", L"latent plugins sit out", L"lowlat 256", L"...over this many samples" },
         { Pair, L"height 3", L"rows per track (1-4)", L"dark  light", L"themes (also: grey)" },
 #if JUCE_WINDOWS
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav D:\\x", L"...to a folder (remembered)" },
@@ -1595,6 +1611,35 @@ void Ui::drawDevicePicker (App& app)
     canvas.fill (0, h - 2, w, L' ');
     canvas.fill (0, h - 1, w, L' ');
     canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
+}
+
+// Opening a session: what's loading, and how far along.
+void Ui::drawOpening (App& app)
+{
+    const auto& job = *app.opening;
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 64), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
+
+    for (int y = 0; y < 6; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    canvas.text (x0 + 2, y0 + 1, "OPENING", colour::text, bg, true);
+    canvas.text (x0 + 10, y0 + 1, app.session != nullptr ? app.session->name() : juce::String(), colour::accent, bg, true, boxW - 12);
+
+    const auto total = juce::jmax<size_t> (1, job.steps.size());
+    const auto done = juce::jmin (job.done, job.steps.size());
+    const auto now = done < job.steps.size() ? job.steps[done].kind + " " + juce::File (job.steps[done].name).getFileName()
+                                             : juce::String ("starting");
+    canvas.text (x0 + 2, y0 + 2, L"loading " + now + L"\x2026", colour::dim, bg, false, boxW - 4);
+
+    // A bar of steps done.
+    const int barW = boxW - 12;
+    const int filled = (int) ((double) barW * (double) done / (double) total);
+
+    for (int i = 0; i < barW; ++i)
+        canvas.put (x0 + 2 + i, y0 + 4, i < filled ? L'\x2588' : L'\x2591', i < filled ? colour::accent : colour::faint, bg);
+
+    canvas.text (x0 + 3 + barW, y0 + 4, juce::String ((int) done) + "/" + juce::String ((int) job.steps.size()), colour::dim, bg);
 }
 
 void Ui::drawTemplatePicker (App& app)

@@ -106,7 +106,8 @@ effect's window (or picks an effect or a bus for an empty slot), `M` bypasses, s
 reorder effects, `[ ]` set a send's level, `del` removes. An open plugin window follows you
 from slot to slot. Soloing a track keeps its reverb; soloing a bus plays just what's on it.
 `ins` (like `inst`) opens a picker of the effects that fit the focused track. Plugin latency is
-compensated, so tracks stay in time through lookahead limiters and linear-phase EQs.
+compensated, so tracks stay in time through lookahead limiters and linear-phase EQs; what you
+monitor skips the compensation, and `lowlat` sits out the high-latency plugins while you track.
 
 Tracks are mono or stereo (`2 stereo`, `add Keys stereo`, `2 i 3-4` records a pair) and pan
 with `2 pan l30` or alt+[ ].

@@ -178,7 +178,10 @@ int App::run()
         pollBounce();
         pollImport();
 
-        if (treeDirty && session != nullptr)
+        if (opening != nullptr)
+            stepOpening();
+
+        if (treeDirty && session != nullptr && opening == nullptr)
         {
             treeDirty = false;
 
@@ -194,7 +197,7 @@ int App::run()
         if (engine.isRolling())
         {
             if (juce::Time::getMillisecondCounterHiRes() - cursorMovedAt > 3000.0)
-                keepInView (engine.playhead());
+                keepInView (heardPlayhead());
         }
 
         const auto now = juce::Time::getMillisecondCounterHiRes();
@@ -480,6 +483,7 @@ Result App::play()
     playStart = cursor;
     cursorMovedWhileRolling = false;
     const auto from = loopActive() ? (juce::int64) session->tree()[ids::loopStart] : cursor;
+    playFrom = from;
     engine.play (from, countInSamples (from, false));
     return Result::good();
 }
@@ -588,7 +592,7 @@ Result App::record (const std::vector<int>& tracks)
 
     if (! engine.isRolling())
     {
-        playStart = cursor;
+        playStart = playFrom = cursor;
         engine.play (cursor, countIn);
     }
 
@@ -1879,7 +1883,7 @@ Result App::nudgeVolume (double deltaDb)
 void App::zoom (int delta)
 {
     zoomLevel = juce::jlimit (-6, 8, zoomLevel + delta);
-    keepInView (engine.isRolling() ? engine.playhead() : cursor);
+    keepInView (engine.isRolling() ? heardPlayhead() : cursor);
 }
 
 void App::loadSettings()
@@ -2030,6 +2034,9 @@ juce::String App::formatTime (juce::int64 pos) const
 
 void App::handleKey (const Key& k)
 {
+    if (opening != nullptr)
+        return; // keys wait until the session is open
+
     switch (mode)
     {
         case Mode::Main:           handleMainKey (k); break;
@@ -2251,7 +2258,7 @@ void App::handleMainKey (const Key& k)
         else if (k.ch == 'k' || k.ch == 'm') // k: macOS Terminal sends ctrl+m as Enter
         {
             beginEdit ("marker");
-            say (addMarker (engine.isRolling() ? engine.playhead() : cursor));
+            say (addMarker (engine.isRolling() ? heardPlayhead() : cursor));
         }
 
 
@@ -2401,6 +2408,57 @@ void App::handleDevicePickerKey (const Key& k)
     }
 }
 
+// Opening a session from the menu: the session file, then its audio and plugins a few per
+// frame, so the screen can say what it's loading (plugins can take seconds each).
+void App::startOpening (const juce::File& dir)
+{
+    juce::String error;
+    auto s = Session::load (dir, error);
+
+    if (s == nullptr)
+    {
+        say (Result::fail (error));
+        return;
+    }
+
+    attachSession (std::move (s));
+    opening = std::make_unique<Opening>();
+
+    for (int i = 0; i < session->numTracks(); ++i)
+    {
+        const auto t = session->track (i);
+
+        if (Session::isSampleTrack (t))
+            opening->steps.push_back ({ "audio", t[ids::sample].toString(), [this, t] { audioFor (t[ids::sample].toString()); } });
+
+        for (const auto& c : Session::clips (t))
+            opening->steps.push_back ({ "audio", c[ids::file].toString(), [this, c] { clipFor (c); } });
+
+        if (Session::isInstrumentTrack (t))
+            opening->steps.push_back ({ "plugin", t[ids::pluginName].toString(), [this, t] { hostedEntry (t); } });
+
+        for (const auto& c : t)
+            if (c.hasType (ids::INSERT))
+                opening->steps.push_back ({ "plugin", c[ids::pluginName].toString(), [this, c] { hostedEntry (c); } });
+    }
+}
+
+void App::stepOpening()
+{
+    // About a frame's worth of work, then a frame drawn (a slow plugin still takes its time).
+    const auto until = juce::Time::getMillisecondCounterHiRes() + 40.0;
+
+    while (opening->done < opening->steps.size() && juce::Time::getMillisecondCounterHiRes() < until)
+        opening->steps[opening->done++].run();
+
+    if (opening->done < opening->steps.size())
+        return;
+
+    opening.reset();
+    proceedToSession();
+    say (Result::good ("opened " + session->name() + L" \x00b7 " + session->folder().getFullPathName()));
+}
+
 void App::handleTemplatePickerKey (const Key& k)
 {
     const auto numRecent = (int) recent.size();
@@ -2413,21 +2471,11 @@ void App::handleTemplatePickerKey (const Key& k)
         case Key::Backspace: newSessionName = newSessionName.dropLastCharacters (1); return;
         case Key::Escape:    quit(); return;
         case Key::Enter:
-            if (pickIndex < numRecent)
-            {
-                juce::String error;
+            if (opening != nullptr)
+                return; // already opening one
 
-                if (auto s = Session::load (recent[(size_t) pickIndex], error))
-                {
-                    attachSession (std::move (s));
-                    proceedToSession();
-                    say (Result::good ("opened " + session->name() + L" \x00b7 " + session->folder().getFullPathName()));
-                }
-                else
-                {
-                    say (Result::fail (error));
-                }
-            }
+            if (pickIndex < numRecent)
+                startOpening (recent[(size_t) pickIndex]);
             else if (pickIndex < n)
             {
                 say (createSession (templates[(size_t) (pickIndex - numRecent)]));

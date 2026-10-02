@@ -180,6 +180,7 @@ records the selected tracks, else whatever is armed.
 | `click` | toggle the click (metronome) |
 | `click rec` / `click always` | click only while recording / during playback too |
 | `click -12` | click level in dB |
+| `lowlat` / `lowlat 256` | low latency mode on/off / its limit in samples (plugins over it sit out) |
 | `count 4` / `count off` | count-in: clicks before recording starts (default 4; also in `project`) |
 | `count always` / `count rec` | count in on plain playback too / only when recording starts (default) |
 | `height 3` | rows per track, 1-4 (default 2); saved with the session |
@@ -394,8 +395,17 @@ Stereo one. Typed names pick the same way.
   its send to a reverb bus with a linear-phase EQ on it still line up. The delay lines are
   kept across graph rebuilds (a fader move doesn't empty them) and follow a plugin whose
   latency changes. The whole mix comes out as late as its latest path: recordings, pad hits
-  and MIDI are placed that much earlier, and bounces drop it from the start. Monitoring through
-  the mix is that much later too (no low-latency monitoring mode yet). `taw --exec` prints it.
+  and MIDI are placed that much earlier, and bounces drop it from the start; the playhead is
+  drawn where you hear it. `taw --exec` prints it.
+- **Live inputs skip it.** A monitored input, and an armed instrument while stopped or
+  recording, go straight through their routes' compensation delays: you're playing in time with
+  what you hear, so holding them back would only make you late. (What was already in a delay
+  still comes out.) Their own plugins' latency, and a latent plugin on a bus they send to, still
+  count.
+- **Low latency mode** (`lowlat`, off by default, not saved): inserts with more latency than the
+  session's limit (`lowlat 256`, in samples; also in `project`) sit out, so the mix stops
+  running late while you record. They're drawn yellow and the transport shows `LOW LAT`.
+  `lowlat` again brings them back. Bounces always use every plugin.
 - **No loops.** A route that would feed back (a bus feeding itself, or a chain that comes
   round) is refused, and the picker only lists buses that can take it. The graph runs every
   track before the buses it feeds. A loop in a hand-edited session is broken: the routes that
@@ -504,6 +514,8 @@ over the time selection, offline on its own thread, faster than real time. `Esc`
 With no session given, taw lists recent sessions (newest first, and any sessions in the
 launch folder) above the templates. Enter on a recent session opens it; typing a name jumps to
 the templates to create a new one. The recent list lives in `%APPDATA%\taw\recent.json`.
+Opening a session loads its audio and plugins a few per frame, with a box saying what's loading
+and how far along it is (plugins can take seconds each); keys wait until it's open.
 
 ## When things go wrong
 

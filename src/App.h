@@ -153,6 +153,37 @@ public:
     Result swapInserts (int track, int slot, int other);
     Result toggleBypass (int track, int slot);
     juce::String insertProblem (const juce::ValueTree& insert) const; // why it isn't loaded
+
+    // Low latency mode ("lowlat"): inserts with more latency than the session's limit sit out, so
+    // the mix isn't held back while you record. Not saved: it's for now, not the mix.
+    bool lowLatency = false;
+    Result setLowLatency (const juce::String& arg);
+    bool insertSittingOut (const juce::ValueTree& insert) const;
+
+    // Where the playhead is in what you hear: delay compensation makes the mix that much later
+    // than what the engine is rendering. For drawing it and for markers dropped while playing.
+    juce::int64 heardPlayhead() const
+    {
+        const auto p = engine.playhead();
+        return engine.isRolling() && mixLatency > 0 ? juce::jmax (playFrom, p - mixLatency) : p;
+    }
+    juce::int64 playFrom = 0; // where the engine last started playing (the loop start, with the loop on)
+
+    // Opening a session from the menu, a few steps a frame so the screen can show progress.
+    struct Opening
+    {
+        struct Step
+        {
+            juce::String kind, name; // "audio" / "plugin", and what
+            std::function<void()> run;
+        };
+
+        std::vector<Step> steps;
+        size_t done = 0;
+    };
+    std::unique_ptr<Opening> opening;
+    void startOpening (const juce::File& dir);
+    void stepOpening();
     Result scanPlugins (bool retryFailed); // "scan", "scan retry"
     // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
     // opened, and the last message it sent, to see a controller is getting through.

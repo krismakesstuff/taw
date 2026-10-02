@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo" };
+                              "pan", "mono", "stereo", "lowlat" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -257,6 +257,31 @@ Result App::setClick (const juce::String& argIn)
     return Result::good (clickStatus());
 }
 
+// lowlat (toggle) | lowlat on | lowlat off | lowlat 256 (the limit, in samples)
+Result App::setLowLatency (const juce::String& argIn)
+{
+    const auto arg = argIn.trim().toLowerCase();
+
+    if (arg.isEmpty())
+        lowLatency = ! lowLatency;
+    else if (arg == "on" || arg == "off")
+        lowLatency = arg == "on";
+    else if (arg.containsOnly ("0123456789"))
+        session->tree().setProperty (ids::lowLatencyMax, juce::jlimit (0, 8192, arg.getIntValue()), um());
+    else
+        return Result::fail ("lowlat [on|off|256]");
+
+    rebuildGraph();
+    const int max = session->tree()[ids::lowLatencyMax];
+    const auto limit = juce::String (max) + " samples (" + juce::String (max * 1000.0 / sampleRate(), 1) + " ms)";
+
+    if (! lowLatency)
+        return Result::good ("low latency off \x00b7 every plugin back in" + juce::String (mixLatency > 0 ? L" \x00b7 the mix runs " + juce::String (mixLatency * 1000.0 / sampleRate(), 1) + " ms late" : ""));
+
+    return Result::good (L"low latency on \x00b7 plugins over " + limit + L" bypassed (shown yellow) \x00b7 the mix now runs "
+                         + juce::String (mixLatency * 1000.0 / sampleRate(), 1) + L" ms late \x00b7 lowlat again restores them");
+}
+
 // count 4 | count off (or 0) | count rec (only when recording starts) | count always (play too)
 Result App::setCountIn (const juce::String& argIn)
 {
@@ -303,6 +328,9 @@ std::vector<App::Setting> App::projectSettings() const
         { "Count-in", (int) s[ids::countIn] <= 0 ? juce::String ("off") : s[ids::countIn].toString() + ((int) s[ids::countIn] == 1 ? " click" : " clicks"), "count " },
         { "Count-in when", s[ids::countInWhen].toString() == "always" ? juce::String ("recording and playback") : juce::String ("recording"), {} },
         { "Latency compensation", onOff (s[ids::latencyComp]), {} },
+        { "Low latency mode", onOff (lowLatency) + (lowLatency ? juce::String (L" \x00b7 plugins over the limit bypassed") : juce::String()), {} },
+        { "Low latency limit", s[ids::lowLatencyMax].toString() + " samples (" + juce::String ((double) s[ids::lowLatencyMax] * 1000.0 / sampleRate(), 1) + " ms)",
+          "lowlat " },
         { "Track height", juce::String (height) + (height == 1 ? " row" : " rows"), "height " },
         { "Bounce format", s[ids::bounceFormat].toString(), {} },
         { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
@@ -339,6 +367,8 @@ Result App::stepSetting (int index, int direction)
     if (name == "Count-in")       return execute ("count " + juce::String (juce::jlimit (0, 16, (int) s[ids::countIn] + direction)));
     if (name == "Count-in when")  return execute (juce::String ("count ") + (s[ids::countInWhen].toString() == "always" ? "rec" : "always"));
     if (name == "Latency compensation") return execute ("lat");
+    if (name == "Low latency mode") return execute ("lowlat");
+    if (name == "Low latency limit") return execute ("lowlat " + juce::String (juce::jlimit (0, 8192, (int) s[ids::lowLatencyMax] + direction * 64)));
     if (name == "Track height")   return execute ("height " + juce::String (juce::jlimit (1, 4, session->trackHeight() + direction)));
     if (name.startsWith ("Theme")) return execute (cycle ({ "dark", "light", "grey" }, theme));
 
@@ -521,7 +551,7 @@ Result App::toggleHitAtCursor()
 
     auto track = session->track (focused);
     const auto step = hitStepBeats();
-    const auto at = engine.isRolling() ? engine.playhead() : cursor;
+    const auto at = engine.isRolling() ? heardPlayhead() : cursor;
     auto beat = (double) at / session->samplesPerBeat();
 
     for (const auto& h : Session::hits (track))
@@ -646,9 +676,10 @@ Result App::execute (const juce::String& line)
     if (v == "rec")                return record (p.hasSelector ? p.tracks : selectedTracks());
     if (v == "play")               return play();
     if (v == "stop")               return stop();
-    if (v == "mark")               return addMarker (engine.isRolling() ? engine.playhead() : cursor, p.rest.trim());
+    if (v == "mark")               return addMarker (engine.isRolling() ? heardPlayhead() : cursor, p.rest.trim());
     if (v == "click" || v == "c")  return setClick (p.args[0]);
     if (v == "count")              return setCountIn (p.args[0]);
+    if (v == "lowlat")             return setLowLatency (p.args[0]);
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
     if (v == "import" || v == "imp")

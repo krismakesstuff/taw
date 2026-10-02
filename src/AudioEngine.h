@@ -80,6 +80,25 @@ struct RouteDelay
         }
     }
 
+    // A live input (monitored, or a played instrument) goes straight through: you're playing in
+    // time with what you hear, so holding it back only makes you late. What's already in the line
+    // still comes out, and silence goes in behind it.
+    void addLive (const float* left, const float* right, float gain, float* destL, float* destR, int n) noexcept
+    {
+        auto* bl = buffer.getWritePointer (0);
+        auto* br = buffer.getWritePointer (1);
+
+        for (int i = 0; i < n; ++i)
+        {
+            destL[i] += bl[pos] + left[i] * gain;
+            destR[i] += br[pos] + right[i] * gain;
+            bl[pos] = br[pos] = 0.0f;
+
+            if (++pos == length)
+                pos = 0;
+        }
+    }
+
     const int length;
     juce::AudioBuffer<float> buffer;
     int pos = 0;
@@ -239,10 +258,11 @@ inline void panTrack (const TrackPlay& tp, float* left, float* right, int n)
 
 // Where a track's signal goes once it's rendered and panned: its pre-fader sends, its fader
 // (applied in place, so left/right then hold what the track plays, for its meter), its
-// post-fader sends, and its output, each through its delay compensation if it has one. buses
-// holds left and right for each bus (bus b at 2b and 2b + 1). Shared by live playback and
-// bounces.
-inline void routeTrack (const TrackPlay& tp, float* left, float* right, int n, float* const* buses, float* mixL, float* mixR)
+// post-fader sends, and its output, each through its delay compensation if it has one (unless
+// live: a monitored input or a played instrument skips it). buses holds left and right for each
+// bus (bus b at 2b and 2b + 1). Shared by live playback and bounces.
+inline void routeTrack (const TrackPlay& tp, float* left, float* right, int n, float* const* buses, float* mixL, float* mixR,
+                        bool live = false)
 {
     auto add = [&] (int bus, float g, RouteDelay* delay)
     {
@@ -252,7 +272,9 @@ inline void routeTrack (const TrackPlay& tp, float* left, float* right, int n, f
         auto* dl = bus < 0 ? mixL : buses[bus * 2];
         auto* dr = bus < 0 ? mixR : buses[bus * 2 + 1];
 
-        if (delay != nullptr)
+        if (delay != nullptr && live)
+            delay->addLive (left, right, g, dl, dr, n);
+        else if (delay != nullptr)
             delay->addDelayed (left, right, g, dl, dr, n); // silent or not, so it stays in step
         else if (g > 0.0f)
         {
@@ -377,8 +399,8 @@ public:
     int maxBlockSize() const noexcept { return maxBlock.load(); }
 
     // Tests: run the engine the way a device would, with no device (taw --counttest).
-    void runWithoutDevice (double rate, int bufferSize);
-    void renderWithoutDevice (float* const* out, int numOut, int numSamples);
+    void runWithoutDevice (double rate, int bufferSize, int numInputs = 0);
+    void renderWithoutDevice (float* const* out, int numOut, int numSamples, const float* const* in = nullptr, int numIn = 0);
 
     float takeInputPeak (int ch) noexcept { return inputPeaks[(size_t) ch].take(); }
     float takeTrackPeak (int t) noexcept { return trackPeaks[(size_t) t].take(); }

@@ -466,6 +466,66 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --livetest   delay compensation and live inputs, without a device: a track with a
+    // compensation delay on its output plays its clips that late, but its monitored input
+    // goes straight through.
+    if (args[0] == "--livetest")
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 64, delay = 100, at = 10;
+        int failures = 0;
+
+        auto impulse = std::make_shared<juce::AudioBuffer<float>> (1, 1000);
+        impulse->clear();
+        impulse->setSample (0, at, 1.0f);
+
+        for (const bool monitoring : { true, false })
+        {
+            taw::AudioEngine engine;
+            engine.runWithoutDevice (rate, block, 1);
+
+            auto g = std::make_unique<taw::Graph>();
+            g->tracks.push_back ({});
+            auto& tp = g->tracks[0];
+            tp.inputChannel = 0;
+            tp.armed = monitoring; // armed while stopped: you hear the input
+            tp.clips.push_back ({ impulse, 0, 0, 1000 });
+            tp.outDelay = std::make_shared<taw::RouteDelay> (delay);
+            engine.setGraph (std::move (g));
+
+            if (! monitoring)
+                engine.play (0);
+
+            std::vector<float> l (block), r (block), input (block);
+            float* outs[] = { l.data(), r.data() };
+            const float* ins[] = { input.data() };
+            int heard = -1;
+
+            for (int pos = 0; pos < 1000 && heard < 0; pos += block)
+            {
+                std::fill (input.begin(), input.end(), 0.0f);
+
+                if (monitoring && at >= pos && at < pos + block)
+                    input[(size_t) (at - pos)] = 1.0f;
+
+                engine.renderWithoutDevice (outs, 2, block, ins, 1);
+
+                for (int i = 0; i < block && heard < 0; ++i)
+                    if (std::abs (l[(size_t) i]) > 0.1f)
+                        heard = pos + i;
+            }
+
+            const auto want = monitoring ? at : at + delay;
+            std::printf ("%s %s: heard at %d, want %d\n", heard == want ? "ok  " : "FAIL",
+                         monitoring ? "monitored input skips the delay" : "clips wait for it", heard, want);
+            failures += heard == want ? 0 : 1;
+            engine.stop();
+            engine.setGraph (std::make_unique<taw::Graph>());
+        }
+
+        return failures;
+    }
+
     // taw --cliptest [session-dir]   check clip rendering rules; optionally load (and migrate) a
     //                                session and list its clips. Never saves.
     if (args[0] == "--cliptest")

@@ -192,14 +192,14 @@ void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
     startRunning (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(), device->getActiveInputChannels().countNumberOfSetBits());
 }
 
-void AudioEngine::runWithoutDevice (double rate, int bufferSize)
+void AudioEngine::runWithoutDevice (double rate, int bufferSize, int inputs)
 {
-    startRunning (rate, bufferSize, 0);
+    startRunning (rate, bufferSize, inputs);
 }
 
-void AudioEngine::renderWithoutDevice (float* const* out, int numOut, int numSamples)
+void AudioEngine::renderWithoutDevice (float* const* out, int numOut, int numSamples, const float* const* in, int numIn)
 {
-    audioDeviceIOCallbackWithContext (nullptr, 0, out, numOut, numSamples, {});
+    audioDeviceIOCallbackWithContext (in, numIn, out, numOut, numSamples, {});
 }
 
 void AudioEngine::startRunning (double rate, int bufferSize, int inputs)
@@ -402,8 +402,11 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         for (const auto& fx : tp.inserts)
             fx->process (transport, n, trackL, trackR);
 
+        // Live: what you're playing right now (a monitored input, an armed instrument while stopped
+        // or recording) skips delay compensation.
+        const bool live = monitoring || (tp.midiLive && (! isRolling || current->recording));
         panTrack (tp, trackL, trackR, n);
-        routeTrack (tp, trackL, trackR, n, busPtrs.data(), mixL, mixR);
+        routeTrack (tp, trackL, trackR, n, busPtrs.data(), mixL, mixR, live);
 
         // The meter shows what you hear from the track: the input (pre-fader, for setting
         // levels) while monitoring, otherwise its playback.

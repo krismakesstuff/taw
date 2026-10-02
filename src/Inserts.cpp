@@ -29,6 +29,10 @@ void App::addInserts (TrackPlay& tp, const juce::ValueTree& track, bool offline)
         if (in == nullptr || in->slot == nullptr)
             continue;
 
+        // Low latency mode: plugins with more latency than the limit sit out (never in a bounce).
+        if (! offline && lowLatency && in->slot->latency() > (int) session->tree()[ids::lowLatencyMax])
+            continue;
+
         if (! offline)
         {
             tp.inserts.push_back (in->slot);
@@ -60,6 +64,18 @@ void App::dropPlugin (const juce::ValueTree& node)
             hosted.erase (it);
             return;
         }
+}
+
+bool App::insertSittingOut (const juce::ValueTree& node) const
+{
+    if (! lowLatency)
+        return false;
+
+    for (const auto& in : hosted)
+        if (in.node == node)
+            return in.slot != nullptr && in.slot->latency() > (int) session->tree()[ids::lowLatencyMax];
+
+    return false;
 }
 
 juce::String App::insertProblem (const juce::ValueTree& node) const

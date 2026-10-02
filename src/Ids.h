@@ -27,6 +27,7 @@ TAW_ID (timeSigNum)
 TAW_ID (timeSigDen)
 TAW_ID (grid)
 TAW_ID (latencyComp)
+TAW_ID (lowLatencyMax) // low latency mode: plugins with more latency than this (samples) sit out
 TAW_ID (trackHeight) // rows per track on screen, 1-4
 TAW_ID (inputQuantize) // bool: pad hits snap to the grid step as they're recorded
 TAW_ID (click)     // bool

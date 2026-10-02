@@ -111,6 +111,7 @@ static void applyDefaults (juce::ValueTree& s)
     def (ids::clickWhen, "rec");
     def (ids::clickDb, -6.0);
     def (ids::countIn, 4);
+    def (ids::lowLatencyMax, 256);
     def (ids::countInWhen, "rec");
     def (ids::mixDb, 0.0);
     def (ids::loop, false);

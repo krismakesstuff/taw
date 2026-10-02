@@ -56,6 +56,7 @@ Key byteKey (unsigned char c)
     else if (c == 0)                { k.code = Key::Char; k.ch = L' '; k.ctrl = true; }  // ctrl+space
     else if (c <= 0x1a)             { k.code = Key::Char; k.ch = (wchar_t) ('a' + c - 1); k.ctrl = true; }
     else if (c == 0x1d)             { k.code = Key::Char; k.ch = L']'; k.ctrl = true; }
+    else if (c == 0x1c)             { k.code = Key::Char; k.ch = L'\\'; k.ctrl = true; } // ctrl+backslash
     else if (c >= 0x20)             { k.code = Key::Char; k.ch = (wchar_t) c; }
 
     return k;

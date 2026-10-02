@@ -355,6 +355,13 @@ std::vector<Key> Console::poll()
             k.ch = e.wVirtualKeyCode == VK_OEM_4 ? L'[' : L']';
         }
 
+        // Ctrl+\ (close plugin windows) arrives as a control code.
+        if (k.ctrl && ! k.alt && e.wVirtualKeyCode == VK_OEM_5)
+        {
+            k.code = Key::Char;
+            k.ch = L'\\';
+        }
+
         // Alt+/ (place a hit) may arrive without its character on some layouts.
         if (k.alt && ! k.ctrl && ! k.shift && e.wVirtualKeyCode == VK_OEM_2)
         {

@@ -1369,6 +1369,7 @@ void Ui::drawHelp (App&)
         { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
         { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
         { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
+        { Pair, L"ctrl+\\", L"close plugin windows", L"ed close", L"the same, typed" },
         { Pair, L"shift+T", L"track menu", L"2 remove", L"delete track 2 (ctrl+z back)" },
         { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"2 stereo", L"stereo: inputs 3-4 (2 i 3-4)" },
         { Heading, L"SAMPLES", nullptr, L"EDIT", nullptr },

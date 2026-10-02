@@ -706,6 +706,19 @@ Result App::execute (const juce::String& line)
     if (v == "midi")               return toggleMidiPanel();
     if (v == "ed")
     {
+        // ed close (ctrl+\): every plugin window, wherever you are.
+        if (p.args[0].equalsIgnoreCase ("close") || p.args[0].equalsIgnoreCase ("x"))
+        {
+            int open = 0;
+
+            for (const auto& in : hosted)
+                open += in.slot != nullptr && in.slot->editorShowing() ? 1 : 0;
+
+            closePluginWindows();
+            return open == 0 ? Result::good ("no plugin windows open")
+                             : Result::good ("closed " + juce::String (open) + (open == 1 ? " plugin window" : " plugin windows"));
+        }
+
         // In the routing column on an insert: that plugin's window.
         if (! p.hasSelector && ioCell >= ioFirstInsert && ioCell < ioFirstSend && ! mixFocused() && ! onTopLane())
             return toggleInsertEditor (focused, ioCell);

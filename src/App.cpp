@@ -1868,7 +1868,7 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
     const auto strength = arg.isEmpty() ? 1.0 : juce::jlimit (0.0, 1.0, arg.getDoubleValue() / 100.0);
 
     if (arg.isNotEmpty() && ! arg.containsOnly ("0123456789."))
-        return Result::fail ("quantize, quantize 50 (percent) or quantize input");
+        return Result::fail (L"snap, snap 50 (percent) or snap input \x2014 the step is the grid's: grid 16");
 
     const auto step = session->fineStepBeats();
     const auto spb = session->samplesPerBeat();

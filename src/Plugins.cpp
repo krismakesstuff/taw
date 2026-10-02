@@ -26,7 +26,7 @@ struct TitleButton final : juce::Button
         const auto& c = windowColours;
 
         if (over || down)
-            g.fillAll (isClose ? juce::Colour (0xffc42b1c).withAlpha (down ? 0.8f : 1.0f) : c.text.withAlpha (down ? 0.25f : 0.15f));
+            g.fillAll (isClose ? juce::Colour (0xffc42b1c).withAlpha (down ? 0.8f : 1.0f) : c.text.withAlpha (down ? 0.3f : 0.2f));
 
         g.setColour (over && isClose ? juce::Colours::white : over ? c.text : c.dim);
         const auto centre = getLocalBounds().toFloat().getCentre();
@@ -105,6 +105,26 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
     {
         closeRequested = true;
         setVisible (false);
+    }
+
+    // The bar is ours, not Windows': JUCE would report it as a native caption and buttons, and
+    // then Windows does the dragging and clicking itself, and the bar never hears a hover or a
+    // double-click. As ordinary content, dragging it moves the window (ResizableWindow does
+    // that) and the buttons light up. Resizing edges stay native.
+    WindowControlKind findControlAtPoint (juce::Point<float> pt) const override
+    {
+        const auto kind = DocumentWindow::findControlAtPoint (pt);
+
+        switch (kind)
+        {
+            case WindowControlKind::caption:
+            case WindowControlKind::minimise:
+            case WindowControlKind::maximise:
+            case WindowControlKind::close:
+                return WindowControlKind::client;
+            default:
+                return kind;
+        }
     }
 
     // The title bar double-clicked: the owner gives this window the keyboard to keep (or takes

@@ -293,6 +293,17 @@ juce::ValueTree Session::send (const juce::ValueTree& track, int slot)
     return {};
 }
 
+juce::ValueTree Session::insert (const juce::ValueTree& track, int slot)
+{
+    const auto name = slotName (slot).toLowerCase();
+
+    for (const auto& c : track)
+        if (c.hasType (ids::INSERT) && c[ids::slot].toString().equalsIgnoreCase (name))
+            return c;
+
+    return {};
+}
+
 juce::ValueTree Session::track (int index) const
 {
     int n = 0;

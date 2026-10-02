@@ -66,6 +66,7 @@ public:
     int nextBusId() const;
     static constexpr int numSends = 5; // slots a to e
     static juce::ValueTree send (const juce::ValueTree& track, int slot); // invalid when the slot is empty
+    static juce::ValueTree insert (const juce::ValueTree& track, int slot); // the effect in slot a-e, or invalid
     static juce::String slotName (int slot) { return juce::String::charToString ((juce::juce_wchar) ('A' + slot)); }
     static std::vector<juce::ValueTree> notes (const juce::ValueTree& track);
     static std::vector<juce::ValueTree> controls (const juce::ValueTree& track);

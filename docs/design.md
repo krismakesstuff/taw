@@ -331,38 +331,58 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
 - `taw --plugintest <file.vst3>` loads one plugin and plays it the way the engine does (a chord
   from the timeline, a stop, a controller key, a disarm), and checks its state round-trips.
 
-## Routing
+## Routing and inserts
 
-Bus tracks, and for every track an output and five sends (A to E), the way a console has
-them. Buses are where time-based effects (reverb, delay) will sit once insert slots exist,
-fed by sends. They're also how you submix a group.
+For every track: five insert slots (A to E) for effect plugins, five sends (A to E) and an
+output, the way a console has them. Bus tracks take sends and outputs, so a reverb or delay
+lives once on a bus and tracks send to it. Buses also submix a group.
 
 ```
 TRACK { kind: "bus", busId, … }      # busId: what outputs and sends call it (stable across moves and renames)
 TRACK { …, out? }                    # the busId it plays into; absent = the mix
+  INSERT { slot: "a"-"e", plugin, pluginName, pluginState, bypass? }   # as an instrument track keeps its plugin
   SEND { slot: "a"-"e", to, db, pre?, mute? }
 ```
 
 | Command | Meaning |
 |---|---|
+| `2 fx valhalla` | an effect in the first free insert (`2 fx` alone: the effects picker) |
+| `2 fx b valhalla` | into insert B (replacing what's there) |
+| `2 fx b` | open or close insert B's window (empty: the picker for B) |
+| `2 fx b off` / `on` / `x` / `2 fx b>d` | bypass, back on, remove, swap B and D |
 | `bus Verb` / `add bus Verb` | new bus track (no input, no clips, nothing to arm) |
 | `2 send verb` | a send to Verb: the slot already going there, else the first free one; a name no bus has makes the bus |
 | `2 send b verb` / `2 send b 6` | slot B to Verb / to bus track 6 |
 | `2 send b -12` / `pre` / `post` / `off` / `on` / `x` | level (a sign or 0: `-12`, `+3`, `0`, `-inf`), before or after the fader, off, remove |
-| `2 send` | list track 2's output and sends |
+| `2 send` | list track 2's inserts, output and sends |
 | `2 out drums` / `2 > drums` / `2 out mix` | where the track goes after its fader; `2 out` alone opens the picker |
 | `o` | into the routing column on the focused track (see below) |
 | `io` | show or hide the routing column (on by default; kept in `settings.json`) |
 
-- **The routing column** sits right of the timeline: the output, then sends A to E, each a
-  bus name, with the send's level under it (pre-fader sends in the accent colour). `o` steps
-  into it: ←→ pick the output or a send, ↑↓ change tracks, enter opens the bus picker (type
-  to filter; a name nothing matches makes that bus), del removes a send (or puts the output
-  back on the mix), `[ ]` ride a send's level, `M` turns a send off, `P` flips pre/post, esc or `o`
-  leaves.
-- **Signal flow.** Source (clips, hits, instrument, input) → pre-fader sends → fader →
-  post-fader sends → output. New sends are post-fader at 0 dB. Mute silences a track's sends too.
-  A mono track enters a bus at the pan law, as it does the mix.
+`fx` and `out` start with keys that are hotkeys on an empty line (`f`, `o`), so typed they
+need a track number (`2 fx`); on the focused track, use the column.
+
+- **The routing column** sits left of the timeline, between the track panel and the meter,
+  as in Pro Tools. A track's first row shows inserts A to E, its second sends A to E and then
+  the output, and a third row the send levels (pre-fader in the accent colour). A track one
+  row tall shows its inserts and output. `o` steps into the column: ←→ walk the inserts, the
+  sends, then the output; ↑↓ change tracks. On an insert, enter opens its window (an empty one:
+  the effects picker, type to filter), `M` bypasses it, shift+←→ moves it along the chain, del
+  removes it. On a send, enter picks its bus (a name nothing matches makes that bus), `[ ]`
+  ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, enter
+  picks a bus and del puts it back on the mix. Esc or `o` leaves. `ed` there opens the insert.
+- **Plugin windows.** Loading an effect opens its window. One window at a time: opening
+  another closes the first, and while one is open it follows you as you move between inserts.
+- **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →
+  fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped
+  too, so tails ring out and monitored inputs go through them. New sends are post-fader at
+  0 dB. Mute silences a track's sends too. A mono track enters a bus at the pan law.
+- **Effects run in stereo.** taw asks each effect for stereo in and out; a mono-only one gets
+  both sides summed and its output goes to both. Typed names prefer "X Stereo" over "X Mono".
+- **State** is kept like an instrument's (`plugins/NN-Name.state`), so undoing a removed
+  insert brings it back as it was. Bounces run their own copies of every insert.
+- **No plugin delay compensation yet.** Lookahead limiters and linear-phase EQs put their
+  track late by their latency.
 - **No loops.** A route that would feed back (a bus feeding itself, or a chain that comes
   round) is refused, and the picker only lists buses that can take it. The graph runs every
   track before the buses it feeds. A loop in a hand-edited session is broken: the routes that
@@ -484,7 +504,7 @@ the templates to create a new one. The recent list lives in `%APPDATA%\taw\recen
  (blank)
  transport: ■ STOP · bars.beats · time · tempo/sig · click · loop   (centred)
  ruler
- tracks:    number · name · arm/mute/solo/mon · input │ timeline lane │ out · sends A-E │ volume · meter · peak dB
+ tracks:    number · name · arm/mute/solo/mon · input │ inserts A-E / sends A-E · out │ volume · meter · peak │ timeline lane
  mix
  message:   feedback from the last command
  command:   : 1-3 r

@@ -59,7 +59,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "scan", "midi", "fill",
-                              "bus", "out", ">", "send", "io", "count" };
+                              "bus", "out", ">", "send", "io", "count", "fx" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -79,7 +79,7 @@ void splitVerb (const juce::String& token, juce::String& verb, juce::String& glu
             const auto next = token[candidate.length()];
             const bool takesWords = candidate == "n" || candidate == "name" || candidate == "click" || candidate == "b"
                                     || candidate == "pat" || candidate == "inst" || candidate == "bus" || candidate == "out"
-                                    || candidate == ">" || candidate == "send";
+                                    || candidate == ">" || candidate == "send" || candidate == "fx";
 
             if (takesWords || ! juce::CharacterFunctions::isLetter (next))
                 best = candidate.length();
@@ -673,6 +673,10 @@ Result App::execute (const juce::String& line)
     if (v == "midi")               return toggleMidiPanel();
     if (v == "ed")
     {
+        // In the routing column on an insert: that plugin's window.
+        if (! p.hasSelector && ioCell >= ioFirstInsert && ioCell < ioFirstSend && ! mixFocused() && ! onTopLane())
+            return toggleInsertEditor (focused, ioCell);
+
         const auto targets = p.hasSelector ? p.tracks : defaultTargets();
         return toggleEditor ((onTopLane() && ! p.hasSelector) || targets.empty() ? -1 : targets.front());
     }
@@ -946,6 +950,10 @@ Result App::execute (const juce::String& line)
     // 2 out verb / 2 > verb / 2 out mix: where the track goes after its fader. Alone: the picker.
     if (v == "out" || v == ">")
         return setOutput (targets, p.rest);
+
+    // 2 fx valhalla / 2 fx b valhalla / 2 fx b (its window) / 2 fx b x|off|on / 2 fx b>d / 2 fx (picker)
+    if (v == "fx")
+        return editInserts (targets, p.args);
 
     // 2 send verb / 2 send b -6 / 2 send b pre|post|off|on|x / 2 send (lists them)
     if (v == "send")

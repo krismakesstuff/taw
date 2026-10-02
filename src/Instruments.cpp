@@ -1,4 +1,4 @@
-// Instrument tracks: a hosted plugin (VST3) per track, played by the MIDI controller while the
+﻿// Instrument tracks: a hosted plugin (VST3) per track, played by the MIDI controller while the
 // track is armed, and the notes recorded on it.
 
 #include "App.h"
@@ -48,13 +48,14 @@ Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat)
 }
 
 //==============================================================================
-std::shared_ptr<PluginSlot> App::createInstrument (const juce::ValueTree& track, double rate, int block, juce::String& problem)
+// node: an instrument track or an INSERT; both keep plugin, pluginName and pluginState.
+std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, double rate, int block, juce::String& problem)
 {
-    const auto name = track[ids::pluginName].toString();
-    auto desc = plugins.byIdentifier (track[ids::plugin].toString());
+    const auto name = node[ids::pluginName].toString();
+    auto desc = plugins.byIdentifier (node[ids::plugin].toString());
 
     if (! desc && name.isNotEmpty())
-        desc = plugins.findInstrument (name);
+        desc = plugins.find (name, ! node.hasType (ids::INSERT));
 
     if (! desc)
     {
@@ -68,7 +69,7 @@ std::shared_ptr<PluginSlot> App::createInstrument (const juce::ValueTree& track,
     if (slot == nullptr)
         return {};
 
-    const auto stateFile = track[ids::pluginState].toString();
+    const auto stateFile = node[ids::pluginState].toString();
 
     if (stateFile.isNotEmpty())
     {
@@ -81,26 +82,26 @@ std::shared_ptr<PluginSlot> App::createInstrument (const juce::ValueTree& track,
     return slot;
 }
 
-App::Instrument* App::instrumentEntry (const juce::ValueTree& track)
+App::Hosted* App::hostedEntry (const juce::ValueTree& node)
 {
-    for (auto& in : instruments)
-        if (in.track == track)
+    for (auto& in : hosted)
+        if (in.node == node)
             return &in;
 
-    if (! Session::isInstrumentTrack (track))
+    if (! Session::isInstrumentTrack (node) && ! node.hasType (ids::INSERT))
         return nullptr;
 
-    // First time this track is played: load its plugin (and its saved state).
-    Instrument in;
-    in.track = track;
+    // First time it's played: load the plugin (and its saved state).
+    Hosted in;
+    in.node = node;
     const auto rate = engine.deviceSampleRate() > 0.0 ? engine.deviceSampleRate() : sampleRate();
-    in.slot = createInstrument (track, rate, engine.maxBlockSize(), in.problem);
+    in.slot = createPlugin (node, rate, engine.maxBlockSize(), in.problem);
 
     if (in.slot != nullptr)
         in.savedState = in.slot->getState();
 
-    instruments.push_back (std::move (in));
-    return &instruments.back();
+    hosted.push_back (std::move (in));
+    return &hosted.back();
 }
 
 PluginSlot* App::instrumentFor (int track)
@@ -108,7 +109,7 @@ PluginSlot* App::instrumentFor (int track)
     if (session == nullptr || track < 0 || track >= session->numTracks())
         return nullptr;
 
-    auto* in = instrumentEntry (session->track (track));
+    auto* in = hostedEntry (session->track (track));
     return in != nullptr ? in->slot.get() : nullptr;
 }
 
@@ -117,8 +118,8 @@ juce::String App::instrumentProblem (int track) const
     if (session == nullptr || track < 0 || track >= session->numTracks())
         return {};
 
-    for (const auto& in : instruments)
-        if (in.track == session->track (track))
+    for (const auto& in : hosted)
+        if (in.node == session->track (track))
             return in.problem;
 
     return {};
@@ -126,10 +127,10 @@ juce::String App::instrumentProblem (int track) const
 
 // Plugin state lives in its own file (plugins/…), not in session.json: it's opaque and can be
 // megabytes. Written only when it changed.
-void App::writeInstrumentState (Instrument& in)
+void App::writePluginState (Hosted& in)
 {
     const auto sessionFolder = session->folder();
-    const auto path = in.track[ids::pluginState].toString();
+    const auto path = in.node[ids::pluginState].toString();
 
     if (in.slot == nullptr || path.isEmpty())
         return;
@@ -146,23 +147,23 @@ void App::writeInstrumentState (Instrument& in)
         in.savedState = std::move (state);
 }
 
-void App::saveInstrumentStates()
+void App::savePluginStates()
 {
     if (session != nullptr)
-        for (auto& in : instruments)
-            writeInstrumentState (in);
+        for (auto& in : hosted)
+            writePluginState (in);
 }
 
-void App::pollInstruments()
+void App::pollPlugins()
 {
     if (session == nullptr)
         return;
 
-    for (auto& in : instruments)
+    for (auto& in : hosted)
         if (in.slot != nullptr && in.slot->editorWantsToClose())
         {
             in.slot->closeEditor();
-            writeInstrumentState (in);
+            writePluginState (in);
         }
 
     // A new device (or new settings): every plugin gets prepared for its rate and block size.
@@ -170,7 +171,7 @@ void App::pollInstruments()
     {
         preparedGeneration = engine.deviceGeneration();
 
-        for (auto& in : instruments)
+        for (auto& in : hosted)
             if (in.slot != nullptr)
                 in.slot->prepare (engine.deviceSampleRate(), engine.maxBlockSize());
     }
@@ -181,7 +182,7 @@ void App::pollInstruments()
     if (now - lastStateSave > 15000.0)
     {
         lastStateSave = now;
-        saveInstrumentStates();
+        savePluginStates();
     }
 
     if (plugins.isScanning())
@@ -195,12 +196,14 @@ void App::pollInstruments()
         else
         {
             // Tracks whose plugin wasn't found get another go.
-            instruments.erase (std::remove_if (instruments.begin(), instruments.end(), [] (const auto& in) { return in.slot == nullptr; }),
-                               instruments.end());
+            hosted.erase (std::remove_if (hosted.begin(), hosted.end(), [] (const auto& in) { return in.slot == nullptr; }),
+                               hosted.end());
             rebuildGraph();
 
             const auto n = (int) plugins.instruments().size();
-            auto msg = "found " + juce::String (n) + (n == 1 ? " instrument" : " instruments");
+            const auto fx = (int) plugins.effects().size();
+            auto msg = "found " + juce::String (n) + (n == 1 ? " instrument" : " instruments") + " and " + juce::String (fx)
+                       + (fx == 1 ? " effect" : " effects");
 
             // Plugins that crashed or hung while being looked at are skipped from now on.
             if (const auto& failed = plugins.failedLastScan(); ! failed.isEmpty())
@@ -284,8 +287,10 @@ bool App::handleMidiPanelKey (const Key& k)
     }
 }
 
-void App::openPluginPicker (int targetTrack)
+void App::openPluginPicker (int targetTrack, int effectSlot)
 {
+    pluginPickSlot = effectSlot;
+
     // The first time, the list fills in while the picker is open.
     if (! plugins.hasScanned() && ! plugins.isScanning())
         plugins.startScan();
@@ -301,7 +306,7 @@ std::vector<juce::PluginDescription> App::pickerChoices() const
 {
     std::vector<juce::PluginDescription> out;
 
-    for (const auto& d : plugins.instruments())
+    for (const auto& d : pluginPickSlot >= 0 ? plugins.effects() : plugins.instruments())
         if (pluginFilter.isEmpty() || (d.manufacturerName + " " + d.name).containsIgnoreCase (pluginFilter))
             out.push_back (d);
 
@@ -329,7 +334,8 @@ bool App::handlePluginPickerKey (const Key& k)
             if (pluginPickIndex < n)
             {
                 pluginPickerVisible = false;
-                say (loadInstrument (pluginPickTarget, choices[(size_t) pluginPickIndex]));
+                say (pluginPickSlot >= 0 ? loadEffect (pluginPickTarget, pluginPickSlot, choices[(size_t) pluginPickIndex])
+                                         : loadInstrument (pluginPickTarget, choices[(size_t) pluginPickIndex]));
             }
             return true;
         case Key::Char:
@@ -415,13 +421,13 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     else
     {
         // Swapping plugins: the old one goes (its window too); the track keeps its notes.
-        for (auto it = instruments.begin(); it != instruments.end(); ++it)
-            if (it->track == track)
+        for (auto it = hosted.begin(); it != hosted.end(); ++it)
+            if (it->node == track)
             {
                 if (it->slot != nullptr)
                     it->slot->closeEditor();
 
-                instruments.erase (it);
+                hosted.erase (it);
                 break;
             }
     }
@@ -435,7 +441,7 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
         .setProperty (ids::pluginName, desc.name, um())
         .setProperty (ids::pluginState, stateFile.getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/'), um());
 
-    instruments.push_back ({ track, std::move (slot), {}, {} });
+    hosted.push_back ({ track, std::move (slot), {}, {} });
     focusTrack (index);
     rebuildGraph();
 
@@ -461,10 +467,10 @@ Result App::toggleEditor (int index)
 
     if (slot->editorShowing())
     {
-        if (auto* in = instrumentEntry (session->track (index)))
+        if (auto* in = hostedEntry (session->track (index)))
         {
             in->slot->closeEditor();
-            writeInstrumentState (*in);
+            writePluginState (*in);
         }
 
         return Result::good ("closed " + slot->name());

@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Midi.h"
 
@@ -43,6 +43,9 @@ public:
     // jump ends what it started. live: what the controller sent this block (armed tracks only);
     // when a track stops listening, the keys still held are released.
     void render (const Sequence&, const HostTransport&, int n, const MidiMsg* live, int numLive, float* left, float* right);
+
+    // An effect: left/right go through it in place. While it's being prepared they pass dry.
+    void process (const HostTransport&, int n, float* left, float* right);
 
 private:
     juce::Optional<PositionInfo> getPosition() const override;
@@ -100,7 +103,10 @@ public:
     const juce::StringArray& failedLastScan() const { return failed; } // plugin names that crashed or hung
 
     std::vector<juce::PluginDescription> instruments() const; // by name
-    std::optional<juce::PluginDescription> findInstrument (const juce::String& query) const;
+    std::vector<juce::PluginDescription> effects() const;     // everything else, by name
+    std::optional<juce::PluginDescription> findInstrument (const juce::String& query) const { return find (query, true); }
+    std::optional<juce::PluginDescription> findEffect (const juce::String& query) const { return find (query, false); }
+    std::optional<juce::PluginDescription> find (const juce::String& query, bool instrument) const;
     std::optional<juce::PluginDescription> byIdentifier (const juce::String& id) const;
 
     std::shared_ptr<PluginSlot> create (const juce::PluginDescription&, double sampleRate, int maxBlock, juce::String& error);

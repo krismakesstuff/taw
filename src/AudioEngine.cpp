@@ -396,6 +396,10 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         if (tp.plugin != nullptr)
             tp.plugin->render (tp.sequence, transport, n, tp.midiLive ? liveMidi.data() : nullptr, numLive, trackL, trackR);
 
+        // Effects run stopped too, so reverb tails ring out and monitored inputs go through them.
+        for (const auto& fx : tp.inserts)
+            fx->process (transport, n, trackL, trackR);
+
         const auto pan = (isStereo (tp) && ! monitoring) ? 1.0f : centrePan; // a mono input pans centre
         routeTrack (tp, pan, trackL, trackR, n, busPtrs.data(), mixL, mixR);
 

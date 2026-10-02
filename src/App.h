@@ -143,6 +143,16 @@ public:
     Result loadInstrument (const std::vector<int>& tracks, const juce::String& query);
     Result loadInstrument (int track, const juce::PluginDescription&); // track -1: a new one
     Result toggleEditor (int track); // "ed": the plugin's own window
+
+    // Inserts (Inserts.cpp): five effect slots per track, A to E, after the source (and the
+    // instrument), before the sends and the fader.
+    Result editInserts (const std::vector<int>& tracks, const juce::StringArray& args); // "2 fx b valhalla", "2 fx b x"
+    Result loadEffect (int track, int slot, const juce::PluginDescription&);
+    Result removeInsert (int track, int slot);
+    Result toggleInsertEditor (int track, int slot);
+    Result swapInserts (int track, int slot, int other);
+    Result toggleBypass (int track, int slot);
+    juce::String insertProblem (const juce::ValueTree& insert) const; // why it isn't loaded
     Result scanPlugins (bool retryFailed); // "scan", "scan retry"
     // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
     // opened, and the last message it sent, to see a controller is getting through.
@@ -166,7 +176,8 @@ public:
     // The routing column, right of the timeline ("io" shows or hides it; settings.json). o steps
     // into it on the focused track: left/right pick the output or a send, enter picks its bus.
     bool ioVisible = true;
-    int ioCell = -1; // -1: not in the column; 0: output; 1-5: sends A to E
+    int ioCell = -1; // -1: not in the column; else one of these
+    static constexpr int ioFirstInsert = 0, ioFirstSend = 5, ioOutput = 10;
 
     // The bus picker: where the output or a send goes. Type to filter (a new name makes a bus).
     struct BusChoice
@@ -182,7 +193,7 @@ public:
 
     PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr
     juce::String instrumentProblem (int track) const; // why it isn't loaded
-    void openPluginPicker (int targetTrack);
+    void openPluginPicker (int targetTrack, int effectSlot = -1); // effectSlot >= 0: effects, for that insert
     PluginCatalog plugins;
     std::unique_ptr<MidiInputs> midiInputs;
 
@@ -203,7 +214,7 @@ public:
     // The instrument picker ("inst" alone): type to filter, up/down, enter loads, esc closes.
     bool pluginPickerVisible = false;
     juce::String pluginFilter;
-    int pluginPickIndex = 0, pluginPickTarget = -1;
+    int pluginPickIndex = 0, pluginPickTarget = -1, pluginPickSlot = -1;
     std::vector<juce::PluginDescription> pickerChoices() const;
     Result returnPlayhead();
     Result setGridDivision (int noteValue);
@@ -362,20 +373,24 @@ private:
     int makeBus (const juce::String& name, juce::String& error); // a new bus track's busId, 0 on failure
     int resolveBus (const juce::String& query, juce::String& made, juce::String& error); // busId; may make one
 
-    // Live plugin instances, by track (found by tree identity, so they follow tracks around).
-    struct Instrument
+    // Live plugin instances: instruments (the node is the track) and effects (an INSERT). Found
+    // by tree identity, so they follow tracks around and come back with undo.
+    struct Hosted
     {
-        juce::ValueTree track;
+        juce::ValueTree node;
         std::shared_ptr<PluginSlot> slot;
         juce::String problem; // why it didn't load
         juce::MemoryBlock savedState; // what's in its state file, to skip rewriting it
     };
-    std::vector<Instrument> instruments;
-    Instrument* instrumentEntry (const juce::ValueTree& track);
-    std::shared_ptr<PluginSlot> createInstrument (const juce::ValueTree& track, double rate, int block, juce::String& problem);
-    void saveInstrumentStates();
-    void writeInstrumentState (Instrument&);
-    void pollInstruments(); // closed editor windows, device changes, periodic state saves
+    std::vector<Hosted> hosted;
+    Hosted* hostedEntry (const juce::ValueTree& node); // loads it the first time
+    std::shared_ptr<PluginSlot> createPlugin (const juce::ValueTree& node, double rate, int block, juce::String& problem);
+    void savePluginStates();
+    void writePluginState (Hosted&);
+    void pollPlugins(); // closed editor windows, device changes, periodic state saves
+    void dropPlugin (const juce::ValueTree& node); // its state saved, its window closed
+    void addInserts (TrackPlay&, const juce::ValueTree& track, bool offline);
+    void followWindow (int track, int slot); // a plugin window is open: show this insert's instead
     int preparedGeneration = -1;
     double lastStateSave = 0.0;
     void stopRecorders();

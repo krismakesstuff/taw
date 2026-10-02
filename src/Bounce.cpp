@@ -319,19 +319,21 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
             juce::FloatVectorOperations::copy (br, busPtrs[(size_t) tp.busIndex * 2 + 1], n);
         }
 
-        // Instruments: the graph has its own plugin instances (copies of the live ones), so the
-        // live ones keep playing while this renders.
+        // Instruments and effects: the graph has its own plugin instances (copies of the live
+        // ones), so the live ones keep playing while this renders.
+        HostTransport transport;
+        transport.bpm = graph->bpm;
+        transport.sampleRate = sampleRate;
+        transport.timeSigNum = graph->timeSigNum;
+        transport.timeSigDen = graph->timeSigDen;
+        transport.pos = pos;
+        transport.rolling = true;
+
         if (tp.plugin != nullptr)
-        {
-            HostTransport t;
-            t.bpm = graph->bpm;
-            t.sampleRate = sampleRate;
-            t.timeSigNum = graph->timeSigNum;
-            t.timeSigDen = graph->timeSigDen;
-            t.pos = pos;
-            t.rolling = true;
-            tp.plugin->render (tp.sequence, t, n, nullptr, 0, bl, br);
-        }
+            tp.plugin->render (tp.sequence, transport, n, nullptr, 0, bl, br);
+
+        for (const auto& fx : tp.inserts)
+            fx->process (transport, n, bl, br);
 
         routeTrack (tp, isStereo (tp) ? 1.0f : centrePan, bl, br, n, busPtrs.data(), l, r);
     }

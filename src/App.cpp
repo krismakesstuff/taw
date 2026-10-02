@@ -77,13 +77,13 @@ void App::releaseSession()
 
         // Plugins: their state to disk, their windows closed. The instances themselves go with
         // the last graph that plays them.
-        saveInstrumentStates();
+        savePluginStates();
 
-        for (auto& in : instruments)
+        for (auto& in : hosted)
             if (in.slot != nullptr)
                 in.slot->closeEditor();
 
-        instruments.clear();
+        hosted.clear();
         heldNotes.clear();
         midiRecordTracks.clear();
         fillView = pluginPickerVisible = false;
@@ -174,7 +174,7 @@ int App::run()
         collectFinishedTakes();
         drainLiveOverviews();
         drainRecordedMidi();
-        pollInstruments();
+        pollPlugins();
         pollBounce();
         pollImport();
 
@@ -926,7 +926,7 @@ Result App::redoEdit()
 void App::pumpBackgroundWork()
 {
     collectFinishedTakes();
-    pollInstruments();
+    pollPlugins();
     pollBounce();
     pollImport();
 
@@ -1050,13 +1050,13 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             tp.stereo = true;
             tp.sequence = buildSequence (t, session->samplesPerBeat());
 
-            if (auto* in = instrumentEntry (t); in != nullptr && in->slot != nullptr)
+            if (auto* in = hostedEntry (t); in != nullptr && in->slot != nullptr)
             {
                 if (offline)
                 {
                     // A bounce plays its own copy, so the live one keeps playing meanwhile.
                     juce::String problem;
-                    tp.plugin = createInstrument (t, sampleRate(), 8192, problem);
+                    tp.plugin = createPlugin (t, sampleRate(), 8192, problem);
 
                     if (tp.plugin != nullptr)
                     {
@@ -1139,21 +1139,28 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         g->tracks.push_back (std::move (tp));
     }
 
+    for (int i = 0; i < n; ++i)
+        addInserts (g->tracks[(size_t) i], session->track (i), offline);
+
     applyRouting (*g);
 
-    // Plugins of tracks that are gone (undo) or no longer instruments: state saved, window
-    // closed. Undoing back brings the plugin back from that state.
+    // Plugins that are gone (undo, a removed insert, a track no longer an instrument): state
+    // saved, window closed. Undoing back brings the plugin back from that state.
     if (! offline)
-        for (auto it = instruments.begin(); it != instruments.end();)
+        for (auto it = hosted.begin(); it != hosted.end();)
         {
-            if (! it->track.getParent().isValid() || ! Session::isInstrumentTrack (it->track))
+            const bool gone = it->node.hasType (ids::INSERT)
+                                  ? ! it->node.getParent().isValid() || ! it->node.getParent().getParent().isValid()
+                                  : ! it->node.getParent().isValid() || ! Session::isInstrumentTrack (it->node);
+
+            if (gone)
             {
-                writeInstrumentState (*it);
+                writePluginState (*it);
 
                 if (it->slot != nullptr)
                     it->slot->closeEditor();
 
-                it = instruments.erase (it);
+                it = hosted.erase (it);
             }
             else
             {
@@ -2290,7 +2297,7 @@ void App::handleMainKey (const Key& k)
                 else
                     topLane = TopLane::markers, trackAnchor = -1;
             }
-            // o: into the routing column on the focused track (the output, then sends A to E).
+            // o: into the routing column on the focused track (inserts, sends, then the output).
             else if (lineEmpty && k.ch == 'o' && session != nullptr)
             {
                 if (mixFocused() || onTopLane() || session->numTracks() == 0)
@@ -2300,8 +2307,8 @@ void App::handleMainKey (const Key& k)
                     if (! ioVisible)
                         ioVisible = true, saveSettings();
 
-                    ioCell = 0;
-                    say (Result::good (describeIoCell (focused, 0)));
+                    ioCell = ioFirstInsert;
+                    say (Result::good (describeIoCell (focused, ioCell)));
                 }
             }
             // f: the focused track fills the track area (a piano roll on instrument tracks).

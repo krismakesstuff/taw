@@ -1,4 +1,4 @@
-// Routing: bus tracks, each track's output (the mix or a bus) and its five sends (A to E), the
+﻿// Routing: bus tracks, each track's output (the mix or a bus) and its five sends (A to E), the
 // routing column right of the timeline, and the bus picker.
 
 #include "App.h"
@@ -363,7 +363,7 @@ Result App::setSendBus (int track, int slot, int busId)
         send.setProperty (ids::to, busId, um());
     }
 
-    return Result::good (describeIoCell (track, slot + 1));
+    return Result::good (describeIoCell (track, ioFirstSend + slot));
 }
 
 Result App::nudgeSend (int track, int slot, double deltaDb)
@@ -375,7 +375,7 @@ Result App::nudgeSend (int track, int slot, double deltaDb)
 
     const auto db = (double) send[ids::db];
     send.setProperty (ids::db, juce::jlimit (-96.0, 12.0, db <= -96.0 && deltaDb > 0 ? -60.0 : std::round (db + deltaDb)), um());
-    return Result::good (describeIoCell (track, slot + 1));
+    return Result::good (describeIoCell (track, ioFirstSend + slot));
 }
 
 juce::String App::describeIoCell (int track, int cell) const
@@ -383,11 +383,25 @@ juce::String App::describeIoCell (int track, int cell) const
     const auto t = session->track (track);
     const auto label = "track " + juce::String (track + 1);
 
-    if (cell == 0)
+    if (cell == ioOutput)
         return label + L" output \x2192 " + busName (t[ids::out]) + L" \x00b7 enter changes \x00b7 del: the mix";
 
-    const auto send = Session::send (t, cell - 1);
-    const auto slot = Session::slotName (cell - 1);
+    if (cell < ioFirstSend)
+    {
+        const auto insert = Session::insert (t, cell);
+        const auto slot = Session::slotName (cell);
+
+        if (! insert.isValid())
+            return label + " insert " + slot + L" empty \x00b7 enter picks an effect";
+
+        const auto problem = insertProblem (insert);
+        return label + " insert " + slot + ": " + insert[ids::pluginName].toString()
+               + (problem.isNotEmpty() ? L" \x2014 " + problem : (bool) insert[ids::bypass] ? juce::String (" (bypassed)") : juce::String())
+               + L" \x00b7 enter opens it \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes";
+    }
+
+    const auto send = Session::send (t, cell - ioFirstSend);
+    const auto slot = Session::slotName (cell - ioFirstSend);
 
     if (! send.isValid())
         return label + " send " + slot + L" empty \x00b7 enter picks a bus";
@@ -408,7 +422,14 @@ juce::String App::describeSends (int track) const
             parts.add (Session::slotName (s) + " " + busName (send[ids::to]) + " " + levelText (send[ids::db])
                        + ((bool) send[ids::pre] ? " pre" : "") + ((bool) send[ids::mute] ? " off" : ""));
 
-    return "track " + juce::String (track + 1) + L" \x2192 " + busName (t[ids::out])
+    juce::StringArray inserts;
+
+    for (int s = 0; s < Session::numSends; ++s)
+        if (const auto insert = Session::insert (t, s); insert.isValid())
+            inserts.add (Session::slotName (s) + " " + insert[ids::pluginName].toString() + ((bool) insert[ids::bypass] ? " (bypassed)" : ""));
+
+    return "track " + juce::String (track + 1) + (inserts.isEmpty() ? juce::String() : L" \x00b7 inserts " + inserts.joinIntoString (juce::String (L" \x00b7 ")))
+           + L" \x2192 " + busName (t[ids::out])
            + (parts.isEmpty() ? juce::String (L" \x00b7 no sends") : L" \x00b7 sends " + parts.joinIntoString (juce::String (L" \x00b7 ")));
 }
 
@@ -546,7 +567,7 @@ Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& a
         if (onOff.isNotEmpty())
             send.setProperty (ids::mute, onOff == "off", um());
 
-        done.add (describeIoCell (t, s + 1).upToFirstOccurrenceOf (juce::String (L" \x00b7"), false, false));
+        done.add (describeIoCell (t, ioFirstSend + s).upToFirstOccurrenceOf (juce::String (L" \x00b7"), false, false));
     }
 
     const auto msg = done.joinIntoString (juce::String (L" \x00b7 "));
@@ -665,9 +686,12 @@ bool App::handleBusPickerKey (const Key& k)
     }
 }
 
-// In the routing column (after o): left/right pick the output or a send, up/down change tracks
-// as usual, enter picks a bus, del clears, [ ] ride a send, M turns a send off, P flips it
-// before/after the fader, esc or o leaves.
+// In the routing column (after o): left/right walk inserts A-E, sends A-E, then the output;
+// up/down change tracks as usual. On an insert: enter opens its window (empty: the effects
+// picker), M bypasses, shift+left/right moves it along the chain, del removes it. On a send:
+// enter picks its bus, [ ] ride its level, M turns it off, P flips pre/post, del removes it. On
+// the output: enter picks a bus, del puts it back on the mix. Esc or o leaves. An open plugin
+// window follows you from insert to insert.
 bool App::handleIoKey (const Key& k)
 {
     if (ioCell < 0 || session == nullptr || ! commandLine.isEmpty())
@@ -680,18 +704,37 @@ bool App::handleIoKey (const Key& k)
     }
 
     const auto track = focused;
-    const auto sendSlot = ioCell - 1;
+    const auto insertSlot = ioCell < ioFirstSend ? ioCell : -1;
+    const auto sendSlot = ioCell >= ioFirstSend && ioCell < ioOutput ? ioCell - ioFirstSend : -1;
 
     switch (k.code)
     {
         case Key::Left:
         case Key::Right:
-            if (k.ctrl || k.alt || k.shift)
+        {
+            if (k.ctrl || k.alt)
                 return false;
 
-            ioCell = juce::jlimit (0, Session::numSends, ioCell + (k.code == Key::Right ? 1 : -1));
+            const int step = k.code == Key::Right ? 1 : -1;
+
+            // Shift moves the insert itself (and the cursor with it).
+            if (k.shift)
+            {
+                if (insertSlot < 0 || insertSlot + step < 0 || insertSlot + step >= Session::numSends)
+                    return true;
+
+                beginEdit ("move insert");
+                const auto r = swapInserts (track, insertSlot, insertSlot + step);
+                ioCell += step;
+                say (r);
+                return true;
+            }
+
+            ioCell = juce::jlimit (0, ioOutput, ioCell + step);
+            followWindow (track, ioCell < ioFirstSend ? ioCell : -1);
             say (Result::good (describeIoCell (track, ioCell)));
             return true;
+        }
 
         case Key::Up:
         case Key::Down:
@@ -701,21 +744,41 @@ bool App::handleIoKey (const Key& k)
             k.code == Key::Up ? focusUp (false) : focusDown (false);
 
             if (! mixFocused() && ! onTopLane())
+            {
+                followWindow (focused, ioCell < ioFirstSend ? ioCell : -1);
                 say (Result::good (describeIoCell (focused, ioCell)));
+            }
             return true;
 
         case Key::Enter:
-            openBusPicker (track, ioCell);
+            if (insertSlot >= 0)
+            {
+                if (Session::insert (session->track (track), insertSlot).isValid())
+                    say (toggleInsertEditor (track, insertSlot));
+                else
+                    openPluginPicker (track, insertSlot);
+            }
+            else
+            {
+                openBusPicker (track, ioCell == ioOutput ? 0 : sendSlot + 1);
+            }
             return true;
 
         case Key::Delete:
         case Key::Backspace:
-            beginEdit (ioCell == 0 ? "output" : "remove send");
-
-            if (ioCell == 0)
+            if (insertSlot >= 0)
+            {
+                beginEdit ("remove insert");
+                say (removeInsert (track, insertSlot));
+            }
+            else if (ioCell == ioOutput)
+            {
+                beginEdit ("output");
                 say (setOutputBus (track, 0));
+            }
             else if (auto send = Session::send (session->track (track), sendSlot); send.isValid())
             {
+                beginEdit ("remove send");
                 session->track (track).removeChild (send, um());
                 say (Result::good ("track " + juce::String (track + 1) + " send " + Session::slotName (sendSlot) + L" removed \x00b7 ctrl+z brings it back"));
             }
@@ -734,6 +797,13 @@ bool App::handleIoKey (const Key& k)
             {
                 ioCell = -1;
                 message.clear();
+                return true;
+            }
+
+            if (insertSlot >= 0 && k.ch == 'M')
+            {
+                beginEdit ("bypass");
+                say (toggleBypass (track, insertSlot));
                 return true;
             }
 

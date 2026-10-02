@@ -1,4 +1,4 @@
-#include "Plugins.h"
+﻿#include "Plugins.h"
 #include "Session.h"
 
 namespace taw
@@ -250,6 +250,40 @@ void PluginSlot::render (const Sequence& seq, const HostTransport& t, int n, con
     }
 }
 
+void PluginSlot::process (const HostTransport& t, int n, float* left, float* right)
+{
+    const juce::SpinLock::ScopedTryLockType lock (processLock);
+
+    if (! lock.isLocked() || ! prepared || n > buffer.getNumSamples())
+        return;
+
+    transport = t;
+    midi.clear();
+
+    juce::AudioBuffer<float> block (buffer.getArrayOfWritePointers(), buffer.getNumChannels(), n);
+    block.clear();
+    const auto ins = plugin->getTotalNumInputChannels(), outs = plugin->getTotalNumOutputChannels();
+
+    if (ins >= 2)
+    {
+        block.copyFrom (0, 0, left, n);
+        block.copyFrom (1, 0, right, n);
+    }
+    else if (ins == 1) // a mono effect gets both sides
+    {
+        block.copyFrom (0, 0, left, n, 0.5f);
+        block.addFrom (0, 0, right, n, 0.5f);
+    }
+
+    plugin->processBlock (block, midi);
+
+    if (outs >= 1)
+    {
+        juce::FloatVectorOperations::copy (left, block.getReadPointer (0), n);
+        juce::FloatVectorOperations::copy (right, block.getReadPointer (outs >= 2 ? 1 : 0), n);
+    }
+}
+
 //==============================================================================
 struct PluginCatalog::ScanJob
 {
@@ -458,14 +492,29 @@ std::vector<juce::PluginDescription> PluginCatalog::instruments() const
     return out;
 }
 
-std::optional<juce::PluginDescription> PluginCatalog::findInstrument (const juce::String& queryIn) const
+std::vector<juce::PluginDescription> PluginCatalog::effects() const
+{
+    std::vector<juce::PluginDescription> out;
+
+    for (const auto& d : list.getTypes())
+        if (! d.isInstrument)
+            out.push_back (d);
+
+    std::sort (out.begin(), out.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
+    return out;
+}
+
+std::optional<juce::PluginDescription> PluginCatalog::find (const juce::String& queryIn, bool instrument) const
 {
     const auto query = queryIn.trim().unquoted();
     std::optional<juce::PluginDescription> best;
     int bestRank = 0;
 
-    // Exact name, then the start of a name, then anywhere in it (or the maker); shortest wins a tie.
-    for (const auto& d : instruments())
+    // Exact name, then the start of a name, then anywhere in it (or the maker); shortest wins a
+    // tie, except that "X Mono" loses to "X Stereo" (taw's tracks run in stereo).
+    auto length = [] (const juce::String& name) { return name.length() + (name.endsWithIgnoreCase (" Mono") ? 100 : 0); };
+
+    for (const auto& d : instrument ? instruments() : effects())
     {
         const int rank = d.name.equalsIgnoreCase (query) ? 4
                          : d.name.startsWithIgnoreCase (query) ? 3
@@ -473,7 +522,7 @@ std::optional<juce::PluginDescription> PluginCatalog::findInstrument (const juce
                          : (d.manufacturerName + " " + d.name).containsIgnoreCase (query) ? 1
                                                                                             : 0;
 
-        if (rank > bestRank || (rank == bestRank && rank > 0 && d.name.length() < best->name.length()))
+        if (rank > bestRank || (rank == bestRank && rank > 0 && length (d.name) < length (best->name)))
         {
             best = d;
             bestRank = rank;
@@ -502,6 +551,21 @@ std::shared_ptr<PluginSlot> PluginCatalog::create (const juce::PluginDescription
             error = "couldn't load " + desc.name;
 
         return {};
+    }
+
+    // Effects run on a stereo track: ask for stereo in and out (a plugin that can't keep its own).
+    if (! desc.isInstrument)
+    {
+        auto layout = instance->getBusesLayout();
+
+        if (layout.inputBuses.size() > 0)
+            layout.inputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+
+        if (layout.outputBuses.size() > 0)
+            layout.outputBuses.getReference (0) = juce::AudioChannelSet::stereo();
+
+        if (instance->checkBusesLayoutSupported (layout))
+            instance->setBusesLayout (layout);
     }
 
     auto slot = std::make_shared<PluginSlot> (std::move (instance), desc);

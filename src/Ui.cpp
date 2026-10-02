@@ -426,7 +426,16 @@ void Ui::drawTimeline (App& app)
     auto& s = *app.session;
     const int w = canvas.width(), h = canvas.height();
     const bool io = app.ioVisible;
-    const int laneX = leftPanel + 1, laneW = laneWidth (w + 1, io), ioX = laneX + laneW + 1, meterX = ioX + ioWidth (io);
+    const int ioX = leftPanel + 1, meterX = ioX + ioWidth (io), laneX = laneStart (io), laneW = laneWidth (w + 1, io);
+
+    // The borders between the panels and the timeline, and after it.
+    auto borders = [&] (int y)
+    {
+        canvas.put (ioX - 1, y, L'\x2502', colour::faint);
+        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
+        canvas.put (laneX - 1, y, L'\x2502', colour::faint);
+        canvas.put (laneX + laneW, y, L'\x2502', colour::faint);
+    };
     const auto spc = app.samplesPerColumn();
     const auto rolling = app.engine.isRolling();
     const auto playhead = app.engine.playhead();
@@ -475,11 +484,7 @@ void Ui::drawTimeline (App& app)
             canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
         canvas.text (1, y, label, focusedLane ? colour::dim : colour::faint, bg, false, leftPanel - 1);
-        canvas.put (laneX - 1, y, L'\x2502', colour::faint);
-        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
-
-        if (io)
-            canvas.put (ioX - 1, y, L'\x2502', colour::faint);
+        borders (y);
 
         if (focusedLane)
             for (int c = 0; c < laneW; ++c)
@@ -491,17 +496,18 @@ void Ui::drawTimeline (App& app)
                                      : juce::String (spc / app.sampleRate(), 2) + " s";
     drawTopLane (markerY, App::TopLane::markers, "markers");
     drawTopLane (rulerY, App::TopLane::ruler, "zoom " + zoomText + "/col");
-    canvas.text (meterX + 1, rulerY, "  vol", colour::faint);
+    canvas.text (meterX, rulerY, "  vol", colour::faint);
+    canvas.text (meterX + 6, rulerY, "level", colour::faint);
+    canvas.text (meterX + 12, rulerY, " peak", colour::faint);
 
+    // Slot letters: inserts on a track's first row, sends on its second.
     if (io)
     {
-        canvas.text (ioX + ioOut, rulerY, "out", colour::faint);
-
         for (int k = 0; k < Session::numSends; ++k)
-            canvas.text (ioX + ioSends + k * ioSendW, rulerY, Session::slotName (k), colour::faint);
+            canvas.text (ioX + ioSlots + k * ioSlotW, rulerY, Session::slotName (k), colour::faint);
+
+        canvas.text (ioX + ioOut, rulerY, "out", colour::faint);
     }
-    canvas.text (meterX + 7, rulerY, "level", colour::faint);
-    canvas.text (meterX + 20, rulerY, " peak", colour::faint);
 
     // Loop range on the ruler: green when on, grey when set but off.
     {
@@ -792,10 +798,8 @@ void Ui::drawTimeline (App& app)
         {
             canvas.fill (0, y + r, leftPanel, L' ', -1, bg);
             canvas.put (laneX - 1, y + r, L'\x2502', colour::faint);
-            canvas.put (meterX - 1, y + r, L'\x2502', colour::faint);
-
-            if (io)
-                canvas.put (ioX - 1, y + r, L'\x2502', colour::faint);
+            canvas.fill (meterX, y + r, meterPanel, L' ', -1, bg);
+            borders (y + r);
         }
 
         if (focusedRow)
@@ -998,7 +1002,8 @@ void Ui::drawTimeline (App& app)
                          colour::dim, laneBg, false, laneW - 2);
         }
 
-        // Routing: the output, then sends A to E (names on the first row, levels under them).
+        // Routing: inserts A-E on the first row; sends A-E and the output on the second, with
+        // the send levels under them when there's a third. One row tall: inserts and the output.
         if (io)
         {
             const bool inColumn = focusedRow && app.ioCell >= 0;
@@ -1007,47 +1012,64 @@ void Ui::drawTimeline (App& app)
                 canvas.fill (ioX, y + r, ioPanel, L' ', -1, bg);
 
             auto cellBg = [&] (int cell) { return inColumn && app.ioCell == cell ? colour::selBg : bg; };
-            const int outBus = s.findBus (t[ids::out]);
-            const auto outName = outBus < 0 ? juce::String ("Mix") : s.track (outBus)[ids::name].toString();
-            canvas.fill (ioX + ioOut - 1, y, 6, L' ', -1, cellBg (0));
-            canvas.text (ioX + ioOut, y, outName, outBus < 0 ? colour::dim : colour::accent, cellBg (0), outBus >= 0, 5);
 
             for (int k = 0; k < Session::numSends; ++k)
             {
-                const int x = ioX + ioSends + k * ioSendW, cbg = cellBg (k + 1);
-                const auto send = Session::send (t, k);
-                canvas.fill (x - 1, y, ioSendW, L' ', -1, cbg);
+                const int x = ioX + ioSlots + k * ioSlotW, cbg = cellBg (App::ioFirstInsert + k);
+                const auto insert = Session::insert (t, k);
+                canvas.fill (x - 1, y, ioSlotW, L' ', -1, cbg);
 
-                if (! send.isValid())
-                {
+                if (! insert.isValid())
                     canvas.put (x, y, L'\x00b7', colour::faint, cbg);
-                    continue;
-                }
-
-                const int dest = s.findBus (send[ids::to]);
-                const bool off = send[ids::mute];
-                canvas.text (x, y, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(), dest < 0 ? colour::error : off ? colour::faint : colour::text,
-                             cbg, false, 3);
-
-                // The level under the name; pre-fader sends in the accent colour.
-                if (rowsPerTrack > 1)
-                {
-                    const double db = send[ids::db];
-                    const auto level = db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
-                    canvas.fill (x - 1, y + 1, ioSendW, L' ', -1, cbg);
-                    canvas.text (x, y + 1, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, 3);
-                }
+                else
+                    canvas.text (x, y, insert[ids::pluginName].toString(),
+                                 app.insertProblem (insert).isNotEmpty() ? colour::error : (bool) insert[ids::bypass] ? colour::faint : colour::note, cbg,
+                                 false, 3);
             }
+
+            if (rowsPerTrack > 1)
+                for (int k = 0; k < Session::numSends; ++k)
+                {
+                    const int x = ioX + ioSlots + k * ioSlotW, cbg = cellBg (App::ioFirstSend + k);
+                    const auto send = Session::send (t, k);
+                    canvas.fill (x - 1, y + 1, ioSlotW, L' ', -1, cbg);
+
+                    if (! send.isValid())
+                    {
+                        canvas.put (x, y + 1, L'\x00b7', colour::faint, cbg);
+                        continue;
+                    }
+
+                    const int dest = s.findBus (send[ids::to]);
+                    const bool off = send[ids::mute];
+                    canvas.text (x, y + 1, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(),
+                                 dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, false, 3);
+
+                    // The level under the name; pre-fader sends in the accent colour.
+                    if (rowsPerTrack > 2)
+                    {
+                        const double db = send[ids::db];
+                        const auto level = db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
+                        canvas.fill (x - 1, y + 2, ioSlotW, L' ', -1, cbg);
+                        canvas.text (x, y + 2, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, 3);
+                    }
+                }
+
+            const int outY = rowsPerTrack > 1 ? y + 1 : y;
+            const int outBus = s.findBus (t[ids::out]);
+            const auto outName = outBus < 0 ? juce::String ("Mix") : s.track (outBus)[ids::name].toString();
+            canvas.fill (ioX + ioOut - 1, outY, 6, L' ', -1, cellBg (App::ioOutput));
+            canvas.text (ioX + ioOut, outY, outName, outBus < 0 ? colour::dim : colour::accent, cellBg (App::ioOutput), outBus >= 0, 5);
         }
 
         // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
         // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
-        drawVolume (meterX + 1, y, t[ids::gainDb], bg);
-        drawDb (meterX + 20, y, m.hold, m.clipped, bg);
+        drawVolume (meterX, y, t[ids::gainDb], bg);
+        drawDb (meterX + 12, y, m.hold, m.clipped, bg);
 
         for (int r = 0; r < rowsPerTrack; ++r)
-            drawMeter (meterX + 7, y + r, 12, m.level, colour::meterBg);
+            drawMeter (meterX + 6, y + r, 5, m.level, colour::meterBg);
     }
 
     // The cursor's handle sits under the last track, clear of the ruler's numbers.
@@ -1061,7 +1083,7 @@ void Ui::drawTimeline (App& app)
     {
         const int y = masterY + ch;
         const int bg = mixFocused ? colour::focusBg : -1;
-        canvas.fill (0, y, leftPanel, L' ', -1, bg);
+        canvas.fill (0, y, meterX + meterPanel, L' ', -1, bg);
 
         if (ch == 0)
         {
@@ -1069,15 +1091,11 @@ void Ui::drawTimeline (App& app)
                 canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
             canvas.text (4, y, "Mix", colour::text, bg, true);
-            drawVolume (meterX + 1, y, s.tree()[ids::mixDb], bg);
+            drawVolume (meterX, y, s.tree()[ids::mixDb], bg);
         }
 
-        canvas.text (laneX - 3, y, ch == 0 ? "L" : "R", colour::dim, bg);
-        canvas.put (laneX - 1, y, L'\x2502', colour::faint);
-        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
-
-        if (io)
-            canvas.put (ioX - 1, y, L'\x2502', colour::faint);
+        canvas.text (leftPanel - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
+        borders (y);
 
         if (ch == 0 && fill)
             canvas.text (laneX + 1, y, "track " + juce::String (app.focused + 1) + " of " + juce::String (n) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
@@ -1088,8 +1106,8 @@ void Ui::drawTimeline (App& app)
                          colour::faint);
 
         const auto& m = app.masterMeters[(size_t) ch];
-        drawMeter (meterX + 7, y, 12, m.level, colour::meterBg);
-        drawDb (meterX + 20, y, m.hold, m.clipped);
+        drawMeter (meterX + 6, y, 5, m.level, colour::meterBg);
+        drawDb (meterX + 12, y, m.hold, m.clipped, bg);
     }
 }
 
@@ -1215,8 +1233,11 @@ void Ui::drawBottom (App& app)
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
-        hints = app.ioCell == 0 ? L"\x2190\x2192 output / sends A-E \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 del: back to the mix \x00b7 [ ] track volume \x00b7 esc or o leaves"
-                                : L"\x2190\x2192 output / sends A-E \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 [ ] send level \x00b7 M off \x00b7 P pre/post \x00b7 del removes \x00b7 esc or o leaves";
+        hints = app.ioCell < App::ioFirstSend
+                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 tracks \x00b7 enter opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or o leaves"
+                : app.ioCell == App::ioOutput
+                    ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 del: back to the mix \x00b7 [ ] track volume \x00b7 esc or o leaves"
+                    : L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 tracks \x00b7 enter picks a bus \x00b7 [ ] send level \x00b7 M off \x00b7 P pre/post \x00b7 del removes \x00b7 esc or o leaves";
     else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isBusTrack (app.session->track (app.focused)))
         hints = L"a bus plays what's sent to it \x00b7 2 send <name> or 2 out <name> feeds it \x00b7 o routes \x00b7 [ ] its volume \x00b7 shift+S solo (keeps what feeds it) \x00b7 ? help";
     else if (app.session != nullptr && ! app.mixFocused() && ! app.onTopLane() && Session::isInstrumentTrack (app.session->track (app.focused)))
@@ -1265,7 +1286,8 @@ void Ui::drawHelp (App&)
         { Pair, L"shift+R  ed", L"arm for MIDI / its window", L"2 send verb", L"send A-E (a new name: a bus)" },
         { Pair, L"f", L"focused track fills: piano roll", L"2 send b -6", L"level; pre post off on x" },
         { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
-        { Pair, nullptr, nullptr, L"o   io", L"routing column / show, hide" },
+        { Pair, L"2 fx valhalla", L"effect in a free insert", L"2 fx b  b x", L"its window / remove it" },
+        { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"o   io", L"inserts+sends column / hide" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"count 4", L"count-in clicks (off)", L"count always", L"...on play too (rec: not)" },
@@ -1371,8 +1393,10 @@ void Ui::drawPluginPicker (App& app)
     for (int y = 0; y < boxH; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
-    canvas.text (x0 + 2, y0 + 1, "INSTRUMENTS", colour::text, bg, true);
-    canvas.text (x0 + 15, y0 + 1, app.pluginPickTarget >= 0 ? "onto track " + juce::String (app.pluginPickTarget + 1) : juce::String ("a new track"),
+    const bool effects = app.pluginPickSlot >= 0;
+    canvas.text (x0 + 2, y0 + 1, effects ? "EFFECTS" : "INSTRUMENTS", colour::text, bg, true);
+    canvas.text (x0 + 15, y0 + 1, effects ? "insert " + Session::slotName (app.pluginPickSlot) + " on track " + juce::String (app.pluginPickTarget + 1)
+                                  : app.pluginPickTarget >= 0 ? "onto track " + juce::String (app.pluginPickTarget + 1) : juce::String ("a new track"),
                  colour::dim, bg);
 
     // The filter, typed straight in.
@@ -1383,7 +1407,7 @@ void Ui::drawPluginPicker (App& app)
         canvas.text (x0 + 2, y0 + 4, L"scanning plugins " + juce::String (juce::roundToInt (app.plugins.scanProgress() * 100.0f)) + L"% \x00b7 "
                                          + app.plugins.scanningName(), colour::meterYellow, bg, false, boxW - 4);
     else if (choices.empty())
-        canvas.text (x0 + 2, y0 + 4, app.pluginFilter.isEmpty() ? L"no instruments found \x00b7 esc, then scan looks again"
+        canvas.text (x0 + 2, y0 + 4, app.pluginFilter.isEmpty() ? (effects ? L"no effects found \x00b7 esc, then scan looks again" : L"no instruments found \x00b7 esc, then scan looks again")
                                                                 : L"nothing matches \x00b7 backspace", colour::dim, bg);
 
     // Keep the chosen row in view.

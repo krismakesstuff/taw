@@ -94,6 +94,9 @@ struct TrackPlay
     Sequence sequence;
     bool midiLive = false;
 
+    // Effects, in slot order (bypassed ones left out): after the source, before sends and fader.
+    std::vector<std::shared_ptr<PluginSlot>> inserts;
+
     std::shared_ptr<Recorder> recorder;
 
     // Routing. Buses are numbered in the graph (Graph::numBuses); -1 is the mix.

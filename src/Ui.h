@@ -12,15 +12,19 @@ class App;
 
 namespace layout
 {
+// Left to right, as in Pro Tools: the track panel, the routing column, the meter, then the
+// timeline.
 constexpr int leftPanel = 25;  // focus, number, name, flags, input
-constexpr int meterPanel = 25; // volume, meter bar, peak readout
-constexpr int ioPanel = 27;    // routing, right of the lane: the output, then sends A to E
+constexpr int ioPanel = 27;    // inserts A-E on a track's first row; sends A-E and the output on its second
+constexpr int meterPanel = 18; // volume, meter bar, peak readout
 
 inline int ioWidth (bool io) { return io ? ioPanel + 1 : 0; } // with its border
-constexpr int ioOut = 1, ioSends = 7, ioSendW = 4;             // offsets in the panel, send cell width
+constexpr int ioSlots = 1, ioSlotW = 4, ioOut = 21;            // offsets in the panel, slot cell width
 
-// Console width minus the one-column gutter, the panels and the two lane borders.
-inline int laneWidth (int consoleWidth, bool io) { return std::max (10, consoleWidth - 1 - leftPanel - 2 - meterPanel - ioWidth (io)); }
+inline int laneStart (bool io) { return leftPanel + 1 + ioWidth (io) + meterPanel + 1; }
+
+// Console width minus the one-column gutter, everything left of the lane and its right border.
+inline int laneWidth (int consoleWidth, bool io) { return std::max (10, consoleWidth - 1 - laneStart (io) - 1); }
 } // namespace layout
 
 struct Cell

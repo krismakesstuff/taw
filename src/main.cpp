@@ -369,7 +369,8 @@ int main (int argc, char** argv)
                 what = "bus";
 
             // Routing, when it isn't just "to the mix".
-            const auto routing = app.describeSends (t).fromFirstOccurrenceOf (" ", false, false).fromFirstOccurrenceOf (" ", false, false);
+            const auto routing = app.describeSends (t).fromFirstOccurrenceOf (" ", false, false).fromFirstOccurrenceOf (" ", false, false)
+                                     .trimCharactersAtStart (juce::String (L"\x00b7 "));
 
             if (! routing.startsWith (juce::String (L"\x2192 Mix \x00b7 no sends")))
                 what << " | " << routing;

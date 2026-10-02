@@ -17,6 +17,7 @@ TAW_ID (MARKER)
 TAW_ID (NOTE) // instrument tracks: one MIDI note
 TAW_ID (CC)   // instrument tracks: a controller, pitch bend or pressure change
 TAW_ID (SEND) // a track's send to a bus: one of five slots, a to e
+TAW_ID (INSERT) // an effect plugin in one of a track's five insert slots, a to e
 
 TAW_ID (version)
 TAW_ID (name)
@@ -47,7 +48,8 @@ TAW_ID (slot)         // SEND: "a" to "e"
 TAW_ID (to)           // SEND: the busId it feeds
 TAW_ID (db)           // SEND: level in dB
 TAW_ID (pre)          // SEND: before the track's fader (default after)
-TAW_ID (plugin)       // instrument track: the plugin's identifier (PluginDescription::createIdentifierString)
+TAW_ID (bypass)       // INSERT: skipped (the plugin stays loaded)
+TAW_ID (plugin)       // instrument track or INSERT: the plugin's identifier (PluginDescription::createIdentifierString)
 TAW_ID (pluginName)   // ...and its name, to find it again if the identifier changes
 TAW_ID (pluginState)  // ...and the file its state is kept in, relative to the session folder
 TAW_ID (sample)       // sample track: the file it plays

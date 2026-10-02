@@ -105,6 +105,8 @@ static void applyDefaults (juce::ValueTree& s)
     def (ids::grid, true);
     def (ids::gridDiv, 4);
     def (ids::latencyComp, true);
+    def (ids::trackHeight, 2);
+    def (ids::inputQuantize, false);
     def (ids::click, false);
     def (ids::clickWhen, "rec");
     def (ids::clickDb, -6.0);

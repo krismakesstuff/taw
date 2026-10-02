@@ -55,7 +55,7 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 
 // Every verb, so a verb glued to its argument can be split off: "2i2", "2v-6", "bpm92".
 const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "import", "imp", "undo", "redo", "dev", "panel",
-                              "help", "q", "quit", "exit", "save", "bpm", "grid", "lat", "add", "new",
+                              "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close" };
 
@@ -253,6 +253,106 @@ Result App::setClick (const juce::String& argIn)
 }
 
 //==============================================================================
+// Project settings panel ("project")
+
+std::vector<App::Setting> App::projectSettings() const
+{
+    if (session == nullptr)
+        return {};
+
+    const auto& s = session->tree();
+    const auto onOff = [] (bool on) { return juce::String (on ? "on" : "off"); };
+    const int height = session->trackHeight();
+
+    return {
+        { "Tempo", juce::String (session->bpm(), 1) + " bpm", "bpm " },
+        { "Time signature", s[ids::timeSigNum].toString() + "/" + s[ids::timeSigDen].toString(), "sig " },
+        { "Grid", onOff (session->gridOn()), {} },
+        { "Grid step (alt+arrows)", "1/" + s[ids::gridDiv].toString(), "grid " },
+        { "Input quantize (pads)", onOff (s[ids::inputQuantize]), {} },
+        { "Click", ! (bool) s[ids::click] ? juce::String ("off") : s[ids::clickWhen].toString() == "rec" ? juce::String ("recording only") : juce::String ("always"), {} },
+        { "Click level", juce::String ((double) s[ids::clickDb], 1) + " dB", "click " },
+        { "Latency compensation", onOff (s[ids::latencyComp]), {} },
+        { "Track height", juce::String (height) + (height == 1 ? " row" : " rows"), "height " },
+        { "Bounce format", s[ids::bounceFormat].toString(), {} },
+        { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
+        { "Sample rate", juce::String (sampleRate() / 1000.0, 1) + L" kHz  (set when the session was made)", {}, false },
+        { "Theme (all sessions)", theme, {} },
+    };
+}
+
+// Left / right on a setting. Goes through the same commands you'd type, so undo names them.
+Result App::stepSetting (int index, int direction)
+{
+    const auto& s = session->tree();
+    const auto settings = projectSettings();
+
+    if (index < 0 || index >= (int) settings.size() || ! settings[(size_t) index].editable)
+        return Result::fail (L"this one is read-only");
+
+    auto cycle = [direction] (const juce::StringArray& options, const juce::String& current)
+    {
+        const auto i = options.indexOf (current);
+        return options[(juce::jmax (0, i) + direction + options.size()) % options.size()];
+    };
+
+    // By name, so rows can be added or moved in projectSettings without renumbering.
+    const auto& name = settings[(size_t) index].name;
+
+    if (name == "Tempo")          return execute ("bpm " + juce::String (juce::jlimit (20.0, 400.0, std::round (session->bpm()) + direction)));
+    if (name == "Time signature") return execute ("sig " + juce::String (juce::jlimit (1, 16, (int) s[ids::timeSigNum] + direction)) + "/" + s[ids::timeSigDen].toString());
+    if (name == "Grid")           return execute ("grid");
+    if (name.startsWith ("Grid step")) return execute ("grid " + cycle ({ "4", "8", "16", "32" }, s[ids::gridDiv].toString()));
+    if (name.startsWith ("Input quantize")) return execute ("snap input");
+    if (name == "Click")          return execute ("click " + cycle ({ "off", "always", "rec" }, ! (bool) s[ids::click] ? juce::String ("off") : s[ids::clickWhen].toString()));
+    if (name == "Click level")    return execute ("click " + juce::String (juce::jlimit (-60.0, 6.0, std::round ((double) s[ids::clickDb]) + direction), 1));
+    if (name == "Latency compensation") return execute ("lat");
+    if (name == "Track height")   return execute ("height " + juce::String (juce::jlimit (1, 4, session->trackHeight() + direction)));
+    if (name.startsWith ("Theme")) return execute (cycle ({ "dark", "light", "grey" }, theme));
+
+    if (name == "Bounce format")
+    {
+        beginEdit ("bounce format");
+        const auto format = cycle ({ "wav", "mp3" }, s[ids::bounceFormat].toString());
+        session->tree().setProperty (ids::bounceFormat, format, um());
+        return Result::good ("bounces as " + format);
+    }
+
+    return Result::fail (L"this one is read-only");
+}
+
+bool App::handleSettingsKey (const Key& k)
+{
+    if (! settingsVisible || ! commandLine.isEmpty() || session == nullptr)
+        return false; // while you type, keys go to the command line as usual
+
+    const auto settings = projectSettings();
+    settingsIndex = juce::jlimit (0, (int) settings.size() - 1, settingsIndex);
+
+    switch (k.code)
+    {
+        case Key::Up:   settingsIndex = juce::jmax (0, settingsIndex - 1); return true;
+        case Key::Down: settingsIndex = juce::jmin ((int) settings.size() - 1, settingsIndex + 1); return true;
+        case Key::Left:
+        case Key::Right:
+            say (stepSetting (settingsIndex, k.code == Key::Right ? +1 : -1));
+            return true;
+        case Key::Enter:
+            // A value to type: start the command for it (bpm 92 + enter). A switch: flip it.
+            if (const auto& row = settings[(size_t) settingsIndex]; row.command.isNotEmpty())
+                commandLine = row.command;
+            else
+                say (stepSetting (settingsIndex, +1));
+            return true;
+        case Key::Escape:
+            settingsVisible = false;
+            return true;
+        default:
+            return false;
+    }
+}
+
+//==============================================================================
 // Sample tracks
 
 Result App::convertTrack (int index, bool toSample)
@@ -378,11 +478,11 @@ Result App::writePattern (const std::vector<int>& tracks, const juce::String& st
 
 Result App::toggleHitAtCursor()
 {
-    if (session == nullptr || mixFocused() || ! Session::isSampleTrack (session->track (focused)))
+    if (session == nullptr || mixFocused() || onTopLane() || ! Session::isSampleTrack (session->track (focused)))
         return Result::fail (L"alt+/ places hits on sample tracks \x2014 focus one with \x2191\x2193");
 
     auto track = session->track (focused);
-    const auto step = session->fineStepBeats();
+    const auto step = hitStepBeats();
     const auto at = engine.isRolling() ? engine.playhead() : cursor;
     auto beat = (double) at / session->samplesPerBeat();
 
@@ -412,7 +512,7 @@ Result App::setGridDivision (int noteValue)
     // One column per step, so the lanes read as a step sequencer.
     zoomLevel = -(int) std::round (std::log2 (noteValue / 4.0));
     keepInView (cursor);
-    return Result::good ("grid 1/" + juce::String (noteValue) + L" \x00b7 alt \x2190\x2192 moves a step \x00b7 enter toggles a hit on a sample track");
+    return Result::good ("grid 1/" + juce::String (noteValue) + L" \x00b7 alt \x2190\x2192 moves a step \x00b7 alt+/ toggles a hit on a sample track");
 }
 
 Result App::setLoop (const juce::String& argIn)
@@ -508,7 +608,7 @@ Result App::execute (const juce::String& line)
     if (v == "rec")                return record (p.hasSelector ? p.tracks : selectedTracks());
     if (v == "play")               return play();
     if (v == "stop")               return stop();
-    if (v == "mark")               return addMarker (engine.isRolling() ? engine.playhead() : cursor);
+    if (v == "mark")               return addMarker (engine.isRolling() ? engine.playhead() : cursor, p.rest.trim());
     if (v == "click" || v == "c")  return setClick (p.args[0]);
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
@@ -520,7 +620,13 @@ Result App::execute (const juce::String& line)
         return Result::fail ("stop playback before changing the audio device");
     if (v == "dev")                { openDevicePicker(); return Result::good(); }
     if (v == "panel")              return showControlPanel();
-    if (v == "help" || v == "?")   { helpVisible = ! helpVisible; return Result::good(); }
+    if (v == "help" || v == "?")   { helpVisible = ! helpVisible; settingsVisible = false; return Result::good(); }
+    if (v == "project" || v == "settings")
+    {
+        settingsVisible = ! settingsVisible;
+        helpVisible = false;
+        return Result::good (settingsVisible ? juce::String (L"\x2191\x2193 choose \x00b7 \x2190\x2192 change \x00b7 enter types a value \x00b7 esc closes") : juce::String());
+    }
     if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
     if (v == "close")              return closeSession();
 
@@ -567,6 +673,47 @@ Result App::execute (const juce::String& line)
         zoomLevel = 0;
         keepInView (cursor);
         return Result::good (session->gridOn() ? L"grid on \x00b7 arrows move by bars" : L"grid off \x00b7 arrows move by seconds");
+    }
+
+    // snap / snap 50 / snap input: quantize hits ("quantize" would start with q, a view key).
+    if (v == "snap")
+        return quantizeHits (p.rest, p.hasSelector ? p.tracks : defaultTargets());
+
+    // sig 3/4: time signature (beats per bar / note value).
+    if (v == "sig")
+    {
+        const auto num = p.args[0].upToFirstOccurrenceOf ("/", false, false).getIntValue();
+        const auto den = p.args[0].containsChar ('/') ? p.args[0].fromFirstOccurrenceOf ("/", false, false).getIntValue()
+                                                      : (int) session->tree()[ids::timeSigDen];
+
+        if (num < 1 || num > 16 || (den != 2 && den != 4 && den != 8 && den != 16))
+            return Result::fail ("sig 3/4 (1-16 beats over 2, 4, 8 or 16)");
+
+        session->tree().setProperty (ids::timeSigNum, num, um()).setProperty (ids::timeSigDen, den, um());
+        return Result::good ("time signature " + juce::String (num) + "/" + juce::String (den));
+    }
+
+    // height 3: rows per track, saved with the session.
+    if (v == "height")
+    {
+        if (p.args[0].isEmpty())
+            return Result::good ("tracks are " + juce::String (session->trackHeight()) + L" rows tall \x00b7 height 1-4 changes it");
+
+        const auto rows = p.args[0].getIntValue();
+
+        if (rows < 1 || rows > 4)
+            return Result::fail ("height 1 to 4 (rows per track)");
+
+        session->tree().setProperty (ids::trackHeight, rows, um());
+        return Result::good ("tracks " + juce::String (rows) + (rows == 1 ? " row" : " rows") + " tall");
+    }
+
+    // dark / light / grey: the colour theme, for every session (saved in settings.json).
+    if (v == "light" || v == "dark" || v == "grey" || v == "gray")
+    {
+        theme = v == "gray" ? juce::String ("grey") : v;
+        saveSettings();
+        return Result::good (theme + " theme");
     }
 
     if (v == "lat")
@@ -670,6 +817,11 @@ Result App::execute (const juce::String& line)
     if (targets.empty())
         return Result::fail ("the mix only takes v, e.g. v -3");
 
+    // From the bar or markers row, defaultTargets is every track (for edits); track settings
+    // want a track named or focused.
+    if (onTopLane() && ! p.hasSelector)
+        return Result::fail (L"\x2193 to a track first, or name one: 2m");
+
     auto toggle = [&] (const juce::Identifier& id, const juce::String& label) -> Result
     {
         // A group toggles together: if any are off, all go on; if all are on, all go off.
@@ -685,16 +837,17 @@ Result App::execute (const juce::String& line)
     };
 
     // r arms (record-enable + input monitoring); ctrl+space then records.
+    // Armed audio tracks monitor their input; armed sample tracks listen to the pad key (.).
     if (v == "r" || v == "a" || v == "arm")
     {
-        for (auto t : targets)
-            if (Session::isSampleTrack (session->track (t)))
-                return Result::fail ("track " + juce::String (t + 1) + L" is a sample track \x2014 arm an audio track");
-
         const auto r = toggle (ids::armed, "armed");
-        return (bool) session->track (targets.front())[ids::armed]
-                   ? Result::good (r.message + L" \x00b7 monitoring its input \x00b7 ctrl+space records")
-                   : r;
+
+        if (! (bool) session->track (targets.front())[ids::armed])
+            return r;
+
+        return Session::isSampleTrack (session->track (targets.front()))
+                   ? Result::good (r.message + L" \x00b7 . plays it (shift: accent) \x00b7 ctrl+space records what you play")
+                   : Result::good (r.message + L" \x00b7 monitoring its input \x00b7 ctrl+space records");
     }
 
     if (v == "m" || v == "mute") return toggle (ids::mute, "muted");

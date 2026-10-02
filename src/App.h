@@ -105,7 +105,7 @@ public:
     Result punch();
     Result play();
     Result stop();
-    Result addMarker (juce::int64 position);
+    Result addMarker (juce::int64 position, const juce::String& name = {}); // unnamed: numbered
     Result gotoPosition (const juce::String& spec);
     Result discardTake (int track);
 
@@ -159,7 +159,24 @@ public:
     void moveTo (juce::int64, bool extendSelection = false);
     void setCursor (juce::int64);
     void focusTrack (int index, bool extendSelection = false); // index == numTracks focuses the mix
+    void focusUp (bool extendSelection);   // past the first track: the bar row, then markers
+    void focusDown (bool extendSelection);
+    // The grid lines on screen at this zoom: bars (or groups of bars), and the finest shown
+    // division under them (0 when there's none). The arrows step by the finest one.
+    struct GridSpacing { double bars = 0.0, sub = 0.0; double finest() const { return sub > 0.0 ? sub : bars; } };
+    GridSpacing gridSpacing() const;
+    // A step for hits and alt+arrows, in beats: the grid division ("grid 16"), or the finest line
+    // on screen when you've zoomed in past it, so a hit lands on the line the cursor is on.
+    double hitStepBeats() const;
+
+    // The pad key (.): plays every armed sample track now and, while recording, writes a hit on
+    // each where you heard it. Returns false when no sample track is armed (the key types).
+    bool playPads (float velocity);
+    Result quantizeHits (const juce::String& arg, const std::vector<int>& tracks); // "snap [percent]" / "snap input"
     void zoom (int delta);
+    void showSelectionEdge (bool end);
+    Result moveToNextClipEdge (bool extendSelection);
+    Result stepMarker (int direction, bool extendSelection); // markers row: arrows hop marker to marker
     void clearSelection() { clearTimeSelection(); trackAnchor = -1; }
     void clearTimeSelection() { timeAnchor = timeHead = -1; }
 
@@ -170,7 +187,11 @@ public:
     bool hasTimeSelection() const { return timeAnchor >= 0 && timeHead >= 0 && timeHead != timeAnchor; }
     juce::Range<juce::int64> timeSelection() const;
     std::vector<int> selectedTracks() const; // empty when no track selection
-    std::vector<int> defaultTargets() const; // selection, else the focused track
+    std::vector<int> defaultTargets() const; // selection, else the focused track; every track from a top lane
+    // Rows above the tracks you can move onto with up: there, time selections cover every track.
+    enum class TopLane { none, ruler, markers };
+    TopLane topLane = TopLane::none;
+    bool onTopLane() const { return topLane != TopLane::none; }
 
     // Volume: tracks and the mix
     Result nudgeVolume (double deltaDb); // on the selection, focused track, or mix
@@ -202,8 +223,30 @@ public:
     int trackAnchor = -1;        // where a shift-selection of tracks started
     bool recording = false, helpVisible = false;
 
+    // "project": the session's settings in a panel like help. Up/down choose, left/right change,
+    // enter types the setting's command (bpm ...) or flips a switch; typed commands work too.
+    struct Setting
+    {
+        juce::String name, value;
+        juce::String command; // enter puts this on the line to type a value ("bpm "); empty: enter steps it
+        bool editable = true;
+    };
+    bool settingsVisible = false;
+    int settingsIndex = 0;
+    std::vector<Setting> projectSettings() const;
+    Result stepSetting (int index, int direction);
+    bool handleSettingsKey (const Key&); // true when the panel used the key
+
+    // App-wide settings, kept in settings.json next to the device settings. (Track height is
+    // per session: Session::trackHeight.)
+    juce::String theme = "dark"; // "dark", "light" or "grey": the commands of the same names
+    void loadSettings();
+    void saveSettings() const;
+
     juce::String commandLine, message;
     bool messageIsError = false;
+    juce::ValueTree namingMarker; // after ctrl+k the command line names this marker: enter keeps, esc leaves the number
+    juce::ValueTree selectedMarker; // on the markers row, the one the arrows landed on (enter renames, del deletes)
 
     std::vector<LiveTake> live;
     std::map<juce::String, ClipData> clips;

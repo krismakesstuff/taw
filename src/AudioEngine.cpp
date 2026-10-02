@@ -52,6 +52,34 @@ void AudioEngine::setGraph (std::unique_ptr<Graph> g)
     g.release();
 }
 
+void AudioEngine::triggerPad (int trackIndex, float velocity)
+{
+    padPresses.push ({ trackIndex, velocity }); // a full queue drops the press
+}
+
+// Live pad voices for one track, added into its bus. Like hits, they ring out over each other.
+void AudioEngine::renderPads (const TrackPlay& tp, int trackIndex, float* left, float* right, int n)
+{
+    for (auto& v : padVoices)
+    {
+        if (v.track != trackIndex)
+            continue;
+
+        if (tp.sample == nullptr || v.played >= tp.sampleLength)
+        {
+            v.track = -1;
+            continue;
+        }
+
+        const auto count = (int) juce::jmin<juce::int64> (n, tp.sampleLength - v.played);
+        const auto src = (int) (tp.sampleOffset + v.played);
+        const auto lastChannel = tp.sample->getNumChannels() - 1;
+        juce::FloatVectorOperations::addWithMultiply (left, tp.sample->getReadPointer (0, src), v.velocity, count);
+        juce::FloatVectorOperations::addWithMultiply (right, tp.sample->getReadPointer (juce::jmin (1, lastChannel), src), v.velocity, count);
+        v.played += count;
+    }
+}
+
 void AudioEngine::play (juce::int64 from)
 {
     playPos.store (juce::jmax<juce::int64> (0, from));
@@ -238,6 +266,20 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     const bool isRolling = rolling.load();
     const auto pos = playPos.load();
 
+    // New pad presses take a free voice (or the oldest-started one when all 32 are ringing).
+    for (PadPress press; padPresses.pop (press);)
+    {
+        auto* voice = &padVoices[0];
+
+        for (auto& v : padVoices)
+        {
+            if (v.track < 0) { voice = &v; break; }
+            if (v.played > voice->played) voice = &v;
+        }
+
+        *voice = { press.track, 0, press.velocity };
+    }
+
     auto* busL = scratch.getWritePointer (0);
     auto* busR = scratch.getWritePointer (4);
     auto* silence = scratch.getWritePointer (1);
@@ -273,6 +315,8 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
             renderClips (tp, pos, n, busL, busR);
             renderHits (tp, pos, n, busL, busR);
         }
+
+        renderPads (tp, (int) t, busL, busR, n);
 
         const auto gain = tp.audible ? tp.gain : 0.0f;
         juce::FloatVectorOperations::multiply (busL, gain, n);
@@ -332,7 +376,8 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     masterPeaks[1].push (juce::jmax (r.getEnd(), -r.getStart()));
 
     // The click goes to the outputs after metering, so the mix meter shows only the music.
-    bool anyRecording = false;
+    // Recording counts whether it's audio (a recorder) or pad hits only (the graph's flag).
+    bool anyRecording = current->recording;
 
     for (const auto& tp : current->tracks)
         anyRecording = anyRecording || tp.recorder != nullptr;

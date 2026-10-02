@@ -4,6 +4,7 @@
 namespace taw
 {
 static juce::File deviceStateFile() { return configFolder().getChildFile ("audio-device.xml"); }
+static juce::File settingsFile() { return configFolder().getChildFile ("settings.json"); }
 
 //==============================================================================
 void MeterState::update (float peak, double now, double dt)
@@ -29,6 +30,7 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
       pendingTemplate (std::move (templateName))
 {
     configFolder().createDirectory();
+    loadSettings();
 
     // If taw crashes, save what's open on the way down.
     safety::setEmergencySave ([] (void* app)
@@ -99,7 +101,7 @@ Result App::closeSession()
     clipboard = {};
     clearSelection();
     commandLine.clear();
-    helpVisible = false;
+    helpVisible = settingsVisible = false;
     newSessionName.clear();
     pendingTemplate.clear();
     safety::markRunning ({});
@@ -298,6 +300,8 @@ void App::attachSession (std::unique_ptr<Session> s)
     rememberSession (session->folder());
     safety::markRunning (session->folder());
     focused = 0;
+    topLane = TopLane::none;
+    selectedMarker = {};
     cursor = playStart = viewStart = 0;
 
     if (session->loadNote.isNotEmpty())
@@ -525,7 +529,7 @@ Result App::record (const std::vector<int>& tracks)
             armed.push_back (i);
 
     if (armed.empty())
-        return Result::fail (L"nothing armed \x2014 1 r arms track 1, then ctrl+space records");
+        return Result::fail (L"nothing armed \x2014 shift+R arms the track, then ctrl+space records");
 
     if (engine.isRolling())
         return punch();
@@ -568,16 +572,20 @@ Result App::punch()
     return r.ok ? Result::good ("punched in") : r;
 }
 
-Result App::startRecorders (const std::vector<int>& tracks)
+Result App::startRecorders (const std::vector<int>& armedTracks)
 {
     const auto numInputs = engine.numInputChannels();
+
+    // Armed sample tracks record what you play on the pad key (recordPadHits), not audio.
+    std::vector<int> tracks;
+
+    for (auto i : armedTracks)
+        if (! Session::isSampleTrack (session->track (i)))
+            tracks.push_back (i);
 
     for (auto i : tracks)
     {
         const int input = session->track (i)[ids::input];
-
-        if (Session::isSampleTrack (session->track (i)))
-            return Result::fail ("track " + juce::String (i + 1) + L" is a sample track \x2014 record onto an audio track");
 
         if (input < 1 || input > numInputs)
             return Result::fail ("track " + juce::String (i + 1) + " has no valid input (device has " + juce::String (numInputs)
@@ -870,7 +878,7 @@ void App::pumpBackgroundWork()
     }
 }
 
-Result App::addMarker (juce::int64 position)
+Result App::addMarker (juce::int64 position, const juce::String& name)
 {
     juce::ValueTree m (ids::MARKER);
     int n = 1;
@@ -878,9 +886,16 @@ Result App::addMarker (juce::int64 position)
     for (const auto& c : session->tree())
         n += c.hasType (ids::MARKER) ? 1 : 0;
 
-    m.setProperty (ids::position, position, um()).setProperty (ids::name, juce::String (n), um());
+    const auto label = name.isNotEmpty() ? name : juce::String (n);
+    m.setProperty (ids::position, position, um()).setProperty (ids::name, label, um());
     session->tree().appendChild (m, um());
-    return Result::good ("marker " + juce::String (n) + " at " + formatBars (position));
+
+    if (name.isNotEmpty())
+        return Result::good ("marker " + label + " at " + formatBars (position));
+
+    namingMarker = m; // the command line asks for a name next
+    commandLine.clear();
+    return Result::good ("marker " + label + " at " + formatBars (position) + L" \x00b7 type a name + enter \x00b7 esc keeps " + label);
 }
 
 Result App::discardTake (int trackIndex)
@@ -969,6 +984,9 @@ std::unique_ptr<Graph> App::buildGraph()
 
         if (Session::isSampleTrack (t))
         {
+            // Armed means "listening to the pad key", not to an input: its hits keep playing.
+            tp.armed = false;
+
             // One sample, triggered by hits. Hits are in beats, so they follow the tempo.
             if (const auto* data = audioFor (t[ids::sample].toString()))
             {
@@ -1374,10 +1392,11 @@ void App::nudge (int direction, Step step, bool extendSelection)
     // Selections grow from their moving end; otherwise the cursor moves. Never the playhead:
     // during playback the arrows place the cursor and select, while the music keeps going.
     const auto from = selecting ? timeHead : cursor;
-    // Fine (alt) steps follow the grid division: a beat, or a 16th after "grid 16".
+    // Plain steps follow the grid lines on screen, so they shrink as you zoom in (a bar, a beat,
+    // an 8th...). Fine (alt) steps follow the grid division: a beat, or a 16th after "grid 16".
     const bool fine = step == Step::Fine || step == Step::FineLarge;
     const auto times = (step == Step::Large || step == Step::FineLarge) ? 4.0 : 1.0;
-    const auto unit = times * (session->gridOn() ? (fine ? session->samplesPerBeat() * session->fineStepBeats() : session->samplesPerBar())
+    const auto unit = times * (session->gridOn() ? (fine ? session->samplesPerBeat() * hitStepBeats() : gridSpacing().finest())
                                                  : (fine ? 0.1 : 1.0) * sampleRate());
     double to;
 
@@ -1466,12 +1485,175 @@ void App::focusTrack (int index, bool extendSelection)
     }
 
     trackAnchor = -1;
+    topLane = TopLane::none;
+    selectedMarker = {};
     focused = juce::jlimit (0, n, index); // n = the mix row
 }
 
 bool App::mixFocused() const
 {
-    return session != nullptr && focused >= session->numTracks();
+    return session != nullptr && ! onTopLane() && focused >= session->numTracks();
+}
+
+// Up from the first track: the bar row, then the markers row. Down comes back the same way.
+// Shift only ever selects tracks, so it stops at the first one.
+void App::focusUp (bool extendSelection)
+{
+    if (topLane == TopLane::ruler)
+        topLane = TopLane::markers;
+    else if (topLane == TopLane::none && focused == 0 && ! extendSelection)
+        topLane = TopLane::ruler, trackAnchor = -1;
+    else if (topLane == TopLane::none)
+        focusTrack (focused - 1, extendSelection);
+}
+
+void App::focusDown (bool extendSelection)
+{
+    if (topLane == TopLane::markers)
+        topLane = TopLane::ruler, selectedMarker = {};
+    else if (topLane == TopLane::ruler)
+        topLane = TopLane::none, focused = 0;
+    else
+        focusTrack (focused + 1, extendSelection);
+}
+
+bool App::playPads (float velocity)
+{
+    if (session == nullptr)
+        return false;
+
+    std::vector<int> armed;
+
+    for (int i = 0; i < session->numTracks(); ++i)
+        if (Session::isSampleTrack (session->track (i)) && (bool) session->track (i)[ids::armed])
+            armed.push_back (i);
+
+    if (armed.empty())
+        return false;
+
+    // While recording, the hit goes where you heard the music when you pressed: the playhead
+    // is what's being sent out now, which reaches your ears an output latency later.
+    const bool rec = recording && engine.isRolling();
+    double beat = 0.0;
+    bool landsAhead = false;
+
+    if (rec)
+    {
+        juce::int64 heard = engine.playhead();
+
+        if ((bool) session->tree()[ids::latencyComp])
+            if (auto* d = engine.devices().getCurrentAudioDevice())
+                heard -= d->getOutputLatencyInSamples();
+
+        beat = juce::jmax (0.0, (double) heard / session->samplesPerBeat());
+
+        if ((bool) session->tree()[ids::inputQuantize])
+        {
+            const auto step = session->fineStepBeats();
+            beat = std::round (beat / step) * step;
+            // Snapped to a step that hasn't played yet: the timeline will play it on time.
+            landsAhead = beat * session->samplesPerBeat() > (double) engine.playhead();
+        }
+
+        beginEdit ("record hits", "pads");
+    }
+
+    for (auto t : armed)
+    {
+        if (! landsAhead)
+            engine.triggerPad (t, velocity);
+
+        if (rec)
+            session->track (t).appendChild (Session::makeHit (beat, velocity), um());
+    }
+
+    return true;
+}
+
+Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tracks)
+{
+    const auto arg = argIn.trim().toLowerCase();
+
+    if (arg == "input" || arg == "in")
+    {
+        const bool on = ! (bool) session->tree()[ids::inputQuantize];
+        session->tree().setProperty (ids::inputQuantize, on, um());
+        return Result::good (on ? L"input quantize on \x00b7 recorded hits snap to the grid step" : L"input quantize off \x00b7 hits land as played");
+    }
+
+    // quantize [percent]: hits in the time selection (or the whole track) on the selected or
+    // focused sample tracks move that far toward the nearest grid step.
+    const auto strength = arg.isEmpty() ? 1.0 : juce::jlimit (0.0, 1.0, arg.getDoubleValue() / 100.0);
+
+    if (arg.isNotEmpty() && ! arg.containsOnly ("0123456789."))
+        return Result::fail ("quantize, quantize 50 (percent) or quantize input");
+
+    const auto step = session->fineStepBeats();
+    const auto spb = session->samplesPerBeat();
+    const bool ranged = hasTimeSelection();
+    const auto range = timeSelection();
+    int moved = 0;
+
+    for (auto t : tracks)
+    {
+        auto track = session->track (t);
+
+        if (! Session::isSampleTrack (track))
+            continue;
+
+        for (auto h : Session::hits (track))
+        {
+            const auto beat = (double) h[ids::beat];
+            const auto pos = (juce::int64) std::llround (beat * spb);
+
+            if (ranged && ! range.contains (pos))
+                continue;
+
+            const auto target = std::round (beat / step) * step;
+
+            if (std::abs (target - beat) > 1e-9)
+            {
+                h.setProperty (ids::beat, beat + (target - beat) * strength, um());
+                ++moved;
+            }
+        }
+    }
+
+    if (moved == 0)
+        return Result::good (L"nothing to move \x00b7 hits are already on the grid (or no sample track here)");
+
+    return Result::good ("quantized " + juce::String (moved) + (moved == 1 ? " hit" : " hits") + " to 1/"
+                         + session->tree()[ids::gridDiv].toString()
+                         + (strength < 1.0 ? " at " + juce::String ((int) std::round (strength * 100)) + "%" : juce::String()));
+}
+
+double App::hitStepBeats() const
+{
+    const auto division = session->fineStepBeats();
+    const auto shown = gridSpacing().finest() / session->samplesPerBeat();
+    return shown > 0.0 ? juce::jmin (division, shown) : division;
+}
+
+App::GridSpacing App::gridSpacing() const
+{
+    GridSpacing g;
+
+    if (session == nullptr || ! session->gridOn())
+        return g;
+
+    // Lines at least this many columns apart, so the view never fills with them.
+    constexpr double minColumns = 4.0;
+    const auto spc = samplesPerColumn();
+    g.bars = session->samplesPerBar();
+
+    while (g.bars < spc * minColumns)
+        g.bars *= 2.0; // zoomed far out: every 2, 4, 8 bars
+
+    if (g.bars == session->samplesPerBar())
+        for (double step = session->samplesPerBeat(); step >= spc * minColumns && step > session->samplesPerBeat() / 16.0; step /= 2.0)
+            g.sub = step; // beats, then halves, quarters, eighths of a beat
+
+    return g;
 }
 
 juce::Range<juce::int64> App::timeSelection() const
@@ -1492,6 +1674,13 @@ std::vector<int> App::selectedTracks() const
 
 std::vector<int> App::defaultTargets() const
 {
+    if (onTopLane() && session != nullptr)
+    {
+        std::vector<int> all ((size_t) session->numTracks());
+        std::iota (all.begin(), all.end(), 0);
+        return all;
+    }
+
     if (auto sel = selectedTracks(); ! sel.empty())
         return sel;
 
@@ -1540,6 +1729,105 @@ void App::zoom (int delta)
     keepInView (engine.isRolling() ? engine.playhead() : cursor);
 }
 
+void App::loadSettings()
+{
+    const auto json = juce::JSON::parse (settingsFile());
+    if (const auto t = json["theme"].toString(); t == "light" || t == "grey")
+        theme = t;
+}
+
+void App::saveSettings() const
+{
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("theme", theme);
+    settingsFile().replaceWithText (juce::JSON::toString (juce::var (o)));
+}
+
+// The markers row: the arrows (and tab) go marker to marker, selecting the one they land on and
+// taking the cursor with them; with shift the time selection stretches to it instead.
+Result App::stepMarker (int direction, bool extendSelection)
+{
+    if (session == nullptr)
+        return Result::good();
+
+    const auto from = extendSelection && timeAnchor >= 0 ? timeHead : cursor;
+    juce::ValueTree best;
+
+    for (const auto& m : session->tree())
+        if (m.hasType (ids::MARKER))
+        {
+            const auto pos = (juce::int64) m[ids::position];
+            const auto bestPos = best.isValid() ? (juce::int64) best[ids::position] : 0;
+
+            if (direction > 0 ? (pos > from && (! best.isValid() || pos < bestPos))
+                              : (pos < from && (! best.isValid() || pos > bestPos)))
+                best = m;
+        }
+
+    if (! best.isValid())
+        return Result::fail (direction > 0 ? "no more markers" : "no markers before this");
+
+    moveTo ((juce::int64) best[ids::position], extendSelection);
+    selectedMarker = best;
+    return Result::good (extendSelection ? juce::String()
+                                         : "marker " + best[ids::name].toString() + L" \x00b7 enter renames \x00b7 del deletes \x00b7 \x2193 back to the tracks");
+}
+
+// q / w: the cursor to the selection's start or end, centred in the view; the selection stays,
+// so you can select, snap, q, and play to hear it. (No selection: centres on the cursor.)
+void App::showSelectionEdge (bool end)
+{
+    const auto pos = hasTimeSelection() ? (end ? timeSelection().getEnd() : timeSelection().getStart()) : cursor;
+
+    if (engine.isRolling())
+        cursorMovedWhileRolling = true; // stop leaves you there, as with the arrows
+
+    setCursor (pos);
+
+    const auto spc = samplesPerColumn();
+    const auto columns = layout::laneWidth (console.width());
+    const auto first = std::floor ((double) pos / spc) - columns / 2;
+    viewStart = juce::jmax<juce::int64> (0, (juce::int64) (first * spc));
+}
+
+// Tab: the cursor to the next clip start or end on the selected (or focused) tracks. With
+// shift, the selection stretches to it, so tab then shift+tab selects a whole clip.
+Result App::moveToNextClipEdge (bool extendSelection)
+{
+    if (session == nullptr)
+        return Result::good();
+
+    const auto from = cursor;
+    juce::int64 next = -1;
+    auto consider = [&] (juce::int64 edge) { if (edge > from && (next < 0 || edge < next)) next = edge; };
+
+    // On the markers row it hops marker to marker instead, selecting sections across every track.
+    if (topLane == TopLane::markers)
+        return stepMarker (+1, extendSelection);
+
+    // Clip starts and ends on audio tracks; each hit on sample tracks.
+    for (auto t : defaultTargets())
+    {
+        const auto track = session->track (t);
+
+        for (const auto& c : Session::clips (track))
+        {
+            consider ((juce::int64) c[ids::start]);
+            consider ((juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
+        }
+
+        if (Session::isSampleTrack (track))
+            for (const auto& h : Session::hits (track))
+                consider (std::llround ((double) h[ids::beat] * session->samplesPerBeat()));
+    }
+
+    if (next < 0)
+        return Result::fail (onTopLane() ? "no more clips or hits" : "nothing more on this track");
+
+    moveTo (next, extendSelection);
+    return Result::good();
+}
+
 juce::String App::formatBars (juce::int64 pos) const
 {
     if (session == nullptr)
@@ -1582,24 +1870,123 @@ void App::handleMainKey (const Key& k)
     // the distance; it extends the selection (time with left/right, tracks with up/down).
     const auto step = k.alt ? (k.ctrl ? Step::FineLarge : Step::Fine) : (k.ctrl ? Step::Large : Step::Normal);
 
+    // Naming a new marker: the command line is its name field. Enter keeps the name, esc keeps
+    // the number; any other key (arrows, ctrl+...) leaves the number and does its usual job.
+    if (namingMarker.isValid())
+    {
+        if (k.code == Key::Char && ! k.ctrl && ! k.alt && k.ch >= 32)
+        {
+            commandLine += juce::String::charToString ((juce::juce_wchar) k.ch);
+            return;
+        }
+
+        if (k.code == Key::Backspace)
+        {
+            commandLine = commandLine.dropLastCharacters (1);
+            return;
+        }
+
+        const auto name = commandLine.trim();
+        auto marker = std::exchange (namingMarker, {});
+        commandLine.clear();
+
+        if (k.code == Key::Enter)
+        {
+            if (name.isNotEmpty() && marker.getParent().isValid())
+            {
+                marker.setProperty (ids::name, name, um()); // same undo step as the marker
+                say (Result::good ("marker " + name + " at " + formatBars ((juce::int64) marker[ids::position])));
+            }
+            else
+            {
+                message.clear();
+            }
+
+            return;
+        }
+
+        if (k.code == Key::Escape)
+        {
+            message.clear();
+            return;
+        }
+    }
+
+    // The project settings panel takes the arrows, enter and esc while it's open.
+    if (handleSettingsKey (k))
+        return;
+
+    // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
+    if (topLane == TopLane::markers && session != nullptr)
+    {
+        if (selectedMarker.isValid() && ! selectedMarker.getParent().isValid())
+            selectedMarker = {}; // undone or deleted
+
+        if ((k.code == Key::Left || k.code == Key::Right) && ! k.alt)
+        {
+            say (stepMarker (k.code == Key::Right ? +1 : -1, k.shift));
+            return;
+        }
+
+        if (selectedMarker.isValid() && commandLine.isEmpty())
+        {
+            if (k.code == Key::Enter)
+            {
+                beginEdit ("rename marker");
+                namingMarker = selectedMarker;
+                commandLine = selectedMarker[ids::name].toString(); // edit it in place
+                say (Result::good (L"rename: enter keeps \x00b7 esc cancels"));
+                return;
+            }
+
+            if (k.code == Key::Delete || k.code == Key::Backspace)
+            {
+                beginEdit ("delete marker");
+                const auto name = selectedMarker[ids::name].toString();
+                session->tree().removeChild (selectedMarker, um());
+                selectedMarker = {};
+                say (Result::good ("deleted marker " + name + L" \x00b7 ctrl+z brings it back"));
+                return;
+            }
+        }
+    }
+
     // Navigation works the same whether stopped or rolling.
     switch (k.code)
     {
         case Key::Left:  nudge (-1, step, k.shift); return;
         case Key::Right: nudge (+1, step, k.shift); return;
-        case Key::Up:    focusTrack (focused - 1, k.shift); return;
-        case Key::Down:  focusTrack (focused + 1, k.shift); return;
+        // Ctrl jumps to the first / last track; with shift it selects every track on the way.
+        case Key::Up:
+        case Key::Down:
+            if (k.ctrl && session != nullptr && session->numTracks() > 0)
+            {
+                const auto from = onTopLane() ? 0 : juce::jmin (focused, session->numTracks() - 1);
+                topLane = TopLane::none;
+                selectedMarker = {};
+
+                if (k.shift && trackAnchor < 0)
+                    trackAnchor = from; // the selection grows from where you were
+
+                focusTrack (k.code == Key::Up ? 0 : session->numTracks() - 1, k.shift);
+            }
+            else
+            {
+                k.code == Key::Up ? focusUp (k.shift) : focusDown (k.shift);
+            }
+            return;
         case Key::Home:  moveTo (0, k.shift); return;
         case Key::End:
             if (session != nullptr)
                 moveTo (session->contentEnd(), k.shift);
             return;
-        case Key::F1: helpVisible = ! helpVisible; return;
+        case Key::F1: helpVisible = ! helpVisible; settingsVisible = false; return;
         default: break;
     }
 
-    // Delete clears the time selection on the selected (or focused) tracks.
-    if (k.code == Key::Delete && hasTimeSelection())
+    // Delete clears the time selection on the selected (or focused) tracks. So does backspace
+    // with nothing typed (a Mac keyboard's delete key sends backspace).
+    if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection())
     {
         beginEdit ("delete");
         say (deleteSelection (defaultTargets()));
@@ -1621,6 +2008,13 @@ void App::handleMainKey (const Key& k)
         const auto delta = (k.ch == ']' || k.ch == '}') ? 1.0 : -1.0;
         const bool mixKey = k.ctrl || k.ch == '{' || k.ch == '}';
         const bool onMix = mixKey || (mixFocused() && selectedTracks().empty());
+
+        if (onTopLane() && ! mixKey)
+        {
+            say (Result::fail (L"[ ] ride a track \x2014 \x2193 to one (or { } for the mix)"));
+            return;
+        }
+
         juce::StringArray who;
 
         for (auto t : defaultTargets())
@@ -1634,7 +2028,9 @@ void App::handleMainKey (const Key& k)
     // Ctrl shortcuts (AltGr arrives as ctrl+alt and types characters, so it's excluded).
     if (k.code == Key::Char && k.ctrl && ! k.alt)
     {
-        if (k.ch == 'z')
+        if (k.ch == 'q')
+            quit(); // saves first, like exit
+        else if (k.ch == 'z')
             say (undoEdit());
         else if (k.ch == 'y')
             say (redoEdit());
@@ -1645,7 +2041,7 @@ void App::handleMainKey (const Key& k)
         else if (k.ch == 'c' && ! commandLine.isEmpty())
             commandLine.clear(); // like a shell; it never quits (q does)
         else if (k.ch == 'c')
-            say (Result::fail (L"select a range to copy (shift + \x2190 \x2192) \x00b7 q quits"));
+            say (Result::fail (L"select a range to copy (shift + \x2190 \x2192) \x00b7 ctrl+q quits"));
         else if (k.ch == 'x')
         {
             beginEdit ("cut");
@@ -1690,6 +2086,10 @@ void App::handleMainKey (const Key& k)
             commandLine = commandLine.dropLastCharacters (1);
             return;
 
+        case Key::Tab:
+            say (moveToNextClipEdge (k.shift));
+            return;
+
         case Key::Escape:
             if (! lineEmpty)
                 commandLine.clear();
@@ -1721,7 +2121,31 @@ void App::handleMainKey (const Key& k)
             else if (lineEmpty && k.ch == '-')
                 zoom (+1);
             else if (lineEmpty && k.ch == '?')
-                helpVisible = ! helpVisible;
+                helpVisible = ! helpVisible, settingsVisible = false;
+            // The pad key: plays (and while recording, records) every armed sample track.
+            // Shift+. (>) is an accent. With none armed, . types as usual.
+            else if (lineEmpty && (k.ch == '.' || k.ch == '>') && playPads (k.ch == '>' ? 1.0f : 0.8f))
+                return;
+            // Pro Tools keys on an empty line: r t zoom, q w show the selection's ends, and
+            // shift+R S M I arm / solo / mute / monitor the selected (or focused) tracks. Typed
+            // commands start with a number or another letter (2m, exit), so they still work.
+            else if (lineEmpty && k.ch == 'r')
+                zoom (+1);
+            else if (lineEmpty && k.ch == 't')
+                zoom (-1);
+            else if (lineEmpty && (k.ch == 'q' || k.ch == 'w'))
+                showSelectionEdge (k.ch == 'w');
+            // k: to the markers row (pairs with ctrl+k, add a marker); again: back to the track.
+            // (m would block typing mark, mute, mon and mix.)
+            else if (lineEmpty && k.ch == 'k' && session != nullptr)
+            {
+                if (topLane == TopLane::markers)
+                    focusTrack (focused);
+                else
+                    topLane = TopLane::markers, trackAnchor = -1;
+            }
+            else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
+                say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if (k.ch >= 32)
                 commandLine += juce::String::charToString ((juce::juce_wchar) k.ch);
             return;

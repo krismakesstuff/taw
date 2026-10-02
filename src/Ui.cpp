@@ -3,14 +3,59 @@
 
 namespace taw
 {
+// 256-colour palette indexes, set per frame from the theme ("light" / "dark").
 namespace colour
 {
-constexpr int text = 252, dim = 243, faint = 238, headerBg = 235, focusBg = 237;
-constexpr int accent = 214, rec = 196, recBg = 52, play = 35, playBg = 22;
-constexpr int clipAltBg = 239, hit = 179; // hit: sample-track steps (warm, unlike waveforms)
-constexpr int selBg = 24, selClipBg = 31, loopBg = 28, loopOffBg = 239;
-constexpr int clipBg = 236, wave = 110, liveWave = 210, marker = 170;
-constexpr int ok = 114, error = 203, meterGreen = 35, meterYellow = 178, meterRed = 196, meterBg = 234;
+int screenFg, screenBg; // what -1 (the terminal's default) means: dark keeps the terminal's own
+int text, dim, faint, headerBg, focusBg;
+int accent, rec, recBg, play, playBg;
+int clipAltBg, hit; // hit: sample-track steps (warm, unlike waveforms)
+int selBg, selClipBg, loopBg, loopOffBg;
+int gridBar; // bar lines; beats and finer use faint
+int laneFocusBg, laneSelBg; // empty lane cells on the focused / selected tracks (apart from clips)
+int clipBg, wave, liveWave, marker;
+int ok, error, meterGreen, meterYellow, meterRed, meterBg;
+
+void apply (const juce::String& theme)
+{
+    if (theme == "grey")
+    {
+        // Mid-light grey: a softer screen than light, with darker clips and text to match.
+        screenFg = 234, screenBg = 249;
+        text = 233, dim = 238, faint = 244, headerBg = 247, focusBg = 246;
+        accent = 166, rec = 160, recBg = 217, play = 28, playBg = 28;
+        clipAltBg = 243, hit = 94;
+        selBg = 110, selClipBg = 74, loopBg = 108, loopOffBg = 245;
+        gridBar = 241;
+        laneFocusBg = 248, laneSelBg = 146;
+        clipBg = 245, wave = 18, liveWave = 124, marker = 90;
+        ok = 22, error = 124, meterGreen = 28, meterYellow = 136, meterRed = 160, meterBg = 246;
+    }
+    else if (theme == "light")
+    {
+        screenFg = 236, screenBg = 255;
+        text = 235, dim = 242, faint = 248, headerBg = 253, focusBg = 252;
+        accent = 166, rec = 160, recBg = 224, play = 28, playBg = 28;
+        clipAltBg = 249, hit = 130;
+        selBg = 153, selClipBg = 117, loopBg = 151, loopOffBg = 250;
+        gridBar = 245;
+        laneFocusBg = 254, laneSelBg = 189;
+        clipBg = 251, wave = 25, liveWave = 160, marker = 133;
+        ok = 28, error = 160, meterGreen = 34, meterYellow = 172, meterRed = 160, meterBg = 252;
+    }
+    else
+    {
+        screenFg = -1, screenBg = -1;
+        text = 252, dim = 243, faint = 238, headerBg = 235, focusBg = 237;
+        accent = 214, rec = 196, recBg = 52, play = 35, playBg = 22;
+        clipAltBg = 239, hit = 179;
+        selBg = 24, selClipBg = 31, loopBg = 28, loopOffBg = 239;
+        gridBar = 241;
+        laneFocusBg = 234, laneSelBg = 17;
+        clipBg = 236, wave = 110, liveWave = 210, marker = 170;
+        ok = 114, error = 203, meterGreen = 35, meterYellow = 178, meterRed = 196, meterBg = 234;
+    }
+}
 } // namespace colour
 
 //==============================================================================
@@ -47,23 +92,32 @@ std::wstring Canvas::row (int y) const
 {
     std::wstring out = L"\x1b[0m";
     Cell style;
+    style.fg = style.bg = -2; // so the first cell always sets its colours
 
     for (int x = 0; x < w; ++x)
     {
         const auto& c = cells[(size_t) (y * w + x)];
 
-        if (c.fg != style.fg || c.bg != style.bg || c.bold != style.bold)
+        if (c.fg != style.fg || c.bg != style.bg || c.bold != style.bold || c.over != style.over || c.under != style.under)
         {
             out += L"\x1b[0";
             if (c.bold) out += L";1";
-            if (c.fg >= 0) out += L";38;5;" + std::to_wstring (c.fg);
-            if (c.bg >= 0) out += L";48;5;" + std::to_wstring (c.bg);
+            if (c.under) out += L";4";
+            if (c.over) out += L";53"; // terminals without overline skip it
+            // -1 is the theme's screen colour: the terminal's own in dark, set explicitly in light.
+            const auto fg = c.fg >= 0 ? c.fg : colour::screenFg, bg = c.bg >= 0 ? c.bg : colour::screenBg;
+            if (fg >= 0) out += L";38;5;" + std::to_wstring (fg);
+            if (bg >= 0) out += L";48;5;" + std::to_wstring (bg);
             out += L"m";
             style = c;
         }
 
         out += c.ch;
     }
+
+    // In light, paint the rest of the line (the column kept free) the screen colour too.
+    if (colour::screenBg >= 0)
+        out += L"\x1b[0;48;5;" + std::to_wstring (colour::screenBg) + L"m\x1b[K";
 
     return out + L"\x1b[0m";
 }
@@ -81,8 +135,11 @@ void Ui::render (App& app)
     const auto w = app.console.width() - 1; // keep the last column free so nothing wraps
     const auto h = app.console.height();
 
-    if (w != canvas.width() || h != canvas.height())
+    colour::apply (app.theme);
+
+    if (w != canvas.width() || h != canvas.height() || app.theme != themeDrawn)
     {
+        themeDrawn = app.theme; // a new theme repaints everything
         previous.clear();
         app.console.write (L"\x1b[0m\x1b[2J");
     }
@@ -122,7 +179,8 @@ void Ui::render (App& app)
 //   1  interface · input meters
 //   2  (blank)
 //   3  transport bar, centred
-//   4  ruler, then tracks
+//   4  markers
+//   5  ruler, then tracks
 void Ui::drawMain (App& app)
 {
     drawTitle (app);
@@ -136,6 +194,8 @@ void Ui::drawMain (App& app)
 
     if (app.helpVisible)
         drawHelp (app);
+    else if (app.settingsVisible && app.session != nullptr)
+        drawSettings (app);
 }
 
 void Ui::drawTitle (App& app)
@@ -303,26 +363,66 @@ void Ui::drawTimeline (App& app)
     const auto rolling = app.engine.isRolling();
     const auto playhead = app.engine.playhead();
 
-    auto columnOf = [&] (juce::int64 pos) { return (int) std::floor (((double) pos - (double) app.viewStart) / spc); };
+    // Where column 0 starts. Grid lines can fall between samples (99 bpm: a beat is 26727.27
+    // samples), so positions snapped to them are rounded either way; reading every sample from
+    // its middle (half a sample in) puts a rounded position in the same column as its line.
+    const double origin = (double) app.viewStart - 0.5;
+
+    auto columnOf = [&] (juce::int64 pos) { return (int) std::floor (((double) pos - origin) / spc); };
     const auto cursorCol = columnOf (app.cursor);
     const auto playCol = columnOf (playhead);
 
-    // Ruler ---------------------------------------------------------------------
-    const int rulerY = 4; // right below the transport bar
-    const auto zoomText = s.gridOn() ? (app.zoomLevel == 0 ? juce::String ("1 beat") : juce::String (std::pow (2.0, app.zoomLevel), 2) + " beats")
-                                     : juce::String (spc / app.sampleRate(), 2) + " s";
-    canvas.text (1, rulerY, "zoom " + zoomText + "/col", colour::faint, -1, false, leftPanel - 1);
-    canvas.put (laneX - 1, rulerY, L'\x2502', colour::faint);
-    canvas.put (meterX - 1, rulerY, L'\x2502', colour::faint);
-    canvas.text (meterX + 1, rulerY, "  vol", colour::faint);
-    canvas.text (meterX + 7, rulerY, "level", colour::faint);
-    canvas.text (meterX + 20, rulerY, " peak", colour::faint);
+    // Grid lines follow the zoom (App::gridSpacing, which the arrows step by too).
+    const auto grid = app.gridSpacing();
+
+    // A column covers [t0, t1), so a line at t0 belongs on the cell's left edge, where
+    // selections and clips start. Fonts without a left-edge mark get centred ones.
+    const bool edges = app.console.hasEdgeGlyphs();
+    const wchar_t gridMark = edges ? L'\x258f' : L'\x00b7', cursorMark = edges ? L'\x258f' : L'\x2502';
+
+    // 2: a bar line falls in [t0, t1), 1: a subdivision, 0: neither.
+    auto gridLevel = [&] (double t0, double t1)
+    {
+        auto lineIn = [&] (double every) { return every > 0.0 && std::ceil (t0 / every - 1e-9) * every < t1; };
+        return ! s.gridOn() ? 0 : lineIn (grid.bars) ? 2 : lineIn (grid.sub) ? 1 : 0;
+    };
 
     // Time selection, as columns.
     const bool timeSel = app.hasTimeSelection();
     const auto selRange = app.timeSelection();
     const auto selTracks = app.selectedTracks();
     auto inTimeSelection = [&] (double t0, double t1) { return timeSel && t1 > (double) selRange.getStart() && t0 < (double) selRange.getEnd(); };
+
+    // Markers and ruler rows -----------------------------------------------------------
+    // Both can be focused (up from the first track); a selection made there covers every track.
+    const int markerY = 4, rulerY = 5; // below the transport bar
+
+    auto drawTopLane = [&] (int y, App::TopLane lane, const juce::String& label)
+    {
+        const bool focusedLane = app.topLane == lane;
+        const int bg = focusedLane ? colour::focusBg : -1;
+        canvas.fill (0, y, leftPanel, L' ', -1, bg);
+
+        if (focusedLane)
+            canvas.put (0, y, L'\x25b8', colour::accent, bg);
+
+        canvas.text (1, y, label, focusedLane ? colour::dim : colour::faint, bg, false, leftPanel - 1);
+        canvas.put (laneX - 1, y, L'\x2502', colour::faint);
+        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
+
+        if (focusedLane)
+            for (int c = 0; c < laneW; ++c)
+                canvas.put (laneX + c, y, L' ', -1,
+                            inTimeSelection (origin + c * spc, origin + (c + 1) * spc) ? colour::selBg : colour::laneFocusBg);
+    };
+
+    const auto zoomText = s.gridOn() ? (app.zoomLevel == 0 ? juce::String ("1 beat") : juce::String (std::pow (2.0, app.zoomLevel), 2) + " beats")
+                                     : juce::String (spc / app.sampleRate(), 2) + " s";
+    drawTopLane (markerY, App::TopLane::markers, "markers");
+    drawTopLane (rulerY, App::TopLane::ruler, "zoom " + zoomText + "/col");
+    canvas.text (meterX + 1, rulerY, "  vol", colour::faint);
+    canvas.text (meterX + 7, rulerY, "level", colour::faint);
+    canvas.text (meterX + 20, rulerY, " peak", colour::faint);
 
     // Loop range on the ruler: green when on, grey when set but off.
     {
@@ -332,30 +432,53 @@ void Ui::drawTimeline (App& app)
 
         if (loopEnd > loopStart)
             for (int c = 0; c < laneW; ++c)
-                if (const auto t0 = (double) app.viewStart + c * spc; t0 + spc > loopStart && t0 < loopEnd)
+                if (const auto t0 = origin + c * spc; t0 + spc > loopStart && t0 < loopEnd)
                     canvas.put (laneX + c, rulerY, L' ', -1, loopBg);
     }
 
-    if (timeSel)
+    // The selection shows on the ruler only while it's the focused lane (above): the tracks
+    // show what a selection covers.
+    if (timeSel && app.topLane == App::TopLane::ruler)
         for (int c = 0; c < laneW; ++c)
-            if (inTimeSelection ((double) app.viewStart + c * spc, (double) app.viewStart + (c + 1) * spc))
+            if (inTimeSelection (origin + c * spc, origin + (c + 1) * spc))
                 canvas.put (laneX + c, rulerY, L' ', -1, colour::selBg);
 
     int nextFree = 0;
 
     for (int c = 0; c < laneW; ++c)
     {
-        const auto t0 = (double) app.viewStart + c * spc, t1 = t0 + spc;
+        const auto t0 = origin + c * spc, t1 = t0 + spc;
         juce::String label;
+        int labelColour = colour::dim;
 
-        if (s.gridOn())
+        if (const auto level = gridLevel (t0, t1); level == 2)
         {
-            const auto bar = std::ceil (t0 / s.samplesPerBar() - 1e-9);
-
-            if (bar * s.samplesPerBar() < t1)
-                label = juce::String ((int) bar + 1);
+            label = juce::String ((int) std::ceil (t0 / s.samplesPerBar() - 1e-9) + 1);
         }
-        else
+        else if (level == 1 && c >= nextFree)
+        {
+            // Beats get numbers (2.3), finer lines the fraction of the beat as one character
+            // (2.3  ¼  ½  ¾  2.4); a tick when even that's tight. Subdivisions stop at eighths of a
+            // beat (App::gridSpacing), which all have glyphs.
+            static const wchar_t* const eighths[] = { L"", L"\x215b", L"\x00bc", L"\x215c", L"\x00bd", L"\x215d", L"\x00be", L"\x215e" };
+            const auto line = std::ceil (t0 / grid.sub - 1e-9) * grid.sub; // this line's position
+            const auto beats = line / s.samplesPerBeat();
+            const auto beat = (juce::int64) std::floor (beats + 1e-6);
+            const auto eighth = (int) std::llround ((beats - (double) beat) * 8.0) % 8;
+            const auto barBeat = juce::String (beat / s.beatsPerBar() + 1) + "." + juce::String (beat % s.beatsPerBar() + 1);
+            const auto room = (int) (grid.sub / spc) - 1; // columns before the next line, less a gap
+
+            label = eighth == 0 ? barBeat : juce::String (eighths[eighth]);
+
+            if (eighth == 0 ? s.samplesPerBeat() < spc * 6.0 : label.length() > room)
+            {
+                label.clear();
+                canvas.put (laneX + c, rulerY, gridMark, colour::faint, canvas.at (laneX + c, rulerY).bg);
+            }
+
+            labelColour = colour::faint;
+        }
+        else if (! s.gridOn())
         {
             const auto every = spc / app.sampleRate() < 0.5 ? 5.0 : 30.0; // seconds between labels
             const auto mark = std::ceil (t0 / (every * app.sampleRate()) - 1e-9);
@@ -370,22 +493,45 @@ void Ui::drawTimeline (App& app)
         if (label.isNotEmpty() && c >= nextFree)
         {
             for (int j = 0; j < label.length() && c + j < laneW; ++j)
-                canvas.put (laneX + c + j, rulerY, (wchar_t) label[j], colour::dim, canvas.at (laneX + c + j, rulerY).bg);
+                canvas.put (laneX + c + j, rulerY, (wchar_t) label[j], labelColour, canvas.at (laneX + c + j, rulerY).bg);
             nextFree = c + label.length() + 1;
         }
     }
 
-    for (const auto& m : s.tree())
-        if (m.hasType (ids::MARKER))
-            if (const auto c = columnOf ((juce::int64) m[ids::position]); c >= 0 && c < laneW)
-                canvas.text (laneX + c, rulerY, m[ids::name].toString().substring (0, 1), 231, colour::marker, true);
+    // Markers on their own row, left to right, each name cut short before the next marker.
+    {
+        struct Mark { int column; juce::String name; bool picked; };
+        std::vector<Mark> marks;
 
-    if (cursorCol >= 0 && cursorCol < laneW)
-        canvas.put (laneX + cursorCol, rulerY, L'\x25bc', colour::accent);
+        for (const auto& m : s.tree())
+            if (m.hasType (ids::MARKER))
+            {
+                // The one being named shows what's typed so far.
+                const bool naming = m == app.namingMarker && app.commandLine.isNotEmpty();
+                const bool picked = m == app.namingMarker || (app.topLane == App::TopLane::markers && m == app.selectedMarker);
+                marks.push_back ({ columnOf ((juce::int64) m[ids::position]), naming ? app.commandLine : m[ids::name].toString(), picked });
+            }
+
+        std::sort (marks.begin(), marks.end(), [] (const auto& a, const auto& b) { return a.column < b.column; });
+
+        for (size_t i = 0; i < marks.size(); ++i)
+        {
+            const auto& [c, name, picked] = marks[i];
+
+            if (c < 0 || c >= laneW)
+                continue;
+
+            // The picked marker (arrows on the markers row) shows in the cursor's colour.
+            const int room = std::min (laneW - c, i + 1 < marks.size() ? std::max (1, marks[i + 1].column - c - 1) : laneW);
+            canvas.text (laneX + c, markerY, name.isEmpty() ? juce::String ("?") : name, picked ? 16 : 231,
+                         picked ? colour::accent : colour::marker, true, room);
+        }
+    }
 
     // Tracks --------------------------------------------------------------------
     const int tracksTop = rulerY + 1, masterY = h - 6, tracksBottom = masterY - 1; // exclusive
-    const int visible = std::max (1, tracksBottom - tracksTop);
+    const int rowsPerTrack = s.trackHeight(); // "height", per session
+    const int visible = std::max (1, (tracksBottom - tracksTop) / rowsPerTrack); // tracks that fit
     const int n = s.numTracks();
 
     const int focusRow = std::min (app.focused, n - 1); // the mix row lives below the list
@@ -401,6 +547,21 @@ void Ui::drawTimeline (App& app)
     {
         const auto db = toDb (peak);
         return db < -54.0f ? levels[0] : levels[juce::jlimit (1, 4, 1 + (int) ((db + 54.0f) / 54.0f * 4.0f))];
+    };
+
+    // Taller tracks draw the waveform centred: loudness sets how far it reaches up and down from
+    // the middle, and a row it only partly reaches gets a lighter shade.
+    auto waveGlyph = [&] (float peak, int r)
+    {
+        if (rowsPerTrack == 1)
+            return glyphFor (peak);
+
+        const auto db = toDb (peak);
+        const auto level = db < -54.0f ? 0.0 : juce::jlimit (0.0, 1.0, (db + 54.0) / 54.0);
+        const auto reach = level * rowsPerTrack * 0.5 + 0.25;                              // rows from the middle
+        const auto from = std::max (0.0, std::abs (r + 0.5 - rowsPerTrack * 0.5) - 0.5); // where this row starts
+        const auto cover = juce::jlimit (0.0, 1.0, reach - from);
+        return level <= 0.0 ? levels[0] : levels[juce::jlimit (0, 4, (int) std::ceil (cover * 4.0 - 0.5))];
     };
 
     // Peak of an overview over [t0, t1) relative to a clip start.
@@ -421,16 +582,25 @@ void Ui::drawTimeline (App& app)
 
     for (int row = 0; row < visible && app.trackScroll + row < n; ++row)
     {
-        const int i = app.trackScroll + row, y = tracksTop + row;
+        const int i = app.trackScroll + row, y = tracksTop + row * rowsPerTrack;
         const auto t = s.track (i);
-        const bool focusedRow = i == app.focused;
+        const bool focusedRow = i == app.focused && ! app.onTopLane();
         const bool selectedRow = std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end();
         const int bg = focusedRow ? colour::focusBg : (selectedRow ? colour::selBg : -1);
-        // A time selection covers the selected tracks, or every track when none are selected.
-        const bool rowInTimeSelection = timeSel && (selTracks.empty() || selectedRow);
+        // A time selection covers the tracks edits will act on: the selected ones, else the focused
+        // one, or every track from the bar or markers row (App::defaultTargets).
+        const bool rowInTimeSelection = timeSel && (app.onTopLane() || (selTracks.empty() ? focusedRow : selectedRow));
+        // The row stays lit all the way along the timeline, so you can see which track you're on.
+        const int laneBg = selectedRow ? colour::laneSelBg : focusedRow ? colour::laneFocusBg : -1;
 
-        // Left panel: focus, number, name, flags, input
-        canvas.fill (0, y, leftPanel, L' ', -1, bg);
+        // Left panel: focus, number, name, flags, input (on the first row; the rest is its colour)
+        for (int r = 0; r < rowsPerTrack; ++r)
+        {
+            canvas.fill (0, y + r, leftPanel, L' ', -1, bg);
+            canvas.put (laneX - 1, y + r, L'\x2502', colour::faint);
+            canvas.put (meterX - 1, y + r, L'\x2502', colour::faint);
+        }
+
         if (focusedRow)
             canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
@@ -451,9 +621,6 @@ void Ui::drawTimeline (App& app)
         else
             canvas.text (20, y, input > 0 ? "in" + juce::String (input) : juce::String ("--"),
                          input > app.engine.numInputChannels() ? colour::error : colour::dim, bg);
-
-        canvas.put (laneX - 1, y, L'\x2502', colour::faint);
-        canvas.put (meterX - 1, y, L'\x2502', colour::faint);
 
         // Lane
         struct LaneClip
@@ -487,27 +654,27 @@ void Ui::drawTimeline (App& app)
 
         for (int c = 0; c < laneW; ++c)
         {
-            const auto t0 = (double) app.viewStart + c * spc, t1 = t0 + spc;
+            const auto t0 = origin + c * spc, t1 = t0 + spc;
             wchar_t ch = L' ';
-            int fg = colour::wave, cellBg = -1;
+            int fg = colour::wave, cellBg = laneBg;
+            bool inClip = false;
+            float wavePeak = -1.0f; // a clip or take here: drawn per row by waveGlyph
+            wchar_t edgeCh = 0;     // a clip's first or last column
 
-            if (s.gridOn())
+            const auto line = gridLevel (t0, t1);
+
+            if (line > 0)
             {
-                const auto bar = std::ceil (t0 / s.samplesPerBar() - 1e-9);
-                if (bar * s.samplesPerBar() < t1)
-                {
-                    ch = L'\x00b7';
-                    fg = colour::faint;
-                }
+                ch = gridMark;
+                fg = line == 2 ? colour::gridBar : colour::faint;
             }
 
             // Sample tracks read as a step sequencer: every column is a step, a hit shows its
-            // velocity as a shade, an empty step a faint dot (brighter on bar lines).
+            // velocity as a shade, an empty step a faint dot (a grid mark on grid lines).
             if (sampleTrack)
             {
-                const bool barLine = ch != L' ';
-                ch = L'\x00b7';
-                fg = barLine ? colour::dim : colour::faint;
+                ch = line > 0 ? gridMark : L'\x00b7';
+                fg = line == 2 ? colour::dim : line == 1 ? colour::gridBar : colour::faint;
 
                 auto it = std::lower_bound (laneHits.begin(), laneHits.end(), std::make_pair (t0 - 0.5, 0.0f));
                 float vel = -1.0f;
@@ -533,9 +700,21 @@ void Ui::drawTimeline (App& app)
                 if (t1 > start && t0 < end)
                 {
                     const auto fileZero = lc.start - lc.offset; // timeline position of the file's first sample
-                    ch = glyphFor (overviewPeak (lc.data->overview, fileZero, std::max (t0, start), std::min (t1, end)));
+                    wavePeak = overviewPeak (lc.data->overview, fileZero, std::max (t0, start), std::min (t1, end));
                     fg = colour::wave;
                     cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
+                    inClip = true;
+
+                    // An outline (edges here, top and bottom lines below), so a clip's length
+                    // shows against empty space even where it's silent. Clips only a column or
+                    // two wide keep their waveform instead of edges.
+                    if (end - start >= 3.0 * spc)
+                    {
+                        if (start >= t0 && start < t1)
+                            edgeCh = edges ? L'\x258f' : L'\x258c';
+                        else if (end > t0 && end <= t1)
+                            edgeCh = edges ? L'\x2595' : L'\x2590';
+                    }
                     break;
                 }
             }
@@ -546,7 +725,9 @@ void Ui::drawTimeline (App& app)
 
                 if (t1 > (double) liveTake->start && t0 < end)
                 {
-                    ch = glyphFor (overviewPeak (liveTake->overview, liveTake->start, t0, t1));
+                    wavePeak = overviewPeak (liveTake->overview, liveTake->start, t0, t1);
+                    edgeCh = 0;
+                    inClip = false;
                     fg = colour::liveWave;
                     cellBg = colour::recBg;
                 }
@@ -555,20 +736,45 @@ void Ui::drawTimeline (App& app)
             if (rowInTimeSelection && inTimeSelection (t0, t1))
                 cellBg = (cellBg == colour::clipBg || cellBg == colour::clipAltBg) ? colour::selClipBg : colour::selBg;
 
-            if (rolling && c == playCol)
-                cellBg = app.recording ? colour::rec : colour::play;
-            else if (c == cursorCol)
-                cellBg = rolling ? colour::faint : colour::accent, fg = rolling ? fg : 16;
+            // The playhead and the cursor are thin lines over whatever's there, so selections and
+            // clips stay readable; the playhead wins when they share a column.
+            const bool playheadHere = rolling && c == playCol;
+            const bool cursorHere = c == cursorCol && ! playheadHere;
 
-            canvas.put (laneX + c, y, ch, fg, cellBg);
+            for (int r = 0; r < rowsPerTrack; ++r)
+            {
+                auto rowCh = edgeCh != 0 ? edgeCh : wavePeak >= 0.0f ? waveGlyph (wavePeak, r) : ch;
+                auto rowFg = fg;
+
+                if (playheadHere)
+                    rowCh = cursorMark, rowFg = app.recording ? colour::rec : colour::play;
+                else if (cursorHere)
+                    rowCh = cursorMark, rowFg = rolling ? colour::dim : colour::accent;
+
+                canvas.put (laneX + c, y + r, rowCh, rowFg, cellBg);
+
+                // A clip's outline: its top along the first row, its bottom along the last.
+                if (inClip)
+                {
+                    canvas.at (laneX + c, y + r).over = r == 0;
+                    canvas.at (laneX + c, y + r).under = r == rowsPerTrack - 1;
+                }
+            }
         }
 
-        // Volume, then the meter: armed tracks show their input, others their playback
+        // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
+        // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
         drawVolume (meterX + 1, y, t[ids::gainDb], bg);
-        drawMeter (meterX + 7, y, 12, m.level, colour::meterBg);
         drawDb (meterX + 20, y, m.hold, m.clipped, bg);
+
+        for (int r = 0; r < rowsPerTrack; ++r)
+            drawMeter (meterX + 7, y + r, 12, m.level, colour::meterBg);
     }
+
+    // The cursor's handle sits under the last track, clear of the ruler's numbers.
+    if (cursorCol >= 0 && cursorCol < laneW && n > 0)
+        canvas.put (laneX + cursorCol, tracksTop + std::min (visible, n - app.trackScroll) * rowsPerTrack, L'\x25b2', colour::accent);
 
     // Mix ---------------------------------------------------------------------------
     const bool mixFocused = app.mixFocused();
@@ -642,24 +848,76 @@ void Ui::drawBottom (App& app)
     }
 
     {
+        if (app.namingMarker.isValid())
+            x = canvas.text (x, cmdY, " name marker " + app.namingMarker[ids::name].toString() + " ", 231, colour::marker, true);
+
         x = canvas.text (x + 1, cmdY, ": ", colour::accent, -1, true);
         x = canvas.text (x, cmdY, app.commandLine, colour::text, -1, false, w - 4);
         canvas.put (x, cmdY, L' ', -1, colour::text);
 
         // With an empty line, say what commands will act on.
-        if (app.commandLine.isEmpty() && app.session != nullptr)
+        if (app.commandLine.isEmpty() && app.session != nullptr && ! app.namingMarker.isValid())
         {
             juce::StringArray parts;
+            juce::String what = "selected";
 
             if (app.hasTimeSelection())
-                parts.add (app.formatBars (app.timeSelection().getStart()) + L" \x2192 " + app.formatBars (app.timeSelection().getEnd()));
+            {
+                const auto sel = app.timeSelection();
+                const auto& s = *app.session;
+                parts.add (app.formatBars (sel.getStart()) + L" \x2192 " + app.formatBars (sel.getEnd()));
 
-            if (const auto sel = app.selectedTracks(); ! sel.empty())
+                // How long: bars and beats on the grid, and always seconds.
+                const auto beats = (double) sel.getLength() / s.samplesPerBeat();
+                const auto bars = (int) std::floor (beats / s.beatsPerBar() + 1e-6);
+                const auto restBeats = std::max (0.0, beats - bars * s.beatsPerBar());
+                juce::StringArray length;
+
+                if (s.gridOn())
+                {
+                    if (bars > 0)
+                        length.add (juce::String (bars) + (bars == 1 ? " bar" : " bars"));
+
+                    if (restBeats > 0.005 || bars == 0)
+                        length.add (juce::String (restBeats, std::abs (restBeats - std::round (restBeats)) < 0.005 ? 0 : 2)
+                                    + (std::abs (restBeats - 1.0) < 0.005 ? " beat" : " beats"));
+                }
+
+                length.add (juce::String ((double) sel.getLength() / app.sampleRate(), 2) + " s");
+                parts.add (length.joinIntoString (" "));
+
+                // A selection that is exactly one clip (tab, shift+tab) names it.
+                if (const auto targets = app.defaultTargets(); targets.size() == 1)
+                    for (const auto& c : Session::clips (s.track (targets.front())))
+                        if ((juce::int64) c[ids::start] == sel.getStart() && (juce::int64) c[ids::start] + (juce::int64) c[ids::length] == sel.getEnd())
+                            what = "clip " + c[ids::file].toString().replaceCharacter ('\\', '/').fromLastOccurrenceOf ("/", false, false)
+                                                 .upToLastOccurrenceOf (".", false, false) + " selected";
+
+                // From one marker to the next (tab, shift+tab on the markers row): a section.
+                if (app.topLane == App::TopLane::markers)
+                {
+                    juce::String from, to;
+
+                    for (const auto& m : s.tree())
+                        if (m.hasType (ids::MARKER))
+                        {
+                            if ((juce::int64) m[ids::position] == sel.getStart()) from = m[ids::name].toString();
+                            if ((juce::int64) m[ids::position] == sel.getEnd())   to = m[ids::name].toString();
+                        }
+
+                    if (from.isNotEmpty())
+                        what = "marker " + from + (to.isNotEmpty() ? L" \x2192 " + to : juce::String()) + " selected";
+                }
+            }
+
+            if (app.onTopLane())
+                parts.add ("all tracks");
+            else if (const auto sel = app.selectedTracks(); ! sel.empty())
                 parts.add (sel.size() == 1 ? "track " + juce::String (sel.front() + 1)
                                            : "tracks " + juce::String (sel.front() + 1) + "-" + juce::String (sel.back() + 1));
 
             if (! parts.isEmpty())
-                canvas.text (x + 2, cmdY, "selected: " + parts.joinIntoString (juce::String (L" \x00b7 ")) + L" \x00b7 esc clears", colour::dim);
+                canvas.text (x + 2, cmdY, what + ": " + parts.joinIntoString (juce::String (L" \x00b7 ")) + L" \x00b7 esc clears", colour::dim);
         }
     }
 
@@ -673,9 +931,9 @@ void Ui::drawBottom (App& app)
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.session != nullptr && ! app.mixFocused() && Session::isSampleTrack (app.session->track (app.focused)))
-        hints = L"alt+/ toggles a hit \x00b7 alt \x2190\x2192 step, ctrl+alt 4 steps (grid 16 for 16ths) \x00b7 pat x...x... \x00b7 space play \x00b7 [ ] vol \x00b7 audio converts back \x00b7 ? help";
+        hints = L"shift+R arms \x00b7 . plays armed (shift: accent), ctrl+space records it \x00b7 snap quantizes \x00b7 alt+/ toggles a hit \x00b7 pat x...x... \x00b7 ? help";
     else
-        hints = L"enter run (empty: return) \x00b7 space play \x00b7 ctrl+space record \x00b7 1 r arms \x00b7 \x2190\x2192 bar \x00b7 ctrl 4 bars \x00b7 alt beat \x00b7 shift select \x00b7 [ ] vol ({ }: mix) \x00b7 add \x00b7 import / drop files \x00b7 ? help";
+        hints = L"enter run (empty: return) \x00b7 space play \x00b7 ctrl+space record \x00b7 shift+R arms \x00b7 r t zoom \x00b7 \x2190\x2192 bar \x00b7 ctrl 4 bars \x00b7 alt beat \x00b7 shift select \x00b7 [ ] vol ({ }: mix) \x00b7 add \x00b7 import / drop files \x00b7 ? help";
 
     canvas.text (1, hintY, hints, colour::dim, -1, false, w - 2);
 }
@@ -688,23 +946,25 @@ void Ui::drawHelp (App&)
 
     static const Row rows[] = {
         { Heading, L"MOVE", nullptr, L"PLAY & RECORD", nullptr },
-        { Pair, L"\x2190 \x2192", L"1 bar  (grid off: 1 s)", L"space", L"play / stop" },
-        { Pair, L"ctrl \x2190 \x2192", L"4 bars", L"1 r  1-3 r", L"arm (+ hear input)" },
+        { Pair, L"\x2190 \x2192", L"next grid line (zoom)", L"space", L"play / stop" },
+        { Pair, L"ctrl \x2190 \x2192", L"4 bars", L"shift+R  1r", L"arm (+ hear input)" },
         { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
         { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch" },
-        { Pair, L"home / end", L"start / end", L"2mon", L"hear input on playback too" },
-        { Pair, L"\x2191 \x2193", L"choose track or Mix", L"ctrl k", L"marker at the playhead" },
+        { Pair, L"home / end", L"start / end", L"shift+I 2mon", L"hear input on playback too" },
+        { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"ctrl k  k", L"add marker / markers row" },
         { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
-        { Pair, L"+ -   enter", L"zoom / return to start", L"l", L"loop the selection / toggle loop" },
+        { Pair, L"r t   enter", L"zoom out, in / return", L"l", L"loop the selection / toggle loop" },
+        { Pair, L"q w", L"go to sel. start / end", L"tab", L"next clip edge / hit" },
         { Heading, L"TRACKS", nullptr, L"VOLUME", nullptr },
         { Note, L"Numbers first, spaces optional: 2m, 1-3m, 2i3, 2v-6. No number = selection or \x25b8 track." },
         { Pair, L"add vox in2", L"new track on input 2", L"[  ]", L"track -1 / +1 dB" },
-        { Pair, L"2a 2m 2s", L"arm / mute / solo", L"{ } ctrl [ ]", L"mix -1 / +1 dB" },
+        { Pair, L"shift+M S", L"mute / solo  (2m 2s)", L"{ } ctrl [ ]", L"mix -1 / +1 dB" },
         { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
         { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
         { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
         { Heading, L"SAMPLES", nullptr, L"EDIT", nullptr },
         { Pair, L"sample f", L"new sample track", L"ctrl c x v", L"copy / cut / paste" },
+        { Pair, L".  >", L"play armed (> accent)", L"snap  snap 50", L"quantize hits (%)" },
         { Pair, L"3 sample", L"convert (3 audio: back)", L"ctrl d", L"duplicate after itself" },
         { Pair, L"3 pat x...", L"pattern: X x o .", L"delete", L"clear the range" },
         { Pair, L"grid 16", L"steps of a 16th", L"ctrl z / y", L"undo / redo" },
@@ -712,13 +972,14 @@ void Ui::drawHelp (App&)
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
+        { Pair, L"height 3", L"rows per track (1-4)", L"dark  light", L"themes (also: grey)" },
 #if JUCE_WINDOWS
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav D:\\x", L"...to a folder (remembered)" },
 #else
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
 #endif
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
-        { Pair, L"save  close", L"save / back to sessions", L"q", L"save and quit" },
+        { Pair, L"save  close", L"save / back to sessions", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, the selection, then clip lights \x00b7 ? closes this" },
     };
 
@@ -763,6 +1024,42 @@ void Ui::drawHelp (App&)
                 break;
         }
     }
+}
+
+// "project": the session's settings, in a box like help. The chosen row is lit; its value
+// changes with left/right, or enter starts its command on the line below.
+void Ui::drawSettings (App& app)
+{
+    const auto settings = app.projectSettings();
+    const int w = canvas.width(), h = canvas.height();
+    const int boxW = std::min (w - 4, 80), boxH = std::min (h - 2, (int) settings.size() + 6);
+    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+    constexpr int nameW = 26;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    canvas.text (x0 + 2, y0 + 1, "PROJECT SETTINGS", colour::text, bg, true);
+    canvas.text (x0 + 19, y0 + 1, app.session->tree()[ids::name].toString(), colour::dim, bg, false, boxW - 21);
+
+    for (int i = 0; i < (int) settings.size() && i + 3 < boxH - 2; ++i)
+    {
+        const auto& row = settings[(size_t) i];
+        const int y = y0 + 3 + i;
+        const bool chosen = i == app.settingsIndex;
+        const int rowBg = chosen ? colour::selBg : bg;
+
+        canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+        if (chosen)
+            canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+
+        canvas.text (x0 + 3, y, row.name, colour::text, rowBg, false, nameW);
+        canvas.text (x0 + 3 + nameW, y, row.value, row.editable ? colour::accent : colour::dim, rowBg, row.editable, boxW - nameW - 5);
+    }
+
+    canvas.text (x0 + 2, y0 + boxH - 2,
+                 L"\x2191\x2193 choose \x00b7 \x2190\x2192 change \x00b7 enter: type a value or flip it \x00b7 commands work too \x00b7 esc closes",
+                 colour::dim, bg, false, boxW - 4);
 }
 
 //==============================================================================

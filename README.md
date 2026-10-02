@@ -72,7 +72,8 @@ JSON: copy one to make your own.
 ## Thirty-second tour
 
 ```
-1 r           arm track 1 (hear input)  space       play / stop
+shift+R       arm track (hear input)    space       play / stop
+r t           zoom out / in             tab         next clip edge (shift: select)
 ctrl+space    record the armed tracks   ← →         move a bar (ctrl: 4, alt: a step)
 2i3           track 2 <- input 3        shift ← →   select a range
 2v-6          track 2 at -6 dB          ctrl c / v  copy / paste the range

@@ -23,6 +23,8 @@ TAW_ID (timeSigNum)
 TAW_ID (timeSigDen)
 TAW_ID (grid)
 TAW_ID (latencyComp)
+TAW_ID (trackHeight) // rows per track on screen, 1-4
+TAW_ID (inputQuantize) // bool: pad hits snap to the grid step as they're recorded
 TAW_ID (click)     // bool
 TAW_ID (clickWhen) // "always" | "rec"
 TAW_ID (clickDb)

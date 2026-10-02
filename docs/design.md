@@ -107,16 +107,22 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 
 | Key | Grid on | Grid off |
 |---|---|---|
-| `←` / `→` | 1 bar | 1 second |
-| `Ctrl+←` / `Ctrl+→` | 4 bars | 4 seconds |
+| `←` / `→` | to the next grid line shown, so it follows the zoom (a bar, a beat, an 8th...) | 1 second |
+| `Ctrl+←` / `Ctrl+→` | 4 of those | 4 seconds |
 | `Alt+←` / `Alt+→` | 1 step (a beat; a 16th after `grid 16`) | 0.1 second |
 | `Ctrl+Alt+←` / `Ctrl+Alt+→` | 4 steps | 0.4 second |
 | `Enter` (empty command line) | back to where play started; again for the session start (rolling: keeps playing from there) | same |
 | `Home` / `End` | session start / end of last take | same |
-| `↑` / `↓` | focus previous / next track; below the last track is the Mix | same |
+| `↑` / `↓` | focus previous / next track; below the last track is the Mix, above the first the bar row, then the markers row (selections there cover every track). On the markers row `←`/`→` (and Tab) hop marker to marker, picking it and moving the cursor; Enter renames it, Delete/Backspace removes it, Shift stretches the selection marker to marker; `↓` goes back to normal arrows | same |
 | `[` / `]` | volume −1 / +1 dB on the selection, focused track, or Mix (also while rolling) | same |
 | `{` / `}` or `Ctrl+[` / `Ctrl+]` | Mix volume −1 / +1 dB, from anywhere (`{ }` because macOS Terminal sends `Ctrl+[` as Escape) | same |
-| `+` / `-` (empty command line) | zoom in / out | same |
+| `r` / `t` (empty command line; also `-` / `+`) | zoom out / in (Pro Tools keys) | same |
+| `Ctrl+↑` / `Ctrl+↓` | first / last track; with Shift, selects every track from where you were to there | same |
+| `k` (empty command line) | to the markers row (ctrl+k adds a marker); `k` again returns to the track | same |
+| `q` / `w` (empty command line) | cursor to the selection's start / end, centred in the view; the selection stays (select, `snap`, `q`, play) | same |
+| `Tab` / `Shift+Tab` | cursor to the next clip start or end, or the next hit on sample tracks, on the selected or focused tracks / extend the selection to it | same |
+| `Shift+R` `S` `M` `I` (empty command line) | arm / solo / mute / input-monitor the selected or focused tracks | same |
+| `.` / `>` (empty command line, a sample track armed) | the pad key: plays every armed sample track now (`>` = accent); while recording, writes a hit on each where you heard it (output latency taken off). Recording-first: patterns are played in; `snap` / `snap 50` quantize afterwards, `snap input` snaps while recording (off by default) | same |
 | `Space` (empty command line) | play / stop | same |
 
 **During playback the arrows never move the playhead.** They move the cursor (drawn apart from
@@ -173,9 +179,11 @@ records the selected tracks, else whatever is armed.
 | `click` | toggle the click (metronome) |
 | `click rec` / `click always` | click only while recording / during playback too |
 | `click -12` | click level in dB |
+| `height 3` | rows per track, 1-4 (default 2); saved with the session |
+| `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device |
 | `panel` | open the ASIO driver control panel |
-| `save`, `q` | save, quit (quitting also saves) |
+| `save`, `exit` (or `Ctrl+Q`) | save, quit (quitting also saves; `q` alone is a view key) |
 | `close` | save and close the session, back to the recent sessions / new session screen |
 
 ### Rolling keys

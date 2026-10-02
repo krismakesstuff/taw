@@ -24,6 +24,7 @@ struct Cell
     wchar_t ch = L' ';
     int fg = -1, bg = -1; // 256-colour palette index, -1 = terminal default
     bool bold = false;
+    bool over = false, under = false; // a line along the top / bottom (clip outlines), in fg
 
     bool operator== (const Cell&) const = default;
 };
@@ -61,6 +62,7 @@ private:
     void drawTimeline (App&);
     void drawBottom (App&);
     void drawHelp (App&);
+    void drawSettings (App&);
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
@@ -69,5 +71,6 @@ private:
 
     Canvas canvas;
     std::vector<std::wstring> previous;
+    juce::String themeDrawn; // the theme the screen was last painted in
 };
 } // namespace taw

@@ -188,6 +188,10 @@ public:
     void stop();
     void seek (juce::int64 position);
 
+    // Plays a sample track's sample right now, stopped or rolling: a pad press (the . key).
+    // Recording the hit is the caller's business; this is only what you hear.
+    void triggerPad (int trackIndex, float velocity);
+
     std::shared_ptr<Recorder> createRecorder (int trackIndex, int inputChannel, const juce::File&,
                                               double sampleRate, juce::String& error);
     // Recorders stop receiving audio once a graph without them is live; they are then closed.
@@ -228,6 +232,24 @@ private:
     juce::TimeSliceThread diskThread { "taw disk writer" };
 
     SpscQueue<Graph*, 64> pending, retired;
+
+    // Pad presses: message thread -> audio thread, played by a few voices that ring out.
+    struct PadPress
+    {
+        int track;
+        float velocity;
+    };
+
+    struct PadVoice
+    {
+        int track = -1; // -1: free
+        juce::int64 played = 0;
+        float velocity = 0.0f;
+    };
+
+    SpscQueue<PadPress, 256> padPresses;
+    std::array<PadVoice, 32> padVoices; // audio thread only
+    void renderPads (const TrackPlay&, int trackIndex, float* left, float* right, int n);
     Graph* current = nullptr; // audio thread (or message thread while the device is stopped)
 
     // A recorder is finished once the audio thread runs a graph posted after it was stopped.

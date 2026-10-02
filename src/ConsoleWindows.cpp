@@ -10,6 +10,43 @@
 
 namespace taw
 {
+namespace
+{
+// The cmd window's font before taw switched it, put back on exit.
+CONSOLE_FONT_INFOEX oldFont {};
+bool fontChanged = false;
+
+// Windows Terminal draws with its own font (Cascadia Mono by default) and ignores console font
+// calls. A classic console window (conhost) gets switched to Cascadia Mono when installed.
+bool useEdgeFont (HANDLE out)
+{
+    if (GetEnvironmentVariableW (L"WT_SESSION", nullptr, 0) > 0)
+        return true;
+
+    oldFont.cbSize = sizeof (oldFont);
+
+    if (! GetCurrentConsoleFontEx (out, FALSE, &oldFont))
+        return false;
+
+    if (std::wcscmp (oldFont.FaceName, L"Cascadia Mono") == 0 || std::wcscmp (oldFont.FaceName, L"Cascadia Code") == 0)
+        return true;
+
+    auto font = oldFont;
+    font.dwFontSize.X = 0; // width follows the height
+    font.FontFamily = FF_MODERN | TMPF_TRUETYPE | TMPF_VECTOR;
+    font.FontWeight = FW_NORMAL;
+    wcscpy_s (font.FaceName, L"Cascadia Mono");
+
+    if (! SetCurrentConsoleFontEx (out, FALSE, &font))
+        return false;
+
+    fontChanged = true;
+    CONSOLE_FONT_INFOEX now { sizeof (now) };
+    // Windows quietly substitutes a font that isn't installed.
+    return GetCurrentConsoleFontEx (out, FALSE, &now) && std::wcscmp (now.FaceName, L"Cascadia Mono") == 0;
+}
+} // namespace
+
 bool Console::open()
 {
     if (opened)
@@ -34,6 +71,7 @@ bool Console::open()
     }
 
     opened = true;
+    edgeGlyphs = useEdgeFont (out);
     write (L"\x1b[?1049h\x1b[?25l\x1b[2J");
     return true;
 }
@@ -46,6 +84,9 @@ Console::~Console()
     write (L"\x1b[0m\x1b[?25h\x1b[?1049l");
     SetConsoleMode (in, oldInMode);
     SetConsoleMode (out, oldOutMode);
+
+    if (fontChanged)
+        SetCurrentConsoleFontEx (out, FALSE, &oldFont);
 }
 
 std::vector<Key> Console::poll()

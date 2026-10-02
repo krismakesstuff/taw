@@ -280,6 +280,7 @@ bool Console::open()
         return false;
 
     opened = true;
+    edgeGlyphs = true; // Menlo, SF Mono and the usual terminal fonts have them
     writeAll (enter, std::strlen (enter));
     return true;
 }

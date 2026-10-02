@@ -40,6 +40,7 @@ public:
     double bpm() const { return state[ids::bpm]; }
     int beatsPerBar() const { return state[ids::timeSigNum]; }
     bool gridOn() const { return state[ids::grid]; }
+    int trackHeight() const { return juce::jlimit (1, 4, (int) state[ids::trackHeight]); } // rows per track
 
     double samplesPerBeat() const { return sampleRate() * 60.0 / bpm(); }
     double samplesPerBar() const { return samplesPerBeat() * beatsPerBar(); }

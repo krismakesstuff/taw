@@ -11,6 +11,7 @@ int text, dim, faint, headerBg, focusBg;
 int accent, rec, recBg, play, playBg;
 int clipAltBg, hit; // hit: sample-track steps (warm, unlike waveforms)
 int selBg, selClipBg, loopBg, loopOffBg;
+int cursorBg, playheadBg; // behind what's under the cursor / playhead in a lane
 int gridBar; // bar lines; beats and finer use faint
 int laneFocusBg, laneSelBg; // empty lane cells on the focused / selected tracks (apart from clips)
 int clipBg, wave, liveWave, marker;
@@ -27,6 +28,7 @@ void apply (const juce::String& theme)
         accent = 166, rec = 160, recBg = 217, play = 28, playBg = 28;
         clipAltBg = 243, hit = 94;
         selBg = 110, selClipBg = 74, loopBg = 108, loopOffBg = 245;
+        cursorBg = 180, playheadBg = 114;
         gridBar = 241;
         laneFocusBg = 248, laneSelBg = 146;
         clipBg = 245, wave = 18, liveWave = 124, marker = 90;
@@ -40,6 +42,7 @@ void apply (const juce::String& theme)
         accent = 166, rec = 160, recBg = 224, play = 28, playBg = 28;
         clipAltBg = 249, hit = 130;
         selBg = 153, selClipBg = 117, loopBg = 151, loopOffBg = 250;
+        cursorBg = 223, playheadBg = 157;
         gridBar = 245;
         laneFocusBg = 254, laneSelBg = 189;
         clipBg = 251, wave = 25, liveWave = 160, marker = 133;
@@ -53,6 +56,7 @@ void apply (const juce::String& theme)
         accent = 214, rec = 196, recBg = 52, play = 35, playBg = 22;
         clipAltBg = 239, hit = 179;
         selBg = 24, selClipBg = 31, loopBg = 28, loopOffBg = 239;
+        cursorBg = 94, playheadBg = 22;
         gridBar = 241;
         laneFocusBg = 234, laneSelBg = 17;
         clipBg = 236, wave = 110, liveWave = 210, marker = 170;
@@ -390,7 +394,7 @@ void Ui::drawTransport (App& app)
     if (app.console.keyboardHeldBy() != nullptr)
     {
         gap();
-        add (L" keys !92 plugin ", 16, colour::accent, true);
+        add (L" keys \x2192 plugin ", 16, colour::accent, true);
     }
 
     // Low latency mode changes what you hear, so it's shown while it's on.
@@ -801,10 +805,25 @@ void Ui::drawTimeline (App& app)
                     fg = std::max (up, down) == 2 ? colour::liveWave : colour::note;
                 }
 
+                // As in audio lanes: a colour behind the notes, a line where there are none.
+                const bool empty = up == 0 && down == 0;
+
                 if (playheadHere)
-                    ch = cursorMark, fg = app.recording ? colour::rec : colour::play;
-                else if (cursorHere)
-                    ch = cursorMark, fg = rolling ? colour::dim : colour::accent;
+                {
+                    cellBg = colour::playheadBg;
+
+                    if (empty)
+                        ch = cursorMark, fg = app.recording ? colour::rec : colour::play;
+                }
+                else if (cursorHere && ! rolling)
+                {
+                    cellBg = colour::cursorBg;
+
+                    if (empty)
+                        ch = cursorMark, fg = colour::accent;
+                }
+                else if (cursorHere && empty)
+                    ch = cursorMark, fg = colour::dim;
 
                 canvas.put (laneX + c, y + r, ch, fg, cellBg);
             }
@@ -1004,8 +1023,9 @@ void Ui::drawTimeline (App& app)
                 if (rowInTimeSelection && inTimeSelection (t0, t1))
                     cellBg = (cellBg == colour::clipBg || cellBg == colour::clipAltBg) ? colour::selClipBg : colour::selBg;
 
-                // The playhead and the cursor are thin lines over whatever's there, so selections and
-                // clips stay readable; the playhead wins when they share a column.
+                // The playhead and the cursor colour the cell behind what's there, so a clip's edge
+                // or a hit under them still shows; on an empty cell they're a thin line. The
+                // playhead wins when they share a column.
                 const bool playheadHere = rolling && c == playCol;
                 const bool cursorHere = c == cursorCol && ! playheadHere;
 
@@ -1013,13 +1033,27 @@ void Ui::drawTimeline (App& app)
                 {
                     auto rowCh = edgeCh != 0 ? edgeCh : wavePeak >= 0.0f ? waveGlyph (wavePeak, r) : ch;
                     auto rowFg = fg;
+                    auto rowBg = cellBg;
+                    const bool empty = rowCh == L' ' || rowCh == gridMark;
 
                     if (playheadHere)
-                        rowCh = cursorMark, rowFg = app.recording ? colour::rec : colour::play;
-                    else if (cursorHere)
-                        rowCh = cursorMark, rowFg = rolling ? colour::dim : colour::accent;
+                    {
+                        rowBg = colour::playheadBg;
 
-                    canvas.put (laneX + c, y + r, rowCh, rowFg, cellBg);
+                        if (empty)
+                            rowCh = cursorMark, rowFg = app.recording ? colour::rec : colour::play;
+                    }
+                    else if (cursorHere && ! rolling)
+                    {
+                        rowBg = colour::cursorBg;
+
+                        if (empty)
+                            rowCh = cursorMark, rowFg = colour::accent;
+                    }
+                    else if (cursorHere && empty)
+                        rowCh = cursorMark, rowFg = colour::dim; // playing: the cursor is just a mark
+
+                    canvas.put (laneX + c, y + r, rowCh, rowFg, rowBg);
 
                     // A clip's outline: its top along the first row, its bottom along the last.
                     if (inClip)
@@ -1363,7 +1397,7 @@ void Ui::drawHelp (App&)
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
 #endif
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
-        { Pair, L"save  close", L"save / back to sessions", L"ctrl+q  exit", L"save and quit" },
+        { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };
 

@@ -190,7 +190,7 @@ records the selected tracks, else whatever is armed.
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device |
 | `panel` | open the ASIO driver control panel |
-| `save`, `exit` (or `Ctrl+Q`) | save, quit (quitting also saves; `q` alone is a view key) |
+| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; save and go back to the sessions; save and quit (`q` alone is a view key) |
 | `close` | save and close the session, back to the recent sessions / new session screen |
 
 ### Rolling keys

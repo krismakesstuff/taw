@@ -2366,6 +2366,10 @@ void App::handleMainKey (const Key& k)
     {
         if (k.ch == 'q')
             quit(); // saves first, like exit
+        else if (k.ch == 's' && session != nullptr)
+            say (execute ("save"));
+        else if (k.ch == 'w' && session != nullptr)
+            say (execute ("close")); // saves, then back to the sessions
         else if (k.ch == 'z')
             say (undoEdit());
         else if (k.ch == 'y')

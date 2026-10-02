@@ -40,8 +40,20 @@ Clipboard App::gather (const std::vector<int>& tracks, juce::Range<juce::int64> 
         const auto track = session->track (t);
         Clipboard::Lane lane;
         lane.sample = Session::isSampleTrack (track);
+        lane.instrument = Session::isInstrumentTrack (track);
 
-        if (lane.sample)
+        if (lane.instrument)
+        {
+            // Notes that start in the range (whole, even if they run past it), and controllers.
+            for (const auto& n : track)
+                if ((n.hasType (ids::NOTE) || n.hasType (ids::CC)) && hitInRange (n[ids::beat], from, to))
+                {
+                    auto copy = n.createCopy();
+                    copy.setProperty (ids::beat, (double) n[ids::beat] - from, nullptr);
+                    lane.items.push_back (copy);
+                }
+        }
+        else if (lane.sample)
         {
             for (const auto& h : Session::hits (track))
                 if (const double beat = h[ids::beat]; hitInRange (beat, from, to))
@@ -73,6 +85,20 @@ int App::clearRange (int trackIndex, juce::Range<juce::int64> range)
 {
     auto track = session->track (trackIndex);
     int changed = 0;
+
+    if (Session::isInstrumentTrack (track))
+    {
+        const auto from = snapBeats (range.getStart()), to = snapBeats (range.getEnd());
+
+        for (int i = track.getNumChildren(); --i >= 0;)
+            if (const auto n = track.getChild (i); (n.hasType (ids::NOTE) || n.hasType (ids::CC)) && hitInRange (n[ids::beat], from, to))
+            {
+                track.removeChild (n, um());
+                ++changed;
+            }
+
+        return changed;
+    }
 
     if (Session::isSampleTrack (track))
     {
@@ -146,15 +172,23 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
 
         auto track = session->track (t);
 
-        if (lane.sample != Session::isSampleTrack (track))
+        if (lane.sample != Session::isSampleTrack (track) || lane.instrument != Session::isInstrumentTrack (track))
         {
-            skipped.add ("track " + juce::String (t + 1) + " (" + (lane.sample ? "hits need a sample track" : "audio needs an audio track") + ")");
+            skipped.add ("track " + juce::String (t + 1) + " ("
+                         + (lane.sample ? "hits need a sample track" : lane.instrument ? "notes need an instrument track" : "audio needs an audio track") + ")");
             continue;
         }
 
         for (const auto& item : lane.items)
         {
-            if (lane.sample)
+            if (lane.instrument)
+            {
+                // Notes add to what's there, like playing them in again.
+                auto copy = item.createCopy();
+                copy.setProperty (ids::beat, atBeats + (double) item[ids::beat], nullptr);
+                track.appendChild (copy, um());
+            }
+            else if (lane.sample)
             {
                 // Pasted hits win over any already on the same step.
                 const auto beat = atBeats + (double) item[ids::beat];

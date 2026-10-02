@@ -1,6 +1,7 @@
-#include "App.h"
+﻿#include "App.h"
 #include "Bounce.h"
 #include "Import.h"
+#include "Plugins.h"
 #include "Safety.h"
 
 #include <juce_events/juce_events.h>
@@ -26,8 +27,6 @@ int main (int argc, char** argv)
 #endif
 {
     juce::ScopedJuceInitialiser_GUI juce;
-    taw::safety::installCrashHandler();
-
     juce::StringArray args;
 
 #if JUCE_WINDOWS
@@ -46,6 +45,19 @@ int main (int argc, char** argv)
     for (int i = 1; i < argc; ++i)
         args.add (juce::String::fromUTF8 (argv[i]));
 #endif
+
+    // taw --scan-plugin <file> <out.xml>   (taw runs this itself) describe one plugin file in a
+    // child process, so a plugin that crashes or hangs while loading can't take taw with it.
+    // No crash handler here, and no Windows crash dialog: a crash is just an exit code.
+    if (args[0] == "--scan-plugin")
+    {
+#if JUCE_WINDOWS
+        SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
+        return taw::PluginCatalog::scanInThisProcess (args[1], juce::File (args[2]));
+    }
+
+    taw::safety::installCrashHandler();
 
     if (args.contains ("-h") || args.contains ("--help"))
     {
@@ -68,6 +80,137 @@ int main (int argc, char** argv)
             std::printf ("%-16s %s\n", args[i].toRawUTF8(), taw::explainCommand (args[i], 16).toRawUTF8());
 
         return 0;
+    }
+
+    // taw --plugintest <file.vst3>   load one plugin and play it the way the engine does: a chord
+    // from the timeline, a stop, a key from the controller, a disarm. Checks its state round-trips.
+    // Leaves the plugin list alone.
+    if (args[0] == "--plugintest")
+    {
+        juce::AudioPluginFormatManager formats;
+        juce::addDefaultFormatsToManager (formats);
+        juce::OwnedArray<juce::PluginDescription> found;
+
+        for (auto* format : formats.getFormats())
+            format->findAllTypesForFile (found, args[1]);
+
+        if (found.isEmpty())
+        {
+            std::printf ("no plugin in %s\n", args[1].toRawUTF8());
+            return 1;
+        }
+
+        const auto desc = *found[0];
+        constexpr double rate = 48000.0;
+        constexpr int block = 512;
+        juce::String error;
+        auto instance = formats.createPluginInstance (desc, rate, block, error);
+
+        if (instance == nullptr)
+        {
+            std::printf ("couldn't load %s: %s\n", desc.name.toRawUTF8(), error.toRawUTF8());
+            return 1;
+        }
+
+        std::printf ("%s by %s \xc2\xb7 %s \xc2\xb7 %d in, %d out\n", desc.name.toRawUTF8(), desc.manufacturerName.toRawUTF8(),
+                     desc.isInstrument ? "instrument" : "effect", instance->getTotalNumInputChannels(), instance->getTotalNumOutputChannels());
+
+        auto slot = std::make_shared<taw::PluginSlot> (std::move (instance), desc);
+        slot->prepare (rate, block);
+
+        taw::Sequence seq;
+        for (int pitch : { 60, 64, 67 })
+            seq.notes.push_back ({ 0, (juce::int64) rate, 0, (juce::uint8) pitch, 100 }); // a second of C major
+
+        taw::HostTransport t;
+        t.sampleRate = rate;
+        juce::AudioBuffer<float> out (2, block);
+
+        // Renders seconds of audio from pos (rolling or not) and returns the peak.
+        auto run = [&] (double seconds, bool rolling, const taw::MidiMsg* live, int numLive)
+        {
+            float peak = 0.0f;
+            t.rolling = rolling;
+
+            for (int done = 0; done < (int) (seconds * rate); done += block)
+            {
+                out.clear();
+                slot->render (seq, t, block, live, numLive, out.getWritePointer (0), out.getWritePointer (1));
+                live = live != nullptr ? live + numLive : nullptr, numLive = 0; // only the first block gets the keys
+                peak = std::max ({ peak, out.getMagnitude (0, 0, block), out.getMagnitude (1, 0, block) });
+
+                if (rolling)
+                    t.pos += block;
+            }
+
+            return juce::Decibels::gainToDecibels (peak);
+        };
+
+        const auto chord = run (1.0, true, nullptr, 0);
+        const auto tail = (run (1.5, true, nullptr, 0), run (0.5, true, nullptr, 0)); // after the release
+        const taw::MidiMsg key[] { taw::MidiMsg::noteOn (0, 72, 100) };
+        const auto pressed = run (0.5, false, key, 1);          // stopped, armed: a key from the controller
+        const auto held = run (0.5, false, key + 1, 0);         // still armed, still held
+        const auto released = (run (2.0, false, nullptr, 0), run (0.5, false, nullptr, 0)); // disarmed: let go
+
+        const auto state = slot->getState();
+        slot->setState (state);
+
+        std::printf ("chord %.1f dB \xc2\xb7 2 s later %.1f dB \xc2\xb7 key %.1f dB \xc2\xb7 held %.1f dB \xc2\xb7 disarmed %.1f dB \xc2\xb7 state %d bytes\n",
+                     chord, tail, pressed, held, released, (int) state.getSize());
+
+        const bool ok = chord > -60.0f && tail < chord - 20.0f && pressed > -60.0f && released < pressed - 20.0f;
+        std::puts (ok ? "ok" : "FAILED (expected sound for the chord and the key, and quiet after each ends)");
+        return ok ? 0 : 1;
+    }
+
+    // taw --miditest [output]   open every MIDI input the way taw does, send a note out of a
+    // loopback port (LoopBe by default), and check it comes back in. Then lists what each sent.
+    if (args[0] == "--miditest")
+    {
+        const auto outName = args[1].isNotEmpty() ? args[1] : juce::String ("LoopBe");
+        juce::StringArray others; // "--miditest LoopBe only": just the loopback input open
+
+        if (args[2] == "only")
+            for (const auto& info : juce::MidiInput::getAvailableDevices())
+                if (! info.name.containsIgnoreCase (outName))
+                    others.add (info.name);
+
+        std::array<taw::MidiQueue, taw::MidiInputs::maxPorts> queues;
+        taw::MidiInputs inputs (queues, others);
+        std::unique_ptr<juce::MidiOutput> out;
+
+        for (const auto& info : juce::MidiOutput::getAvailableDevices())
+            if (out == nullptr && info.name.containsIgnoreCase (outName))
+                out = juce::MidiOutput::openDevice (info.identifier);
+
+        std::printf ("%d inputs open\n", inputs.names().size());
+
+        if (out == nullptr)
+        {
+            std::printf ("no MIDI output matching %s to loop back through\n", outName.toRawUTF8());
+            return 1;
+        }
+
+        out->sendMessageNow (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 99));
+        out->sendMessageNow (juce::MidiMessage::noteOff (1, 60));
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (500); // some MIDI backends deliver through the message loop
+
+        int got = 0;
+
+        for (auto& q : queues)
+            for (taw::MidiMsg m; q.pop (m);)
+            {
+                std::printf ("  got %s\n", taw::describe (m).toRawUTF8());
+                ++got;
+            }
+
+        for (const auto& d : inputs.devices())
+            if (d.events > 0 || ! d.open)
+                std::printf ("  %-28s %s, %d messages\n", d.name.toRawUTF8(), d.open ? "open" : "NOT OPEN", d.events);
+
+        std::puts (got >= 2 ? "ok" : "FAILED (sent a note, nothing came back)");
+        return got >= 2 ? 0 : 1;
     }
 
     // taw --bouncetest <folder>   render a synthetic two-track mix to WAV and MP3 (no device needed)
@@ -166,7 +309,15 @@ int main (int argc, char** argv)
             juce::String what;
 
             // Sample tracks: their hits by beat. Audio tracks: each clip as start+length in samples.
-            if (taw::Session::isSampleTrack (track))
+            if (taw::Session::isInstrumentTrack (track))
+            {
+                const auto notes = taw::Session::notes (track);
+                what << track[taw::ids::pluginName].toString() << ", " << (int) notes.size() << " notes:";
+
+                for (const auto& n : notes)
+                    what << " " << (int) n[taw::ids::pitch] << "@" << juce::String ((double) n[taw::ids::beat], 2) << "+" << juce::String ((double) n[taw::ids::len], 2);
+            }
+            else if (taw::Session::isSampleTrack (track))
             {
                 std::vector<double> beats;
 
@@ -460,6 +611,16 @@ int main (int argc, char** argv)
             if (type->hasSeparateInputsAndOutputs())
                 for (const auto& name : type->getDeviceNames (true))
                     std::printf ("  in   %s\n", name.toRawUTF8());
+        }
+
+        // MIDI inputs, and whether taw can open each (another app may hold it).
+        std::printf ("MIDI\n");
+
+        for (const auto& info : juce::MidiInput::getAvailableDevices())
+        {
+            const bool opens = juce::MidiInput::openDevice (info.identifier, nullptr) != nullptr;
+            std::printf ("  in   %s  %s  (%s)\n", info.name.toRawUTF8(), opens ? "ok" : "BUSY: another app has it open",
+                         info.identifier.toRawUTF8());
         }
 
         return 0;

@@ -1,4 +1,4 @@
-// The command language: [selector] verb [args]
+﻿// The command language: [selector] verb [args]
 //
 //   selector   1 | 1-3 | 1,4 | * (tracks are 1-based on the surface, 0-based inside)
 //   @pos       @17  @17.3  @1:30  @0
@@ -57,7 +57,8 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "import", "imp", "undo", "redo", "dev", "panel",
                               "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
-                              "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close" };
+                              "sample", "audio", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
+                              "inst", "ed", "scan", "midi", "fill" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -76,7 +77,7 @@ void splitVerb (const juce::String& token, juce::String& verb, juce::String& glu
         {
             const auto next = token[candidate.length()];
             const bool takesWords = candidate == "n" || candidate == "name" || candidate == "click" || candidate == "b"
-                                    || candidate == "pat";
+                                    || candidate == "pat" || candidate == "inst";
 
             if (takesWords || ! juce::CharacterFunctions::isLetter (next))
                 best = candidate.length();
@@ -360,6 +361,9 @@ Result App::convertTrack (int index, bool toSample)
     auto track = session->track (index);
     const auto label = "track " + juce::String (index + 1);
 
+    if (Session::isInstrumentTrack (track))
+        return Result::fail (label + L" is an instrument track \x2014 inst swaps its plugin");
+
     if (! toSample)
     {
         if (! Session::isSampleTrack (track))
@@ -628,6 +632,25 @@ Result App::execute (const juce::String& line)
         return Result::good (settingsVisible ? juce::String (L"\x2191\x2193 choose \x00b7 \x2190\x2192 change \x00b7 enter types a value \x00b7 esc closes") : juce::String());
     }
     if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
+
+    // Instruments: inst <name> (a new instrument track; 3 inst <name> puts it on track 3), inst
+    // alone for the picker, ed for the plugin's window, scan to find plugins, midi for inputs.
+    if (v == "inst")                return loadInstrument (p.hasSelector ? p.tracks : std::vector<int> {}, p.rest);
+    if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
+    if (v == "midi")               return toggleMidiPanel();
+    if (v == "ed")
+    {
+        const auto targets = p.hasSelector ? p.tracks : defaultTargets();
+        return toggleEditor ((onTopLane() && ! p.hasSelector) || targets.empty() ? -1 : targets.front());
+    }
+
+    // fill (the f key): the focused track takes the whole track area; on an instrument track
+    // that's a piano roll. Up and down still move between tracks.
+    if (v == "fill")
+    {
+        fillView = ! fillView;
+        return Result::good (fillView ? juce::String (L"fill view \x00b7 \x2191\x2193 other tracks \x00b7 f again shows them all") : juce::String());
+    }
     if (v == "close")              return closeSession();
 
     // Not in the help: crashes on purpose, to check what a crash leaves behind.
@@ -844,6 +867,9 @@ Result App::execute (const juce::String& line)
 
         if (! (bool) session->track (targets.front())[ids::armed])
             return r;
+
+        if (Session::isInstrumentTrack (session->track (targets.front())))
+            return Result::good (r.message + L" \x00b7 your MIDI controller plays it \x00b7 ctrl+space records what you play");
 
         return Session::isSampleTrack (session->track (targets.front()))
                    ? Result::good (r.message + L" \x00b7 . plays it (shift: accent) \x00b7 ctrl+space records what you play")

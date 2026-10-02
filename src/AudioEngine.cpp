@@ -1,4 +1,5 @@
 ﻿#include "AudioEngine.h"
+#include "Plugins.h"
 
 namespace taw
 {
@@ -185,12 +186,15 @@ std::vector<FinishedTake> AudioEngine::poll()
 //==============================================================================
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
-    const auto maxBlock = juce::jmax (device->getCurrentBufferSizeSamples() * 2, 8192);
-    scratch.setSize (5, maxBlock); // [0] track L, [1] silence, [2] mix L, [3] mix R, [4] track R
+    const auto blockSize = juce::jmax (device->getCurrentBufferSizeSamples() * 2, 8192);
+    scratch.setSize (5, blockSize); // [0] track L, [1] silence, [2] mix L, [3] mix R, [4] track R
     scratch.clear();
     deviceRate = device->getCurrentSampleRate();
     clickSamplesLeft = 0;
     numInputs.store (device->getActiveInputChannels().countNumberOfSetBits());
+    maxBlock.store (blockSize);
+    liveRate.store (deviceRate);
+    generation.fetch_add (1);
     deviceRunning.store (true);
 }
 
@@ -280,6 +284,28 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         *voice = { press.track, 0, press.velocity };
     }
 
+    // The controller's messages for this block. They go to armed instrument tracks and, while
+    // recording, back to the message thread to be written down.
+    int numLive = 0;
+
+    for (auto& q : midiIn)
+        for (MidiMsg m; numLive < (int) liveMidi.size() && q.pop (m);)
+        {
+            liveMidi[(size_t) numLive++] = m;
+
+            if (isRolling && current->recording)
+                recordedMidi.push ({ pos, m });
+        }
+
+    HostTransport transport;
+    transport.bpm = current->bpm;
+    transport.sampleRate = deviceRate;
+    transport.timeSigNum = current->timeSigNum;
+    transport.timeSigDen = current->timeSigDen;
+    transport.pos = pos;
+    transport.rolling = isRolling;
+    transport.recording = isRolling && current->recording;
+
     auto* busL = scratch.getWritePointer (0);
     auto* busR = scratch.getWritePointer (4);
     auto* silence = scratch.getWritePointer (1);
@@ -317,6 +343,9 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         }
 
         renderPads (tp, (int) t, busL, busR, n);
+
+        if (tp.plugin != nullptr)
+            tp.plugin->render (tp.sequence, transport, n, tp.midiLive ? liveMidi.data() : nullptr, numLive, busL, busR);
 
         const auto gain = tp.audible ? tp.gain : 0.0f;
         juce::FloatVectorOperations::multiply (busL, gain, n);

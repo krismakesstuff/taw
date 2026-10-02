@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Midi.h"
 #include "SpscQueue.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
@@ -7,6 +8,8 @@
 
 namespace taw
 {
+class PluginSlot;
+
 // Peak meter shared between the audio thread (writes) and the UI (reads and resets).
 struct AtomicPeak
 {
@@ -85,6 +88,12 @@ struct TrackPlay
     juce::int64 sampleOffset = 0, sampleLength = 0;
     std::vector<Hit> hits;
 
+    // Instrument tracks: a plugin playing the track's notes, plus the MIDI controller while
+    // the track is armed (midiLive).
+    std::shared_ptr<PluginSlot> plugin;
+    Sequence sequence;
+    bool midiLive = false;
+
     std::shared_ptr<Recorder> recorder;
 };
 
@@ -104,6 +113,8 @@ struct Graph
     std::vector<TrackPlay> tracks;
     ClickSettings click;
     float mixGain = 1.0f;
+    double bpm = 120.0;
+    int timeSigNum = 4, timeSigDen = 4;
 
     bool recording = false; // loops are ignored while recording (for now)
     bool loop = false;
@@ -213,6 +224,15 @@ public:
     }
     bool isDeviceRunning() const noexcept { return deviceRunning.load(); }
 
+    // MIDI: each input port feeds one queue (see MidiInputs). While recording, what the audio
+    // thread passed on comes back with the playhead it arrived at.
+    std::array<MidiQueue, MidiInputs::maxPorts>& midiInputQueues() { return midiIn; }
+    bool popRecordedMidi (TimedMidi& m) noexcept { return recordedMidi.pop (m); }
+    // Bumped whenever the device (re)starts: plugins then get prepared for its rate and block.
+    int deviceGeneration() const noexcept { return generation.load(); }
+    double deviceSampleRate() const noexcept { return liveRate.load(); }
+    int maxBlockSize() const noexcept { return maxBlock.load(); }
+
     float takeInputPeak (int ch) noexcept { return inputPeaks[(size_t) ch].take(); }
     float takeTrackPeak (int t) noexcept { return trackPeaks[(size_t) t].take(); }
     float takeMasterPeak (int ch) noexcept { return masterPeaks[(size_t) ch].take(); }
@@ -248,6 +268,13 @@ private:
     };
 
     SpscQueue<PadPress, 256> padPresses;
+
+    std::array<MidiQueue, MidiInputs::maxPorts> midiIn;
+    SpscQueue<TimedMidi, 4096> recordedMidi;
+    std::array<MidiMsg, 512> liveMidi; // this block's controller messages, audio thread only
+    std::atomic<int> generation { 0 }, maxBlock { 8192 };
+    std::atomic<double> liveRate { 0.0 };
+
     std::array<PadVoice, 32> padVoices; // audio thread only
     void renderPads (const TrackPlay&, int trackIndex, float* left, float* right, int n);
     Graph* current = nullptr; // audio thread (or message thread while the device is stopped)

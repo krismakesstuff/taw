@@ -32,6 +32,9 @@ target_sources(taw PRIVATE
     src/Import.cpp
     src/Safety.cpp
     src/Editing.cpp
+    src/Instruments.cpp
+    src/Midi.cpp
+    src/Plugins.cpp
     src/Ui.cpp)
 
 target_compile_definitions(taw PRIVATE
@@ -40,6 +43,7 @@ target_compile_definitions(taw PRIVATE
     JUCE_MODAL_LOOPS_PERMITTED=1
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_PLUGINHOST_VST3=1 # instrument tracks host VST3 plugins (in process for now)
     TAW_VERSION="${PROJECT_VERSION}")
 
 if (WIN32)
@@ -61,6 +65,7 @@ endif()
 target_link_libraries(taw PRIVATE
     juce::juce_audio_devices
     juce::juce_audio_formats
+    juce::juce_audio_processors
     juce::juce_data_structures
     juce::juce_events
     juce::juce_recommended_config_flags

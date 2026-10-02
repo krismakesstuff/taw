@@ -1,8 +1,9 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioEngine.h"
 #include "Bounce.h"
 #include "Import.h"
+#include "Plugins.h"
 #include "Console.h"
 #include "Session.h"
 #include "Ui.h"
@@ -52,6 +53,7 @@ struct DeviceChoice
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
 juce::String trackList (const std::vector<int>& tracks); // "track 2", "tracks 1,3"
+Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
 // What ctrl+c holds: per track, its clips (audio) or hits (sample track), positioned relative
 // to the start of the copied range.
@@ -59,8 +61,8 @@ struct Clipboard
 {
     struct Lane
     {
-        bool sample = false;
-        std::vector<juce::ValueTree> items; // CLIPs (start in samples) or HITs (beat in beats)
+        bool sample = false, instrument = false;
+        std::vector<juce::ValueTree> items; // CLIPs (start in samples), HITs, or NOTEs and CCs (beat in beats)
     };
 
     juce::int64 length = 0; // samples
@@ -94,7 +96,7 @@ public:
 
     // Headless use (taw --exec): finish background work (imports, bounces, takes) the way the
     // UI loop would.
-    bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr; }
+    bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning(); }
     void pumpBackgroundWork();
 
     // Commands ----------------------------------------------------------------
@@ -129,6 +131,45 @@ public:
     Result convertTrack (int track, bool toSample);
     Result writePattern (const std::vector<int>& tracks, const juce::String& steps, double stepBeats);
     Result toggleHitAtCursor();
+
+    // Instrument tracks: a VST3 instrument played from the MIDI controller while armed, and
+    // the notes recorded on the track.
+    // "inst <name>": a new instrument track (or, with tracks named, onto those). No name: the picker.
+    Result loadInstrument (const std::vector<int>& tracks, const juce::String& query);
+    Result loadInstrument (int track, const juce::PluginDescription&); // track -1: a new one
+    Result toggleEditor (int track); // "ed": the plugin's own window
+    Result scanPlugins (bool retryFailed); // "scan", "scan retry"
+    // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
+    // opened, and the last message it sent, to see a controller is getting through.
+    Result toggleMidiPanel();
+    bool midiPanelVisible = false;
+    int midiPanelIndex = 0;
+    bool handleMidiPanelKey (const Key&);
+    PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr
+    juce::String instrumentProblem (int track) const; // why it isn't loaded
+    void openPluginPicker (int targetTrack);
+    PluginCatalog plugins;
+    std::unique_ptr<MidiInputs> midiInputs;
+
+    // While recording: notes whose key is still down, drawn from where they started to the
+    // playhead. Written to the track as NOTEs when the key comes up.
+    struct HeldNote
+    {
+        int channel, pitch, vel;
+        double beat;   // where it goes (input quantize may have moved it)
+        double played; // where it was played: its length runs from here
+    };
+    std::map<int, HeldNote> heldNotes; // by channel * 128 + pitch
+    std::vector<int> midiRecordTracks;
+
+    // "f": the focused track fills the track area (instrument tracks become a piano roll).
+    bool fillView = false;
+
+    // The instrument picker ("inst" alone): type to filter, up/down, enter loads, esc closes.
+    bool pluginPickerVisible = false;
+    juce::String pluginFilter;
+    int pluginPickIndex = 0, pluginPickTarget = -1;
+    std::vector<juce::PluginDescription> pickerChoices() const;
     Result returnPlayhead();
     Result setGridDivision (int noteValue);
 
@@ -240,6 +281,7 @@ public:
     // App-wide settings, kept in settings.json next to the device settings. (Track height is
     // per session: Session::trackHeight.)
     juce::String theme = "dark"; // "dark", "light" or "grey": the commands of the same names
+    juce::StringArray midiOff;   // MIDI inputs switched off, by name
     void loadSettings();
     void saveSettings() const;
 
@@ -270,6 +312,27 @@ private:
     void matchDeviceSampleRate();
 
     Result startRecorders (const std::vector<int>& tracks);
+    juce::int64 heardPosition (juce::int64 playhead); // minus output latency, when compensating
+    void drainRecordedMidi();
+    void finishHeldNotes (juce::int64 at);
+    bool handlePluginPickerKey (const Key&);
+
+    // Live plugin instances, by track (found by tree identity, so they follow tracks around).
+    struct Instrument
+    {
+        juce::ValueTree track;
+        std::shared_ptr<PluginSlot> slot;
+        juce::String problem; // why it didn't load
+        juce::MemoryBlock savedState; // what's in its state file, to skip rewriting it
+    };
+    std::vector<Instrument> instruments;
+    Instrument* instrumentEntry (const juce::ValueTree& track);
+    std::shared_ptr<PluginSlot> createInstrument (const juce::ValueTree& track, double rate, int block, juce::String& problem);
+    void saveInstrumentStates();
+    void writeInstrumentState (Instrument&);
+    void pollInstruments(); // closed editor windows, device changes, periodic state saves
+    int preparedGeneration = -1;
+    double lastStateSave = 0.0;
     void stopRecorders();
     void collectFinishedTakes();
     void drainLiveOverviews();
@@ -297,7 +360,7 @@ public:
 
 private:
     void rebuildGraph();
-    std::unique_ptr<Graph> buildGraph();
+    std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
     bool cursorMovedWhileRolling = false;
     double cursorMovedAt = 0.0; // ms; the view stops following the playhead briefly after
     void pollBounce();

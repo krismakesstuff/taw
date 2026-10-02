@@ -52,7 +52,7 @@ Modelled on Tracktion Engine.
 | UI | Rendering | Reads the tree and engine atomics; never blocks audio. *In the POC this runs on the message thread; it moves out once rendering gets heavy.* |
 | Audio (device callback) | The compiled playback graph | No allocation, no locks, no file I/O |
 | Disk writer | Take files | Fed by lock-free FIFOs (`AudioFormatWriter::ThreadedWriter`) |
-| MIDI input | *(later)* | Timestamped events into a lock-free FIFO |
+| MIDI input | Device callbacks | One lock-free queue per port into the audio thread |
 
 The message thread compiles the tree into an immutable **playback graph** and hands it to
 the audio thread through a lock-free queue. Retired graphs come back the same way and are
@@ -119,6 +119,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `r` / `t` (empty command line; also `-` / `+`) | zoom out / in (Pro Tools keys) | same |
 | `Ctrl+↑` / `Ctrl+↓` | first / last track; with Shift, selects every track from where you were to there | same |
 | `k` (empty command line) | to the markers row (ctrl+k adds a marker); `k` again returns to the track | same |
+| `f` (empty command line) | fill: the focused track takes every track row (a piano roll on instrument tracks); `f` again shows all tracks | same |
 | `q` / `w` (empty command line) | cursor to the selection's start / end, centred in the view; the selection stays (select, `snap`, `q`, play) | same |
 | `Tab` / `Shift+Tab` | cursor to the next clip start or end, or the next hit on sample tracks, on the selected or focused tracks / extend the selection to it | same |
 | `Shift+R` `S` `M` `I` (empty command line) | arm / solo / mute / input-monitor the selected or focused tracks | same |
@@ -208,7 +209,7 @@ records the selected tracks, else whatever is armed.
 - Retroactive capture (`R`: keep what was just played while not recording).
 - Queries: `1 ?`, `? inputs`.
 - User keymaps and macros (config files).
-- MIDI tracks, plugin hosting (CLAP/VST3, native plugin windows).
+- Note editing in the piano roll; plugins out of process; insert effects; CLAP.
 - Headless engine + socket/MCP front end for agents.
 
 ## Recording
@@ -261,6 +262,62 @@ TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
 fall between samples. Snapping, pattern ranges and the position readout treat anything within
 half a sample of a grid line as on it.
 
+## Instrument tracks
+
+A VST3 instrument per track, played from a MIDI controller and recorded as notes.
+
+```
+TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
+  NOTE { beat, len, pitch, vel, ch? }   # beats, so parts follow the tempo; vel 1-127; ch 1-16 (absent = 1)
+  CC   { beat, num, val, ch? }          # num 0-127 controllers, 128 pitch bend (0-16383), 129 pressure
+```
+
+- `inst` opens the instrument picker (type to filter, enter loads); `inst vital` loads the best
+  name match. Either makes a new instrument track, armed, so the controller plays it at once.
+  `3 inst vital` puts it on track 3 (an empty or instrument track; the notes stay).
+- `scan` looks for new or changed plugins in the VST3 folders (opening the picker the first
+  time starts it). Finding out what a plugin is means loading it, and some crash or hang when
+  loaded cold, so each file is looked at in a child process (`taw --scan-plugin`, four at a
+  time, 60 s each): one that crashes or hangs only takes its child down and is skipped from
+  then on; `scan retry` tries those again. The list is cached in `plugins.xml` in the config
+  folder, saved after every file.
+- `ed` opens the plugin's own window (JUCE's generic sliders if it has none), kept above the
+  terminal; `ed` again or its close button closes it.
+- **MIDI in.** Every input is opened at startup and as devices come and go (up to 32), unless
+  switched off. `midi` opens the MIDI panel, like the audio device picker: each input on or off
+  (kept by name in `settings.json`, for every session), whether it opened (Windows doesn't
+  share MIDI inputs, so another app can hold one), and the last message it sent, lit while it
+  sends. The title row has an activity light. Each port has a lock-free queue to the audio
+  thread. `taw --devices` lists the inputs and whether they open; `taw --miditest` loops a note
+  through a loopback port (LoopBe). Like the pad key, **armed** instrument tracks hear the controller; several
+  armed tracks layer. A track that stops listening releases the keys and pedal still held.
+- **Recording.** While recording, what the audio thread passed on goes back to the message
+  thread with the playhead it arrived at; output latency is taken off (latency compensation
+  on), as for pad hits. A note is written when its key comes up (keys still down at stop end
+  there); controllers, pitch bend and pressure are written as CCs. Input quantize moves note
+  starts and keeps lengths. Recording adds to what's on the track; each pass undoes as one step
+  (notes within two seconds of each other coalesce, like pad hits).
+- **Playback.** The graph carries the notes in samples. The plugin slot keeps the notes the
+  timeline started; any jump (stop, seek, loop wrap) ends them, so nothing hangs. Notes that
+  started before the play position aren't chased (yet). Plugins get the tempo, time signature
+  and position through a play head, for synced arps and LFOs.
+- **State.** Plugin state is opaque and can be megabytes, so it lives in its own file
+  (`plugins/NN-Name.state`), written when it changed: on closing the window, every 15 s, on
+  close and quit. Undoing a track away keeps its file, so redo brings the sound back.
+- **Bounces** render instrument tracks through their own plugin instances (copies of the live
+  ones' state), offline, so the live ones keep playing.
+- **Fill view (`f`).** The focused track takes all the track rows; ↑↓ still move between
+  tracks. On an instrument track that's a piano roll: one pitch per row, named on the left,
+  black keys shaded. In the normal view a lane spans the pitches in use, one per half row.
+  Audio tracks get the same zoom later.
+- `snap` quantizes note starts on instrument tracks as it does hits; Tab stops at note starts
+  and ends; copy, cut, paste, duplicate and delete take notes that start in the range.
+- **In process, for now.** `PluginSlot` is the only way taw talks to a plugin (prepare,
+  render, state, editor), so an out-of-process proxy can replace it. Until then a crashing
+  plugin takes taw down; the crash handler saves the session first.
+- `taw --plugintest <file.vst3>` loads one plugin and plays it the way the engine does (a chord
+  from the timeline, a stop, a controller key, a disarm), and checks its state round-trips.
+
 ## Editing
 
 Select a range with Shift+arrows (time) and Shift+↑↓ (tracks); with no track selection the
@@ -287,7 +344,8 @@ tracks.
 ## Headless commands
 
 `taw --exec <session> "<command>" …` runs command lines against a session without the screen,
-prints each result and a summary, and saves (waiting for imports and bounces to finish). It's
+prints each result and a summary, and saves (waiting for imports, bounces and plugin scans to
+finish). `TAW_CONFIG=<folder>` uses another config folder (templates, device, plugin list). It's
 the first way in for scripts and agents. Device-dependent commands (record, input checks)
 report what they can't do.
 
@@ -356,7 +414,9 @@ the templates to create a new one. The recent list lives in `%APPDATA%\taw\recen
   session, deleted on a clean exit. A marker whose process is gone means that run died: plain
   `taw` reopens its session directly (recovering takes) and says what happened.
 - **Closing the window** (or Ctrl+Break, logoff) quits like `q`: recording stops, takes are kept.
-- **Plugins (planned)** will run out of process, so a crashing plugin is bypassed, not fatal.
+- **Plugins** run in process for now: one that crashes takes taw down (the session is saved
+  first). Scanning is already out of process: a plugin that crashes or hangs there is just
+  skipped. Playing them out of process is planned.
 
 ## Screen
 

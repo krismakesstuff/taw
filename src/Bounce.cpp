@@ -1,4 +1,5 @@
 ﻿#include "Bounce.h"
+#include "Plugins.h"
 
 #if JUCE_WINDOWS
  #define WIN32_LEAN_AND_MEAN
@@ -298,6 +299,20 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         juce::FloatVectorOperations::clear (br, n);
         renderClips (tp, pos, n, bl, br);
         renderHits (tp, pos, n, bl, br);
+
+        // Instruments: the graph has its own plugin instances (copies of the live ones), so the
+        // live ones keep playing while this renders.
+        if (tp.plugin != nullptr)
+        {
+            HostTransport t;
+            t.bpm = graph->bpm;
+            t.sampleRate = sampleRate;
+            t.timeSigNum = graph->timeSigNum;
+            t.timeSigDen = graph->timeSigDen;
+            t.pos = pos;
+            t.rolling = true;
+            tp.plugin->render (tp.sequence, t, n, nullptr, 0, bl, br);
+        }
 
         const auto g = tp.gain * (isStereo (tp) ? 1.0f : centrePan);
         juce::FloatVectorOperations::addWithMultiply (l, bl, g, n);

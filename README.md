@@ -80,15 +80,28 @@ ctrl+space    record the armed tracks   ← →         move a bar (ctrl: 4, alt
 add Vox       new track                 ?           all commands
 ```
 
+## Instruments
+
+Plug in a MIDI controller and type `inst` (or `inst vital`). The first time, taw scans your VST3
+plugins, each in a separate process, so one that crashes or hangs is just skipped. The new instrument track is
+armed, so the controller plays it straight away; `ctrl+space` records what you play as notes,
+`ed` opens the plugin's window, `f` fills the view with the focused track (a piano roll on
+instrument tracks), and `snap` quantizes. Every MIDI input is opened and armed instrument
+tracks hear all of them; `midi` shows them, switches ones you don't use off, and shows what
+each is sending. Plugin settings are saved next to the session in `plugins/`.
+
+Plugins run inside taw for now, so a plugin that crashes takes taw with it (the session is
+saved on the way down). Running them in their own process is planned.
+
 ## Roadmap
 
 Next up, roughly in order:
 
 - **Sample groups:** gather sample tracks into a kit you can program, mix and move as one,
   while each sound keeps its own track.
-- **MIDI keyboard recording:** play parts in from a MIDI controller.
-- **Plugin hosting (VST3/CLAP):** each plugin runs in its own process, so a crashing plugin is
-  bypassed instead of taking the session down.
+- **Note editing:** change single notes in the piano roll (recording comes first; this follows).
+- **Plugins out of process, effects and CLAP:** each plugin in its own process, so a crashing
+  plugin is bypassed instead of taking the session down; insert effects; CLAP alongside VST3.
 - **Cross-platform:** macOS (in progress), then Linux.
 
 ## License

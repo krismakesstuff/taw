@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -14,6 +14,8 @@ TAW_ID (TAKE) // version 1 only; loaded sessions are migrated to CLIP
 TAW_ID (CLIP)
 TAW_ID (HIT) // sample tracks: one trigger of the track's sample
 TAW_ID (MARKER)
+TAW_ID (NOTE) // instrument tracks: one MIDI note
+TAW_ID (CC)   // instrument tracks: a controller, pitch bend or pressure change
 
 TAW_ID (version)
 TAW_ID (name)
@@ -35,12 +37,20 @@ TAW_ID (loopEnd)
 TAW_ID (bounceFormat) // "wav" | "mp3"
 TAW_ID (bounceFolder) // relative to the session folder, or absolute
 
-TAW_ID (kind)         // TRACK: "audio" (default) | "sample". Never "type": that key is the node type in JSON.
+TAW_ID (kind)         // TRACK: "audio" (default) | "sample" | "instrument". Never "type": that key is the node type in JSON.
+TAW_ID (plugin)       // instrument track: the plugin's identifier (PluginDescription::createIdentifierString)
+TAW_ID (pluginName)   // ...and its name, to find it again if the identifier changes
+TAW_ID (pluginState)  // ...and the file its state is kept in, relative to the session folder
 TAW_ID (sample)       // sample track: the file it plays
 TAW_ID (sampleOffset) // ...from here in the file
 TAW_ID (sampleLength) // ...for this long (0 = to the end)
 TAW_ID (beat)         // HIT: position in beats from the session start (follows tempo)
-TAW_ID (vel)          // HIT: velocity 0..1
+TAW_ID (vel)          // HIT: velocity 0..1; NOTE: velocity 1..127
+TAW_ID (len)          // NOTE: length in beats
+TAW_ID (pitch)        // NOTE: MIDI note number (60 = C4)
+TAW_ID (ch)           // NOTE, CC: MIDI channel 1-16 (absent = 1)
+TAW_ID (num)          // CC: controller 0-127, 128 = pitch bend, 129 = channel pressure
+TAW_ID (val)          // CC: value (0-127; pitch bend 0-16383, 8192 = centre)
 TAW_ID (gridDiv)      // SESSION: fine grid step as a note value (4 = quarter, 16 = sixteenth)
 TAW_ID (input)
 TAW_ID (armed)

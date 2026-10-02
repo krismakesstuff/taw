@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "Ids.h"
 
@@ -54,6 +54,14 @@ public:
     static bool isSampleTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "sample"; }
     static std::vector<juce::ValueTree> hits (const juce::ValueTree& track);
     static juce::ValueTree makeHit (double beat, float vel);
+
+    // Instrument tracks: a plugin plays the track's NOTEs and CCs (positions in beats).
+    static bool isInstrumentTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "instrument"; }
+    static bool isAudioTrack (const juce::ValueTree& track) { return ! isSampleTrack (track) && ! isInstrumentTrack (track); }
+    static std::vector<juce::ValueTree> notes (const juce::ValueTree& track);
+    static std::vector<juce::ValueTree> controls (const juce::ValueTree& track);
+    static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);
+    static juce::ValueTree makeControl (double beat, int num, int val, int channel = 1);
 
     // The fine grid step (alt + arrows, step editing), in beats: 1 for quarters, 0.25 for 16ths.
     double fineStepBeats() const { return 4.0 / juce::jmax (1, (int) state[ids::gridDiv]); }

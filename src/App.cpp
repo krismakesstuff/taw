@@ -53,6 +53,7 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
 
 App::~App()
 {
+    midiInputs.reset(); // its callbacks feed the engine's queues
     releaseSession();
     safety::setEmergencySave (nullptr, nullptr);
 }
@@ -73,6 +74,19 @@ void App::releaseSession()
                 collectFinishedTakes();
             }
         }
+
+        // Plugins: their state to disk, their windows closed. The instances themselves go with
+        // the last graph that plays them.
+        saveInstrumentStates();
+
+        for (auto& in : instruments)
+            if (in.slot != nullptr)
+                in.slot->closeEditor();
+
+        instruments.clear();
+        heldNotes.clear();
+        midiRecordTracks.clear();
+        fillView = pluginPickerVisible = false;
 
         session->tree().removeListener (this);
         session->save();
@@ -124,6 +138,10 @@ int App::run()
 
     startupDevice();
 
+    // MIDI controllers, all of them, for armed instrument tracks. Only the interactive app opens
+    // them (Windows MIDI inputs can't be shared).
+    midiInputs = std::make_unique<MidiInputs> (engine.midiInputQueues(), midiOff);
+
     auto last = juce::Time::getMillisecondCounterHiRes();
 
     // Closing the window (or Ctrl+Break) quits like q does: recording stops and takes are kept.
@@ -155,6 +173,8 @@ int App::run()
         }
         collectFinishedTakes();
         drainLiveOverviews();
+        drainRecordedMidi();
+        pollInstruments();
         pollBounce();
         pollImport();
 
@@ -576,11 +596,12 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
 {
     const auto numInputs = engine.numInputChannels();
 
-    // Armed sample tracks record what you play on the pad key (recordPadHits), not audio.
+    // Armed sample tracks record what you play on the pad key (playPads), armed instrument
+    // tracks what you play on the controller (drainRecordedMidi); only audio tracks get files.
     std::vector<int> tracks;
 
     for (auto i : armedTracks)
-        if (! Session::isSampleTrack (session->track (i)))
+        if (Session::isAudioTrack (session->track (i)))
             tracks.push_back (i);
 
     for (auto i : tracks)
@@ -619,6 +640,13 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
     for (auto& s : started)
         live.push_back (std::move (s));
 
+    midiRecordTracks.clear();
+    heldNotes.clear();
+
+    for (auto i : armedTracks)
+        if (Session::isInstrumentTrack (session->track (i)))
+            midiRecordTracks.push_back (i);
+
     recording = true;
     rebuildGraph();
     writeTakeJournal();
@@ -636,6 +664,8 @@ void App::stopRecorders()
             recs.push_back (l.recorder);
         }
 
+    finishHeldNotes (engine.playhead());
+    midiRecordTracks.clear();
     recording = false;
     rebuildGraph(); // a graph without the recorders; once it's live they get closed
     engine.finishRecorders (std::move (recs));
@@ -867,6 +897,7 @@ Result App::redoEdit()
 void App::pumpBackgroundWork()
 {
     collectFinishedTakes();
+    pollInstruments();
     pollBounce();
     pollImport();
 
@@ -963,7 +994,7 @@ void App::rebuildGraph()
         engine.setGraph (buildGraph());
 }
 
-std::unique_ptr<Graph> App::buildGraph()
+std::unique_ptr<Graph> App::buildGraph (bool offline)
 {
     auto g = std::make_unique<Graph>();
     const auto n = session->numTracks();
@@ -981,6 +1012,38 @@ std::unique_ptr<Graph> App::buildGraph()
         tp.inputOnly = t[ids::monitor]; // "mon": hear the input during playback too
         tp.audible = ! (bool) t[ids::mute] && (! anySolo || (bool) t[ids::solo]);
         tp.gain = juce::Decibels::decibelsToGain ((float) (double) t[ids::gainDb], -96.0f);
+
+        if (Session::isInstrumentTrack (t))
+        {
+            // Armed means "listening to the MIDI controller", not to an audio input.
+            tp.midiLive = tp.armed && ! offline;
+            tp.armed = false;
+            tp.stereo = true;
+            tp.sequence = buildSequence (t, session->samplesPerBeat());
+
+            if (auto* in = instrumentEntry (t); in != nullptr && in->slot != nullptr)
+            {
+                if (offline)
+                {
+                    // A bounce plays its own copy, so the live one keeps playing meanwhile.
+                    juce::String problem;
+                    tp.plugin = createInstrument (t, sampleRate(), 8192, problem);
+
+                    if (tp.plugin != nullptr)
+                    {
+                        tp.plugin->setState (in->slot->getState());
+                        tp.plugin->setNonRealtime (true);
+                    }
+                }
+                else
+                {
+                    tp.plugin = in->slot;
+                }
+            }
+
+            g->tracks.push_back (std::move (tp));
+            continue;
+        }
 
         if (Session::isSampleTrack (t))
         {
@@ -1037,8 +1100,31 @@ std::unique_ptr<Graph> App::buildGraph()
         g->tracks.push_back (std::move (tp));
     }
 
+    // Plugins of tracks that are gone (undo) or no longer instruments: state saved, window
+    // closed. Undoing back brings the plugin back from that state.
+    if (! offline)
+        for (auto it = instruments.begin(); it != instruments.end();)
+        {
+            if (! it->track.getParent().isValid() || ! Session::isInstrumentTrack (it->track))
+            {
+                writeInstrumentState (*it);
+
+                if (it->slot != nullptr)
+                    it->slot->closeEditor();
+
+                it = instruments.erase (it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+
     const auto& s = session->tree();
     g->mixGain = juce::Decibels::decibelsToGain ((float) (double) s[ids::mixDb], -96.0f);
+    g->bpm = session->bpm();
+    g->timeSigNum = session->beatsPerBar();
+    g->timeSigDen = juce::jmax (1, (int) s[ids::timeSigDen]);
     g->recording = recording;
     g->loop = s[ids::loop];
     g->loopStart = (juce::int64) s[ids::loopStart];
@@ -1324,7 +1410,7 @@ Result App::startBounce (const juce::StringArray& args)
     if (file.exists())
         file = file.getNonexistentSibling (false);
 
-    bounce = std::make_unique<Bounce> (buildGraph(), timeSelection(), sampleRate(), format, file);
+    bounce = std::make_unique<Bounce> (buildGraph (true), timeSelection(), sampleRate(), format, file);
     bounce->start();
     return Result::good ("bouncing " + formatBars (timeSelection().getStart()) + L" \x2192 " + formatBars (timeSelection().getEnd()));
 }
@@ -1539,13 +1625,7 @@ bool App::playPads (float velocity)
 
     if (rec)
     {
-        juce::int64 heard = engine.playhead();
-
-        if ((bool) session->tree()[ids::latencyComp])
-            if (auto* d = engine.devices().getCurrentAudioDevice())
-                heard -= d->getOutputLatencyInSamples();
-
-        beat = juce::jmax (0.0, (double) heard / session->samplesPerBeat());
+        beat = juce::jmax (0.0, (double) heardPosition (engine.playhead()) / session->samplesPerBeat());
 
         if ((bool) session->tree()[ids::inputQuantize])
         {
@@ -1578,7 +1658,7 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
     {
         const bool on = ! (bool) session->tree()[ids::inputQuantize];
         session->tree().setProperty (ids::inputQuantize, on, um());
-        return Result::good (on ? L"input quantize on \x00b7 recorded hits snap to the grid step" : L"input quantize off \x00b7 hits land as played");
+        return Result::good (on ? L"input quantize on \x00b7 recorded hits and notes snap to the grid step" : L"input quantize off \x00b7 hits and notes land as played");
     }
 
     // quantize [percent]: hits in the time selection (or the whole track) on the selected or
@@ -1598,10 +1678,10 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
     {
         auto track = session->track (t);
 
-        if (! Session::isSampleTrack (track))
-            continue;
+        // Hits on sample tracks, note starts on instrument tracks (a note keeps its length).
+        const auto items = Session::isSampleTrack (track) ? Session::hits (track) : Session::notes (track);
 
-        for (auto h : Session::hits (track))
+        for (auto h : items)
         {
             const auto beat = (double) h[ids::beat];
             const auto pos = (juce::int64) std::llround (beat * spb);
@@ -1620,9 +1700,9 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
     }
 
     if (moved == 0)
-        return Result::good (L"nothing to move \x00b7 hits are already on the grid (or no sample track here)");
+        return Result::good (L"nothing to move \x00b7 already on the grid (or no sample or instrument track here)");
 
-    return Result::good ("quantized " + juce::String (moved) + (moved == 1 ? " hit" : " hits") + " to 1/"
+    return Result::good ("quantized " + juce::String (moved) + (moved == 1 ? " hit or note" : " hits and notes") + " to 1/"
                          + session->tree()[ids::gridDiv].toString()
                          + (strength < 1.0 ? " at " + juce::String ((int) std::round (strength * 100)) + "%" : juce::String()));
 }
@@ -1734,12 +1814,23 @@ void App::loadSettings()
     const auto json = juce::JSON::parse (settingsFile());
     if (const auto t = json["theme"].toString(); t == "light" || t == "grey")
         theme = t;
+
+    if (const auto* off = json["midiOff"].getArray())
+        for (const auto& name : *off)
+            midiOff.add (name.toString());
 }
 
 void App::saveSettings() const
 {
     auto* o = new juce::DynamicObject();
     o->setProperty ("theme", theme);
+
+    juce::Array<juce::var> off;
+
+    for (const auto& name : midiOff)
+        off.add (name);
+
+    o->setProperty ("midiOff", off);
     settingsFile().replaceWithText (juce::JSON::toString (juce::var (o)));
 }
 
@@ -1819,6 +1910,12 @@ Result App::moveToNextClipEdge (bool extendSelection)
         if (Session::isSampleTrack (track))
             for (const auto& h : Session::hits (track))
                 consider (std::llround ((double) h[ids::beat] * session->samplesPerBeat()));
+
+        for (const auto& n : Session::notes (track))
+        {
+            consider (std::llround ((double) n[ids::beat] * session->samplesPerBeat()));
+            consider (std::llround (((double) n[ids::beat] + (double) n[ids::len]) * session->samplesPerBeat()));
+        }
     }
 
     if (next < 0)
@@ -1912,8 +2009,9 @@ void App::handleMainKey (const Key& k)
         }
     }
 
-    // The project settings panel takes the arrows, enter and esc while it's open.
-    if (handleSettingsKey (k))
+    // The project settings panel takes the arrows, enter and esc while it's open; the
+    // instrument picker takes typing too (it filters).
+    if (handlePluginPickerKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k))
         return;
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
@@ -2144,6 +2242,9 @@ void App::handleMainKey (const Key& k)
                 else
                     topLane = TopLane::markers, trackAnchor = -1;
             }
+            // f: the focused track fills the track area (a piano roll on instrument tracks).
+            else if (lineEmpty && k.ch == 'f' && session != nullptr)
+                say (execute ("fill"));
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if (k.ch >= 32)

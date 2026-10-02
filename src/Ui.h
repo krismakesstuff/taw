@@ -63,6 +63,8 @@ private:
     void drawBottom (App&);
     void drawHelp (App&);
     void drawSettings (App&);
+    void drawPluginPicker (App&);
+    void drawMidiPanel (App&);
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
@@ -72,5 +74,9 @@ private:
     Canvas canvas;
     std::vector<std::wstring> previous;
     juce::String themeDrawn; // the theme the screen was last painted in
+    int midiSeen = 0;        // MIDI events counted at the last frame
+    double midiLitAt = 0.0;  // when the last ones arrived (the activity light)
+    std::vector<int> midiRowSeen;        // MIDI panel: each input's count at the last frame
+    std::vector<double> midiRowLitAt;    // ...and when it last changed
 };
 } // namespace taw

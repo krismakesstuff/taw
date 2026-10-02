@@ -1,4 +1,4 @@
-#include "Session.h"
+﻿#include "Session.h"
 
 namespace taw
 {
@@ -335,6 +335,53 @@ juce::ValueTree Session::makeHit (double beat, float vel)
     return h;
 }
 
+std::vector<juce::ValueTree> Session::notes (const juce::ValueTree& track)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : track)
+        if (c.hasType (ids::NOTE))
+            out.push_back (c);
+
+    return out;
+}
+
+std::vector<juce::ValueTree> Session::controls (const juce::ValueTree& track)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : track)
+        if (c.hasType (ids::CC))
+            out.push_back (c);
+
+    return out;
+}
+
+juce::ValueTree Session::makeNote (double beat, double len, int pitch, int vel, int channel)
+{
+    juce::ValueTree n (ids::NOTE);
+    n.setProperty (ids::beat, beat, nullptr)
+        .setProperty (ids::len, juce::jmax (1.0 / 256.0, len), nullptr)
+        .setProperty (ids::pitch, juce::jlimit (0, 127, pitch), nullptr)
+        .setProperty (ids::vel, juce::jlimit (1, 127, vel), nullptr);
+
+    if (channel != 1)
+        n.setProperty (ids::ch, juce::jlimit (1, 16, channel), nullptr);
+
+    return n;
+}
+
+juce::ValueTree Session::makeControl (double beat, int num, int val, int channel)
+{
+    juce::ValueTree c (ids::CC);
+    c.setProperty (ids::beat, beat, nullptr).setProperty (ids::num, num, nullptr).setProperty (ids::val, val, nullptr);
+
+    if (channel != 1)
+        c.setProperty (ids::ch, juce::jlimit (1, 16, channel), nullptr);
+
+    return c;
+}
+
 juce::int64 Session::contentEnd() const
 {
     juce::int64 end = 0;
@@ -349,6 +396,8 @@ juce::int64 Session::contentEnd() const
                 end = juce::jmax (end, (juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
             else if (sampleTrack && c.hasType (ids::HIT))
                 end = juce::jmax (end, (juce::int64) std::llround ((double) c[ids::beat] * samplesPerBeat()));
+            else if (c.hasType (ids::NOTE))
+                end = juce::jmax (end, (juce::int64) std::llround (((double) c[ids::beat] + (double) c[ids::len]) * samplesPerBeat()));
         }
     }
 
@@ -386,7 +435,11 @@ static void migrateTakesToClips (juce::ValueTree& session)
 //==============================================================================
 juce::File configFolder()
 {
-    // %APPDATA%\taw on Windows; ~/Library/Application Support/taw on macOS.
+    // %APPDATA%\taw on Windows; ~/Library/Application Support/taw on macOS. TAW_CONFIG points
+    // elsewhere (tests, a second setup).
+    if (const auto custom = juce::SystemStats::getEnvironmentVariable ("TAW_CONFIG", {}); custom.isNotEmpty())
+        return juce::File::getCurrentWorkingDirectory().getChildFile (custom);
+
     auto base = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory);
    #if JUCE_MAC
     base = base.getChildFile ("Application Support");

@@ -284,6 +284,13 @@ int main (int argc, char** argv)
                 continue;
             }
 
+            // ":sleep 500" waits (timing tests: tap tempo).
+            if (args[i].startsWith (":sleep "))
+            {
+                juce::Thread::sleep (args[i].substring (7).getIntValue());
+                continue;
+            }
+
             if (args[i].startsWith (":key "))
             {
                 const auto name = args[i].substring (5);

@@ -175,7 +175,7 @@ records the selected tracks, else whatever is armed.
 | `b mp3` / `b wav D:\mixes` / `b mp3 "rough 3"` | format, folder (remembered per session), file name |
 | `l` / `loop` | loop the time selection; with no selection, toggle the loop |
 | `loop on` / `loop off` | |
-| `bpm 92` | set tempo |
+| `bpm 92` | set tempo; with `bpm ` typed, `t` taps it (the average of the last 8 taps, a 2 s pause starts over) and enter sets it |
 | `grid` | toggle grid |
 | `click` | toggle the click (metronome) |
 | `click rec` / `click always` | click only while recording / during playback too |

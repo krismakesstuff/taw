@@ -1764,6 +1764,44 @@ void App::focusDown (bool extendSelection)
         focusTrack (focused + 1, extendSelection);
 }
 
+bool App::tappingTempo() const
+{
+    if (session == nullptr || ! commandLine.startsWithIgnoreCase ("bpm "))
+        return false;
+
+    const auto rest = commandLine.substring (4);
+    return rest.isEmpty() || rest.containsOnly ("0123456789.");
+}
+
+// Each t is a beat. The tempo is the average gap over the last eight taps; a pause of two seconds
+// starts over. It's written into the line ("bpm 121"), so enter sets it, as if typed.
+void App::tapTempo()
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+
+    // A pause, or a line the last tap didn't write (typed over, or a new bpm): start over.
+    if (! tapTimes.empty() && (now - tapTimes.back() > 2000.0 || commandLine != tappedLine))
+        tapTimes.clear();
+
+    tapTimes.push_back (now);
+
+    if (tapTimes.size() > 8)
+        tapTimes.erase (tapTimes.begin());
+
+    if (tapTimes.size() < 2)
+    {
+        commandLine = tappedLine = "bpm ";
+        say (Result::good (L"tap \x00b7 keep tapping t on the beat"));
+        return;
+    }
+
+    const auto gap = (tapTimes.back() - tapTimes.front()) / (double) (tapTimes.size() - 1);
+    const auto bpm = juce::jlimit (20.0, 400.0, std::round (60000.0 / gap));
+    commandLine = tappedLine = "bpm " + juce::String ((int) bpm);
+    say (Result::good ("tap " + juce::String ((int) tapTimes.size()) + L" \x00b7 " + juce::String ((int) bpm)
+                       + L" bpm \x00b7 enter sets it \x00b7 esc leaves it"));
+}
+
 bool App::playPads (float velocity)
 {
     if (session == nullptr)
@@ -2451,6 +2489,8 @@ void App::handleMainKey (const Key& k)
                 say (execute ("fill"));
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
+            else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())
+                tapTempo();
             else if (k.ch >= 32)
                 commandLine += juce::String::charToString ((juce::juce_wchar) k.ch);
             return;

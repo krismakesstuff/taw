@@ -390,6 +390,12 @@ public:
     void saveSettings() const;
 
     juce::String commandLine, message;
+
+    // Tap tempo: with "bpm " typed (and no number, or a tapped one), t taps; enter sets it.
+    bool tappingTempo() const;
+    void tapTempo();
+    std::vector<double> tapTimes; // ms, the recent taps
+    juce::String tappedLine;      // what the last tap wrote
     bool messageIsError = false;
     juce::ValueTree namingMarker; // after ctrl+k the command line names this marker: enter keeps, esc leaves the number
     juce::ValueTree selectedMarker; // on the markers row, the one the arrows landed on (enter renames, del deletes)

@@ -1205,6 +1205,10 @@ void Ui::drawBottom (App& app)
         x = canvas.text (x, cmdY, app.commandLine, colour::text, -1, false, w - 4);
         canvas.put (x, cmdY, L' ', -1, colour::text);
 
+        if (app.tappingTempo())
+            canvas.text (x + 2, cmdY, app.commandLine.endsWith (" ") ? L"t taps the tempo \x00b7 or type it" : L"t taps \x00b7 enter sets it",
+                         colour::dim, -1, false, std::max (0, w - x - 3));
+
         // With an empty line, say what commands will act on.
         if (app.commandLine.isEmpty() && app.session != nullptr && ! app.namingMarker.isValid())
         {

@@ -3,12 +3,87 @@
 
 namespace taw
 {
+//==============================================================================
+// Plugin windows get taw's own title bar: the theme's colours, the track and slot on the left,
+// who has the keyboard on the right, and a minimise and a close button.
+
+static PluginSlot::WindowColours windowColours { juce::Colour (0xff262626), juce::Colour (0xffd0d0d0), juce::Colour (0xff767676),
+                                                  juce::Colour (0xffffaf00) };
+
+void PluginSlot::setWindowColours (const WindowColours& c) { windowColours = c; }
+
+static juce::Font titleFont()
+{
+    return juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 13.0f, juce::Font::plain));
+}
+
+struct TitleButton final : juce::Button
+{
+    explicit TitleButton (bool close) : Button (close ? "close" : "minimise"), isClose (close) {}
+
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        const auto& c = windowColours;
+
+        if (over || down)
+            g.fillAll (isClose ? juce::Colour (0xffc42b1c).withAlpha (down ? 0.8f : 1.0f) : c.text.withAlpha (down ? 0.25f : 0.15f));
+
+        g.setColour (over && isClose ? juce::Colours::white : over ? c.text : c.dim);
+        const auto centre = getLocalBounds().toFloat().getCentre();
+        const float r = 4.5f;
+
+        if (isClose)
+        {
+            g.drawLine (centre.x - r, centre.y - r, centre.x + r, centre.y + r, 1.3f);
+            g.drawLine (centre.x - r, centre.y + r, centre.x + r, centre.y - r, 1.3f);
+        }
+        else
+        {
+            g.drawLine (centre.x - r, centre.y, centre.x + r, centre.y, 1.3f);
+        }
+    }
+
+    const bool isClose;
+};
+
+struct TitleLook final : juce::LookAndFeel_V4
+{
+    void drawDocumentWindowTitleBar (juce::DocumentWindow&, juce::Graphics&, int w, int h, int, int, const juce::Image*, bool) override;
+
+    juce::Button* createDocumentWindowButton (int type) override
+    {
+        return type == juce::DocumentWindow::closeButton || type == juce::DocumentWindow::minimiseButton
+                   ? new TitleButton (type == juce::DocumentWindow::closeButton)
+                   : nullptr;
+    }
+
+    void positionDocumentWindowButtons (juce::DocumentWindow&, int x, int y, int w, int h, juce::Button* minimise, juce::Button*,
+                                        juce::Button* close, bool) override
+    {
+        const int bw = h * 3 / 2;
+
+        if (close != nullptr)
+            close->setBounds (x + w - bw, y, bw, h);
+
+        if (minimise != nullptr)
+            minimise->setBounds (x + w - bw * 2, y, bw, h);
+    }
+};
+
+static TitleLook& titleLook()
+{
+    static TitleLook look;
+    return look;
+}
+
 struct PluginSlot::EditorWindow final : juce::DocumentWindow
 {
     EditorWindow (const juce::String& title, juce::AudioProcessorEditor* editor)
         : DocumentWindow (title, juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton), title (title)
     {
-        setUsingNativeTitleBar (true);
+        setLookAndFeel (&titleLook());
+        setUsingNativeTitleBar (false);
+        setTitleBarHeight (24);
         setContentOwned (editor, true);
         setResizable (editor->isResizable(), false);
         // Over the terminal, so it stays in view while you go back to typing. It never wants
@@ -19,6 +94,12 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
         setVisible (true);
     }
 
+    ~EditorWindow() override
+    {
+        clearContentComponent(); // the editor goes while the look it was drawn with is still set
+        setLookAndFeel (nullptr);
+    }
+
     // Deleting a window from its own close button isn't safe; the owner closes it next frame.
     void closeButtonPressed() override
     {
@@ -26,10 +107,47 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
         setVisible (false);
     }
 
-    bool closeRequested = false;
+    // The title bar double-clicked: the owner gives this window the keyboard to keep (or takes
+    // it back). Not maximise: plugin windows are their own size.
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (getTitleBarArea().contains (e.x, e.y))
+            titleDoubleClicked = true;
+    }
+
+    bool closeRequested = false, titleDoubleClicked = false;
     const juce::String title;
     bool keyboardHeld = false; // double-clicked title: it keeps the keyboard
 };
+
+void TitleLook::drawDocumentWindowTitleBar (juce::DocumentWindow& window, juce::Graphics& g, int w, int h, int, int, const juce::Image*, bool)
+{
+    const auto& c = windowColours;
+    const auto* editor = dynamic_cast<PluginSlot::EditorWindow*> (&window);
+    const bool held = editor != nullptr && editor->keyboardHeld;
+
+    g.fillAll (c.bg);
+
+    // A line of the accent along the bottom while the plugin has the keyboard.
+    if (held)
+    {
+        g.setColour (c.accent);
+        g.fillRect (0, h - 2, w, 2);
+    }
+
+    const int buttons = h * 3, pad = 10;
+    const auto status = held ? juce::String (L"keys here \x00b7 double-click: back to taw") : juce::String ("keys: taw");
+    g.setFont (titleFont());
+    const int statusW = juce::GlyphArrangement::getStringWidthInt (titleFont(), status) + pad;
+
+    g.setColour (held ? c.accent : c.dim);
+    g.drawText (status, w - buttons - statusW, 0, statusW, h, juce::Justification::centredRight, true);
+
+    auto name = editor != nullptr ? editor->title : window.getName();
+    name = name.upToLastOccurrenceOf (juce::String (L" \x00b7 taw"), false, false);
+    g.setColour (c.text);
+    g.drawText (name, pad, 0, juce::jmax (0, w - buttons - statusW - pad * 2), h, juce::Justification::centredLeft, true);
+}
 
 PluginSlot::PluginSlot (std::unique_ptr<juce::AudioPluginInstance> p, juce::PluginDescription d)
     : plugin (std::move (p)), desc (std::move (d))
@@ -90,7 +208,17 @@ void PluginSlot::markKeyboard (bool held)
         return;
 
     window->keyboardHeld = held;
-    window->setName (held ? window->title + juce::String (L" \x00b7 keys here (double-click this bar: back to taw)") : window->title);
+    window->repaint (window->getTitleBarArea());
+}
+
+juce::Image PluginSlot::editorSnapshot()
+{
+    return window != nullptr ? window->createComponentSnapshot (window->getLocalBounds()) : juce::Image();
+}
+
+bool PluginSlot::takeTitleDoubleClick()
+{
+    return window != nullptr && std::exchange (window->titleDoubleClicked, false);
 }
 
 void PluginSlot::showEditor (const juce::String& title)

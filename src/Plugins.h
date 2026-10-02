@@ -41,6 +41,17 @@ public:
     bool editorWantsToClose() const; // its close button was pressed; the owner calls closeEditor
     void* editorHandle() const;      // its native window (nullptr when closed)
     void markKeyboard (bool held);   // its title says when it's keeping the keyboard
+    bool takeTitleDoubleClick();     // its title bar was double-clicked since last asked
+    juce::Image editorSnapshot();    // the window as drawn (taw --windowtest)
+
+    // The plugin windows' title bars follow taw's theme.
+    struct WindowColours
+    {
+        juce::Colour bg, text, dim, accent;
+    };
+    static void setWindowColours (const WindowColours&);
+
+    struct EditorWindow;
 
     // audio thread (or a bounce thread) ---------------------------------------------
     // Plays [pos, pos + n) into left/right (added). Rolling: the sequence plays; any transport
@@ -79,7 +90,6 @@ private:
     std::bitset<16> liveSustain;
     bool anyLive = false;
 
-    struct EditorWindow;
     std::unique_ptr<EditorWindow> window;
 };
 

@@ -18,6 +18,29 @@ int clipBg, wave, liveWave, marker;
 int note, blackKeyBg; // instrument notes; piano-roll rows of the black keys
 int ok, error, meterGreen, meterYellow, meterRed, meterBg;
 
+// A palette index as the colour terminals show it (the xterm 256-colour table).
+juce::Colour xtermColour (int index)
+{
+    static const juce::uint32 basic[16] = { 0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xc0c0c0,
+                                            0x808080, 0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xffffff };
+
+    if (index < 0)
+        return juce::Colour (0xff1c1c1c);
+
+    if (index < 16)
+        return juce::Colour (0xff000000 | basic[index]);
+
+    if (index >= 232)
+    {
+        const auto v = (juce::uint8) (8 + (index - 232) * 10);
+        return juce::Colour (v, v, v);
+    }
+
+    const int i = index - 16;
+    auto level = [] (int n) { return (juce::uint8) (n == 0 ? 0 : 55 + n * 40); };
+    return juce::Colour (level (i / 36), level ((i / 6) % 6), level (i % 6));
+}
+
 void apply (const juce::String& theme)
 {
     if (theme == "grey")
@@ -142,6 +165,11 @@ static float toDb (float gain) { return juce::Decibels::gainToDecibels (gain, -1
 juce::String Ui::snapshot (App& app, int w, int h)
 {
     colour::apply (app.theme);
+
+    // Plugin windows' title bars in the same colours.
+    if (app.theme != themeDrawn)
+        PluginSlot::setWindowColours ({ colour::xtermColour (colour::headerBg), colour::xtermColour (colour::text), colour::xtermColour (colour::dim),
+                                        colour::xtermColour (colour::accent) });
     canvas.resize (w, h);
     drawMain (app);
 

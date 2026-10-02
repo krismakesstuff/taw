@@ -61,6 +61,7 @@ public:
     // plugin); this is that window until the terminal is clicked, it closes, or it's
     // double-clicked again. nullptr: taw has the keyboard.
     void* keyboardHeldBy() const;
+    void toggleKeyboardHold (void* pluginWindow);
 
     // Puts text on the system clipboard.
     static void setClipboardText (const char* text);
@@ -77,7 +78,6 @@ private:
     void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
     double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
     void* held_by = nullptr;          // a plugin window keeping the keyboard (keyboardHeldBy)
-    void* hook = nullptr;             // watches title-bar double-clicks on taw's windows
 #else
     std::string pending; // bytes of a key sequence still arriving
     int pendingPolls = 0;

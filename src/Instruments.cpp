@@ -229,7 +229,13 @@ void App::pollPlugins()
 
         if (in.slot != nullptr)
             if (auto* w = in.slot->editorHandle())
+            {
                 windows.push_back (w);
+
+                // Its title bar double-clicked: it keeps the keyboard (or gives it back).
+                if (in.slot->takeTitleDoubleClick())
+                    console.toggleKeyboardHold (w);
+            }
     }
 
     // Clicking in a plugin's window takes the keyboard; it comes back to taw once the mouse is

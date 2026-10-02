@@ -172,6 +172,51 @@ int main (int argc, char** argv)
         return ok ? 0 : 1;
     }
 
+    // taw --windowtest <plugin file> <out.png>   open a plugin's window as taw does and save a
+    // picture of it, keyboard with taw and then held (the title bar; a plugin's own drawing may
+    // not show).
+    if (args[0] == "--windowtest")
+    {
+        juce::AudioPluginFormatManager formats;
+        juce::addDefaultFormatsToManager (formats);
+        juce::OwnedArray<juce::PluginDescription> found;
+
+        for (auto* format : formats.getFormats())
+            format->findAllTypesForFile (found, args[1]);
+
+        juce::String error;
+        auto instance = found.isEmpty() ? nullptr : formats.createPluginInstance (*found[0], 48000.0, 512, error);
+
+        if (instance == nullptr)
+        {
+            std::printf ("couldn't load %s %s\n", args[1].toRawUTF8(), error.toRawUTF8());
+            return 1;
+        }
+
+        auto slot = std::make_shared<taw::PluginSlot> (std::move (instance), *found[0]);
+        slot->prepare (48000.0, 512);
+        slot->showEditor ("3 kik003" + juce::String (L" \x00b7 A \x00b7 ") + found[0]->name + juce::String (L" \x00b7 taw"));
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (1500);
+
+        const auto out = juce::File::getCurrentWorkingDirectory().getChildFile (args[2]);
+        auto save = [&] (const juce::File& file)
+        {
+            const auto image = slot->editorSnapshot();
+            juce::PNGImageFormat png;
+            file.deleteFile();
+            juce::FileOutputStream stream (file);
+            return image.isValid() && stream.openedOk() && png.writeImageToStream (image, stream);
+        };
+
+        bool ok = save (out);
+        slot->markKeyboard (true);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+        ok = save (out.getSiblingFile (out.getFileNameWithoutExtension() + "-held.png")) && ok;
+        slot->closeEditor();
+        std::puts (ok ? "ok" : "FAILED");
+        return ok ? 0 : 1;
+    }
+
     // taw --miditest [output]   open every MIDI input the way taw does, send a note out of a
     // loopback port (LoopBe by default), and check it comes back in. Then lists what each sent.
     if (args[0] == "--miditest")

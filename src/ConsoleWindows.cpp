@@ -136,49 +136,32 @@ Console::~Console()
 
     if (fontChanged)
         SetCurrentConsoleFontEx (out, FALSE, &oldFont);
-
-    if (hook != nullptr)
-        UnhookWindowsHookEx ((HHOOK) hook);
 }
 
 void* Console::keyboardHeldBy() const { return held_by; }
 
-// Title-bar double-clicks on taw's own windows (a thread hook: just taw's windows, nothing
-// system-wide). Plugins never see their title bar, so the gesture is free.
-static HWND titleDoubleClicked = nullptr;
-
-static LRESULT CALLBACK watchMouse (int code, WPARAM message, LPARAM info)
+// A plugin window's title bar double-clicked: it keeps the keyboard (again: taw has it back).
+void Console::toggleKeyboardHold (void* window)
 {
-    if (code == HC_ACTION && message == WM_NCLBUTTONDBLCLK)
-        if (const auto* m = reinterpret_cast<const MOUSEHOOKSTRUCT*> (info); m->wHitTestCode == HTCAPTION)
-            titleDoubleClicked = GetAncestor (m->hwnd, GA_ROOT);
+    if (! opened || window == nullptr)
+        return;
 
-    return CallNextHookEx (nullptr, code, message, info);
+    if (held_by == window)
+    {
+        held_by = nullptr;
+        SetForegroundWindow ((HWND) terminal);
+        logFocus ("title double-clicked: keyboard back to taw");
+    }
+    else
+    {
+        held_by = window;
+        SetForegroundWindow ((HWND) window);
+        logFocus ("title double-clicked: keyboard stays with " + describeWindow ((HWND) window));
+    }
 }
 
 void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
 {
-    if (hook == nullptr && opened)
-        hook = SetWindowsHookExW (WH_MOUSE, watchMouse, nullptr, GetCurrentThreadId());
-
-    // A plugin window's title double-clicked: it keeps the keyboard (again: taw has it back).
-    if (const auto clicked = std::exchange (titleDoubleClicked, nullptr);
-        clicked != nullptr && std::find (pluginWindows.begin(), pluginWindows.end(), (void*) clicked) != pluginWindows.end())
-    {
-        if (held_by == clicked)
-        {
-            held_by = nullptr;
-            SetForegroundWindow ((HWND) terminal);
-            logFocus ("title double-clicked: keyboard back to taw");
-        }
-        else
-        {
-            held_by = clicked;
-            SetForegroundWindow (clicked);
-            logFocus ("title double-clicked: keyboard stays with " + describeWindow (clicked));
-        }
-    }
-
     const auto front = GetForegroundWindow();
 
     // With the terminal in front, plugin windows stay over it. JUCE drops a window's

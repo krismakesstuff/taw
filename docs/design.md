@@ -384,7 +384,8 @@ Stereo one. Typed names pick the same way.
   removes it. On a send, `|` picks its bus (a name nothing matches makes that bus), `[ ]`
   ride its level, `M` turns it off, `P` flips pre/post, del removes it. On the output, `|`
   picks a bus and del puts it back on the mix. Esc or `\` leaves. `ed` there opens the insert.
-- **Plugin windows.** They sit over the terminal but never keep the keyboard: click and drag
+- **Plugin windows.** They have taw's own title bar (the theme's colours; the track, slot and
+  plugin on the left; who has the keyboard on the right; minimise and close). They sit over the terminal but never keep the keyboard: click and drag
   in one, and a moment after the mouse lets go the terminal has the keyboard again, so keys
   keep reaching taw (not while a menu is open or a button is held; a plugin's own dialogs, like
   naming a preset, keep it). `Ctrl+\` (or `ed close`) closes every plugin window from anywhere. Double-click a plugin window's title bar to let it keep the

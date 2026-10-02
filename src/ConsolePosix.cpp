@@ -297,6 +297,7 @@ Console::~Console()
 
 void Console::reclaimKeyboard (const std::vector<void*>&) {}
 void* Console::keyboardHeldBy() const { return nullptr; }
+void Console::toggleKeyboardHold (void*) {}
 
 std::vector<Key> Console::poll()
 {

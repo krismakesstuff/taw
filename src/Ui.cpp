@@ -1357,7 +1357,7 @@ void Ui::drawHelp (App&)
 #endif
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
         { Pair, L"save  close", L"save / back to sessions", L"ctrl+q  exit", L"save and quit" },
-        { Note, L"esc clears the line, the selection, then clip lights \x00b7 ? closes this" },
+        { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };
 
     constexpr int keyW = 13, colW = 38; // key column width, width of each half

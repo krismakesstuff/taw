@@ -2297,6 +2297,16 @@ void App::handleMainKey (const Key& k)
         return;
     }
 
+    // Alt+C clears the latched clip lights (inputs, tracks, the mix).
+    if (k.code == Key::Char && k.alt && ! k.ctrl && (k.ch == 'c' || k.ch == 'C'))
+    {
+        for (auto& m : inputMeters) m.clipped = false;
+        for (auto& m : trackMeters) m.clipped = false;
+        for (auto& m : masterMeters) m.clipped = false;
+        say (Result::good ("clip lights cleared"));
+        return;
+    }
+
     // Alt+/ toggles a hit at the cursor (at the playhead while rolling) on a sample track.
     if (k.code == Key::Char && k.alt && ! k.ctrl && k.ch == '/')
     {
@@ -2427,13 +2437,7 @@ void App::handleMainKey (const Key& k)
             else if (timeAnchor >= 0 || trackAnchor >= 0)
                 clearSelection();
             else
-            {
-                // Clear latched clip lights and the message.
-                for (auto& m : inputMeters) m.clipped = false;
-                for (auto& m : trackMeters) m.clipped = false;
-                for (auto& m : masterMeters) m.clipped = false;
-                message.clear();
-            }
+                message.clear(); // (clip lights: alt+C)
             return;
 
         case Key::Char:

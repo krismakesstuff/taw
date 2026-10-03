@@ -570,6 +570,8 @@ saved and the plugin unloaded under a closing box.
  tracks:    number · name · input │ inserts A-E / sends A-E · out │ timeline lane │ volume · meter · peak
             second row: R I S M flags (an instrument's plugin), pan under the volume
             one row tall: the flags go after the name, in a wider header
+            the type in colour: a strip down the left edge and a filled label (audio blue: its
+            input; smp warm; inst teal; bus purple), so a track reads at a glance
  mix
  message:   feedback from the last command
  command:   : 1-3 r

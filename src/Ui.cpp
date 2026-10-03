@@ -12,6 +12,7 @@ int accent, rec, recBg, play, playBg;
 int clipAltBg, hit; // hit: sample-track steps (warm, unlike waveforms)
 int selBg, selClipBg, loopBg, loopOffBg;
 int cursorBg, playheadBg; // behind what's under the cursor / playhead in a lane
+int busColour, chipText;   // buses' own colour; text on a coloured track-type label
 int gridBar; // bar lines; beats and finer use faint
 int laneFocusBg, laneSelBg; // empty lane cells on the focused / selected tracks (apart from clips)
 int clipBg, wave, liveWave, marker;
@@ -52,6 +53,7 @@ void apply (const juce::String& theme)
         clipAltBg = 243, hit = 94;
         selBg = 110, selClipBg = 74, loopBg = 108, loopOffBg = 245;
         cursorBg = 180, playheadBg = 114;
+        busColour = 97, chipText = 231;
         gridBar = 241;
         laneFocusBg = 248, laneSelBg = 146;
         clipBg = 245, wave = 18, liveWave = 124, marker = 90;
@@ -66,6 +68,7 @@ void apply (const juce::String& theme)
         clipAltBg = 249, hit = 130;
         selBg = 153, selClipBg = 117, loopBg = 151, loopOffBg = 250;
         cursorBg = 223, playheadBg = 157;
+        busColour = 97, chipText = 231;
         gridBar = 245;
         laneFocusBg = 254, laneSelBg = 189;
         clipBg = 251, wave = 25, liveWave = 160, marker = 133;
@@ -80,6 +83,7 @@ void apply (const juce::String& theme)
         clipAltBg = 239, hit = 179;
         selBg = 24, selClipBg = 31, loopBg = 28, loopOffBg = 239;
         cursorBg = 94, playheadBg = 22;
+        busColour = 141, chipText = 16;
         gridBar = 241;
         laneFocusBg = 234, laneSelBg = 17;
         clipBg = 236, wave = 110, liveWave = 210, marker = 170;
@@ -886,13 +890,29 @@ void Ui::drawTimeline (App& app)
             borders (y + r);
         }
 
-        if (focusedRow)
-            canvas.put (0, y, L'\x25b8', colour::accent, bg);
+        // The track's type at a glance, so an old session reads straight away: a strip of its
+        // colour down the left edge (thicker on the focused track) and its label filled with it.
+        // Audio blue like waveforms, sample warm like hits, instrument teal like notes, buses purple.
+        const int typeColour = Session::isBusTrack (t)        ? colour::busColour
+                               : Session::isSampleTrack (t)     ? colour::hit
+                               : Session::isInstrumentTrack (t) ? colour::note
+                                                                : colour::wave;
+
+        for (int r = 0; r < rowsPerTrack; ++r)
+            canvas.put (0, y + r, focusedRow ? L'\x2588' : L'\x258c', typeColour, bg);
+
+        // The type label: a chip of the type's colour (red when something's wrong, dim while loading).
+        auto chip = [&] (const juce::String& text, int fill)
+        {
+            const int x = leftW - 6;
+            canvas.fill (x, y, 6, L' ', -1, fill);
+            canvas.text (x + 1, y, text, colour::chipText, fill, true, 5);
+        };
 
         canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);
         canvas.text (4, y, padRight (t[ids::name].toString(), 10), colour::text, bg);
 
-        const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y, kindX = leftW - 5;
+        const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y;
         auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, flagY, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
         // R I S M: arm, input, solo, mute. A bus has nothing to arm or monitor: just solo and mute.
         const bool busRow = Session::isBusTrack (t);
@@ -912,15 +932,15 @@ void Ui::drawTimeline (App& app)
         const int input = t[ids::input];
 
         if (busTrack)
-            canvas.text (kindX, y, "bus", colour::accent, bg);
+            chip ("bus", typeColour);
         else if (sampleTrack)
-            canvas.text (kindX, y, "smp", colour::hit, bg);
+            chip ("smp", typeColour);
         else if (instrumentTrack)
         {
             // "inst", red when its plugin didn't load; the plugin's name after the flags.
             const auto problem = app.instrumentProblem (i);
             const bool pending = app.pluginPending (t);
-            canvas.text (kindX, y, "inst", problem.isNotEmpty() ? colour::error : pending ? colour::dim : colour::note, bg);
+            chip ("inst", problem.isNotEmpty() ? colour::error : pending ? colour::dim : typeColour);
 
             if (twoRows)
                 canvas.text (9, y + 1, problem.isNotEmpty() ? problem : pending ? juce::String (L"loading\x2026") : t[ids::pluginName].toString(),
@@ -933,7 +953,7 @@ void Ui::drawTimeline (App& app)
             const auto text = input <= 0 ? juce::String ("--")
                               : stereo   ? (input < 10 ? "i" : "") + juce::String (input) + "-" + juce::String (input + 1)
                                          : "in" + juce::String (input);
-            canvas.text (kindX, y, text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : colour::dim, bg, false, 5);
+            chip (text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : typeColour);
         }
 
         // Lane

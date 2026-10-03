@@ -145,6 +145,7 @@ public:
     // "inst <name>": a new instrument track (or, with tracks named, onto those). No name: the picker.
     Result loadInstrument (const std::vector<int>& tracks, const juce::String& query);
     Result loadInstrument (int track, const juce::PluginDescription&); // track -1: a new one
+    Result importMidiFile (const juce::File&, int targetTrack); // import song.mid: a track per part
     Result toggleEditor (int track); // "ed": the plugin's own window
 
     // Inserts (Inserts.cpp): five effect slots per track, A to E, after the source (and the

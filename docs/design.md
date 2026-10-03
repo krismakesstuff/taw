@@ -571,6 +571,12 @@ path.
 - Runs on its own thread; `Esc` cancels.
 - Known gap: MP3 encoder padding isn't trimmed, so MP3 imports start ~25-40 ms late.
 
+**MIDI files** (`.mid`, `.midi`) import at once, not on the thread. Each of the file's tracks (each
+channel, in a one-track file) becomes an instrument track named after it, holding one MIDI clip at
+the cursor, whole bars long, with its notes and controllers; `inst <name>` on each track then picks
+what plays it (until then the track says so). `2 import song.mid` puts the first part on track 2.
+Into an empty session the file's first tempo comes too; a tempo map doesn't (taw has one tempo).
+
 **Drag and drop imports immediately.** A console window turns dropped files into typed text.
 taw spots that as a burst of characters faster than anyone types, holds it back from the key
 handlers (a drop during playback must never fire hotkeys), and once the burst has finished

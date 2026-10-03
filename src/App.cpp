@@ -1440,8 +1440,31 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
     if (targetTrack >= 0 && targetTrack < session->numTracks() && Session::isBusTrack (session->track (targetTrack)))
         return Result::fail ("track " + juce::String (targetTrack + 1) + L" is a bus \x2014 import alone makes new tracks");
 
+    // MIDI files become instrument tracks straight away; the rest is audio for the importer.
+    juce::StringArray audioPaths;
+    Result midiResult;
+    bool anyMidi = false;
+
+    for (const auto& path : paths)
+    {
+        const auto f = juce::File::getCurrentWorkingDirectory().getChildFile (path.unquoted());
+
+        if (f.hasFileExtension (".mid;.midi") && f.existsAsFile())
+        {
+            midiResult = importMidiFile (f, anyMidi ? -1 : targetTrack);
+            anyMidi = true;
+        }
+        else
+        {
+            audioPaths.add (path);
+        }
+    }
+
+    if (anyMidi && audioPaths.isEmpty())
+        return midiResult;
+
     juce::StringArray notFound;
-    auto files = Import::expand (paths, juce::File::getCurrentWorkingDirectory(), notFound);
+    auto files = Import::expand (audioPaths, juce::File::getCurrentWorkingDirectory(), notFound);
 
     if (files.empty())
         return Result::fail ("nothing to import" + (notFound.isEmpty() ? juce::String() : ": not found " + notFound.joinIntoString (", ")));

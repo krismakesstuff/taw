@@ -57,6 +57,12 @@ std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, doub
     if (! desc && name.isNotEmpty())
         desc = plugins.find (name, ! node.hasType (ids::INSERT));
 
+    if (! desc && name.isEmpty() && node[ids::plugin].toString().isEmpty())
+    {
+        problem = L"no instrument yet \x2014 inst <name> picks one";
+        return {};
+    }
+
     if (! desc)
     {
         problem = (name.isNotEmpty() ? name : juce::String ("its plugin"))
@@ -565,6 +571,135 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
 
     return Result::good (msg + (armed ? L" \x00b7 armed: play your controller" : L" \x00b7 shift+R arms it for your controller")
                          + L" \x00b7 ed opens its window \x00b7 ctrl+space records");
+}
+
+// import song.mid: each of the file's tracks (each channel, in a one-track file) becomes an
+// instrument track holding one MIDI clip at the cursor, whole bars long, named after the
+// track; inst on it then picks what plays it. "3 import x.mid" puts the first part on track 3.
+// The file's tempo is taken when the session has nothing in it yet; a tempo map isn't.
+Result App::importMidiFile (const juce::File& file, int targetTrack)
+{
+    juce::FileInputStream in (file);
+    juce::MidiFile midi;
+
+    if (! in.openedOk() || ! midi.readFrom (in))
+        return Result::fail ("couldn't read " + file.getFileName() + " as a MIDI file");
+
+    // Beats from the file's ticks (or from seconds, for an SMPTE file, at the session's tempo).
+    const int format = midi.getTimeFormat();
+
+    if (format <= 0)
+        midi.convertTimestampTicksToSeconds();
+
+    double fileBpm = 0.0;
+    juce::MidiMessageSequence tempos;
+    midi.findAllTempoEvents (tempos);
+
+    if (tempos.getNumEvents() > 0)
+        fileBpm = 60.0 / tempos.getEventPointer (0)->message.getTempoSecondsPerQuarterNote();
+
+    const bool emptySession = session->contentEnd() <= 0;
+
+    if (emptySession && fileBpm >= 20.0 && fileBpm <= 400.0)
+        session->tree().setProperty (ids::bpm, std::round (fileBpm * 100.0) / 100.0, um());
+
+    auto beatOf = [&] (double t) { return format > 0 ? t / format : t * session->bpm() / 60.0; };
+
+    struct Part { juce::String name; int channel; std::vector<juce::ValueTree> nodes; double end = 0.0; };
+    std::vector<Part> parts;
+
+    for (int t = 0; t < midi.getNumTracks(); ++t)
+    {
+        juce::MidiMessageSequence seq (*midi.getTrack (t));
+        seq.updateMatchedPairs();
+        juce::String name;
+        std::map<int, Part> byChannel;
+
+        for (int e = 0; e < seq.getNumEvents(); ++e)
+        {
+            const auto* ev = seq.getEventPointer (e);
+            const auto& m = ev->message;
+            const auto beat = beatOf (m.getTimeStamp());
+
+            if (m.isTrackNameEvent() && name.isEmpty())
+                name = m.getTextFromTextMetaEvent().trim();
+
+            if (m.getChannel() <= 0)
+                continue;
+
+            auto& part = byChannel[m.getChannel()];
+            part.channel = m.getChannel();
+
+            if (m.isNoteOn())
+            {
+                const auto end = ev->noteOffObject != nullptr ? beatOf (ev->noteOffObject->message.getTimeStamp()) : beat + 0.25;
+                part.nodes.push_back (Session::makeNote (beat, end - beat, m.getNoteNumber(), m.getVelocity(), m.getChannel()));
+                part.end = std::max (part.end, end);
+            }
+            else if (m.isController() || m.isPitchWheel() || m.isChannelPressure())
+            {
+                const int num = m.isController() ? m.getControllerNumber() : m.isPitchWheel() ? 128 : 129;
+                const int val = m.isController() ? m.getControllerValue() : m.isPitchWheel() ? m.getPitchWheelValue() : m.getChannelPressureValue();
+                part.nodes.push_back (Session::makeControl (beat, num, val, m.getChannel()));
+                part.end = std::max (part.end, beat);
+            }
+        }
+
+        // A part needs a note; controllers alone (a file's setup track) aren't one.
+        for (auto& [ch, part] : byChannel)
+        {
+            const bool hasNotes = std::any_of (part.nodes.begin(), part.nodes.end(), [] (const auto& n) { return n.hasType (ids::NOTE); });
+
+            if (! hasNotes)
+                continue;
+
+            part.name = name.isNotEmpty() ? (byChannel.size() > 1 ? name + " " + juce::String (ch) : name)
+                                          : file.getFileNameWithoutExtension() + " " + juce::String ((int) parts.size() + 1);
+            parts.push_back (std::move (part));
+        }
+    }
+
+    if (parts.empty())
+        return Result::fail (file.getFileName() + " has no notes");
+
+    beginEdit ("import " + file.getFileName());
+    const auto at = (double) cursor / session->samplesPerBeat();
+    const auto bar = (double) session->beatsPerBar();
+    int first = -1;
+
+    for (size_t i = 0; i < parts.size(); ++i)
+    {
+        auto& part = parts[i];
+        juce::ValueTree track;
+        const int target = i == 0 ? targetTrack : -1;
+
+        if (target >= 0 && target < session->numTracks()
+            && (Session::isInstrumentTrack (session->track (target)) || (Session::isAudioTrack (session->track (target)) && Session::clips (session->track (target)).empty())))
+        {
+            track = session->track (target);
+        }
+        else
+        {
+            track = session->addTrack (part.name, 0, um());
+        }
+
+        track.setProperty (ids::kind, "instrument", um()).setProperty (ids::input, 0, um());
+
+        auto clip = Session::makeMidiClip (at, 0.0, std::max (bar, std::ceil (part.end / bar - 1.0e-9) * bar));
+
+        for (auto& n : part.nodes)
+            clip.appendChild (n, nullptr);
+
+        track.appendChild (clip, um());
+        first = first < 0 ? session->tree().indexOf (track) : first;
+    }
+
+    focusTrack (first);
+    rebuildGraph();
+
+    return Result::good ("imported " + file.getFileName() + ": " + juce::String ((int) parts.size()) + (parts.size() == 1 ? " part" : " parts")
+                         + (emptySession && fileBpm > 0.0 ? " at " + juce::String (session->bpm(), 1) + " bpm" : juce::String())
+                         + L" \x00b7 inst <name> on each track picks what plays it");
 }
 
 Result App::toggleEditor (int index)

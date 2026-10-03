@@ -12,7 +12,7 @@ int accent, rec, recBg, play, playBg;
 int clipAltBg, hit; // hit: sample-track steps (warm, unlike waveforms)
 int selBg, selClipBg, loopBg, loopOffBg;
 int cursorBg, playheadBg; // behind what's under the cursor / playhead in a lane
-int busColour, chipText;   // buses' own colour; text on a coloured track-type label
+int busColour, chipText, busText; // buses' own colour (dark green); text on a type label, and on the bus one
 int gridBar; // bar lines; beats and finer use faint
 int laneFocusBg, laneSelBg; // empty lane cells on the focused / selected tracks (apart from clips)
 int clipBg, wave, liveWave, marker;
@@ -53,7 +53,7 @@ void apply (const juce::String& theme)
         clipAltBg = 243, hit = 94;
         selBg = 110, selClipBg = 74, loopBg = 108, loopOffBg = 245;
         cursorBg = 180, playheadBg = 114;
-        busColour = 97, chipText = 231;
+        busColour = 22, chipText = 231, busText = 231;
         gridBar = 241;
         laneFocusBg = 248, laneSelBg = 146;
         clipBg = 245, wave = 18, liveWave = 124, marker = 90;
@@ -68,7 +68,7 @@ void apply (const juce::String& theme)
         clipAltBg = 249, hit = 130;
         selBg = 153, selClipBg = 117, loopBg = 151, loopOffBg = 250;
         cursorBg = 223, playheadBg = 157;
-        busColour = 97, chipText = 231;
+        busColour = 22, chipText = 231, busText = 231;
         gridBar = 245;
         laneFocusBg = 254, laneSelBg = 189;
         clipBg = 251, wave = 25, liveWave = 160, marker = 133;
@@ -83,7 +83,7 @@ void apply (const juce::String& theme)
         clipAltBg = 239, hit = 179;
         selBg = 24, selClipBg = 31, loopBg = 28, loopOffBg = 239;
         cursorBg = 94, playheadBg = 22;
-        busColour = 141, chipText = 16;
+        busColour = 28, chipText = 16, busText = 231;
         gridBar = 241;
         laneFocusBg = 234, laneSelBg = 17;
         clipBg = 236, wave = 110, liveWave = 210, marker = 170;
@@ -892,7 +892,7 @@ void Ui::drawTimeline (App& app)
 
         // The track's type at a glance, so an old session reads straight away: a strip of its
         // colour down the left edge (thicker on the focused track) and its label filled with it.
-        // Audio blue like waveforms, sample warm like hits, instrument teal like notes, buses purple.
+        // Audio blue like waveforms, sample warm like hits, instrument teal like notes, buses dark green.
         const int typeColour = Session::isBusTrack (t)        ? colour::busColour
                                : Session::isSampleTrack (t)     ? colour::hit
                                : Session::isInstrumentTrack (t) ? colour::note
@@ -906,7 +906,7 @@ void Ui::drawTimeline (App& app)
         {
             const int x = leftW - 6;
             canvas.fill (x, y, 6, L' ', -1, fill);
-            canvas.text (x + 1, y, text, colour::chipText, fill, true, 5);
+            canvas.text (x + 1, y, text, fill == colour::busColour ? colour::busText : colour::chipText, fill, true, 5);
         };
 
         canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);

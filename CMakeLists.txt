@@ -27,6 +27,7 @@ target_sources(taw PRIVATE
     src/App.cpp
     src/Session.cpp
     src/Commands.cpp
+    src/AudioEditor.cpp
     src/AudioEngine.cpp
     src/Bounce.cpp
     src/Import.cpp

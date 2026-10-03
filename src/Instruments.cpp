@@ -256,7 +256,10 @@ void App::pollPlugins()
     if (midiEditor != nullptr)
         midiEditor->poll();
 
-    console.reclaimKeyboard (windows, midiEditor != nullptr ? midiEditor->nativeHandle() : nullptr);
+    if (audioEditor != nullptr)
+        audioEditor->poll();
+
+    console.reclaimKeyboard (windows, editorWindow());
 
     for (auto& in : hosted)
         if (in.slot != nullptr)

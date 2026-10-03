@@ -5,6 +5,7 @@
 
 #include "MidiEditor.h"
 #include "App.h"
+#include "EditorWindow.h"
 
 namespace taw
 {
@@ -13,7 +14,8 @@ namespace
 EditorColours colours { juce::Colour (0xff1c1c1c), juce::Colour (0xff262626), juce::Colour (0xffd0d0d0), juce::Colour (0xff767676),
                         juce::Colour (0xff444444), juce::Colour (0xff626262), juce::Colour (0xffd0d0d0), juce::Colour (0xff303030),
                         juce::Colour (0xff181818), juce::Colour (0xff5fd7af), juce::Colour (0xffffd75f), juce::Colour (0xffffaf00),
-                        juce::Colour (0xff00af5f), juce::Colour (0xffff0000), juce::Colour (0xff121212) };
+                        juce::Colour (0xff00af5f), juce::Colour (0xffff0000), juce::Colour (0xff121212),
+                        juce::Colour (0xff87afd7), juce::Colour (0xff303030), juce::Colour (0xff005f87) };
 
 constexpr int toolbarH = 32, rulerH = 34, keysW = 58, laneH = 110, gap = 4;
 constexpr double minLength = 1.0 / 64.0; // beats: the shortest a note gets by dragging
@@ -58,9 +60,9 @@ int letterOf (const juce::KeyPress& kp)
 }
 
 bool ctrlHeld (const juce::KeyPress& kp) { return kp.getModifiers().isCtrlDown() || isControlCode (kp.getKeyCode()); }
+} // namespace
 
-// A key the editor doesn't use, as taw's console would have reported it.
-Key toTawKey (const juce::KeyPress& kp)
+Key keyForTaw (const juce::KeyPress& kp)
 {
     Key k;
     const auto mods = kp.getModifiers();
@@ -102,9 +104,9 @@ Key toTawKey (const juce::KeyPress& kp)
 
     return k;
 }
-} // namespace
 
 void setEditorColours (const EditorColours& c) { colours = c; }
+const EditorColours& editorColours() { return colours; }
 
 //==============================================================================
 struct MidiEditor::Roll final : juce::Component, private juce::Timer, private juce::ValueTree::Listener
@@ -1370,7 +1372,7 @@ private:
         else
         {
             // Everything else is taw's: space plays, ctrl+z undoes, shift+E closes this.
-            const auto k = toTawKey (kp);
+            const auto k = keyForTaw (kp);
 
             if (k.code == Key::None)
                 return false;
@@ -1422,71 +1424,11 @@ private:
 };
 
 //==============================================================================
-struct MidiEditor::Window final : juce::DocumentWindow, TitledWindow
+struct MidiEditor::Window final : EditorWindow<Roll>
 {
-    explicit Window (App& app)
-        : DocumentWindow ("MIDI editor", juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton)
-    {
-        setLookAndFeel (&windowLook());
-        setUsingNativeTitleBar (false);
-        setTitleBarHeight (24);
-        roll = new Roll (app);
-        setContentOwned (roll, false);
-        setResizable (true, false);
-        setResizeLimits (520, 320, 8000, 6000);
-        setAlwaysOnTop (true); // over the terminal, like the plugin windows
-        centreWithSize (1100, 640);
-    }
-
-    ~Window() override
-    {
-        clearContentComponent();
-        setLookAndFeel (nullptr);
-    }
-
-    void closeButtonPressed() override
-    {
-        closeRequested = true;
-        setVisible (false);
-    }
-
-    // The title bar is ours (see the plugin windows): dragging it moves the window.
-    WindowControlKind findControlAtPoint (juce::Point<float> pt) const override
-    {
-        const auto kind = DocumentWindow::findControlAtPoint (pt);
-
-        switch (kind)
-        {
-            case WindowControlKind::caption:
-            case WindowControlKind::minimise:
-            case WindowControlKind::maximise:
-            case WindowControlKind::close:
-                return WindowControlKind::client;
-            default:
-                return kind;
-        }
-    }
-
-    void activeWindowStatusChanged() override
-    {
-        DocumentWindow::activeWindowStatusChanged();
-
-        for (auto* b : { getMinimiseButton(), getCloseButton() })
-            if (b != nullptr)
-                b->setEnabled (true);
-
-        repaint (getTitleBarArea());
-    }
-
-    juce::String titleName() const override { return roll->title(); }
-    juce::String titleStatus() const override { return isActiveWindow() ? juce::String (L"keys here \x00b7 esc: back to taw") : juce::String ("keys: taw (click to edit)"); }
-    bool titleLit() const override { return isActiveWindow(); }
-
-    Roll* roll = nullptr; // owned as the content
-    bool closeRequested = false;
+    explicit Window (App& app) : EditorWindow<Roll> ("MIDI editor", new Roll (app), 1100, 640) {}
 };
 
-//==============================================================================
 MidiEditor::MidiEditor (App& a) : app (a) {}
 MidiEditor::~MidiEditor() { close(); }
 
@@ -1495,11 +1437,8 @@ void MidiEditor::open (const juce::ValueTree& clip)
     if (window == nullptr)
         window = std::make_unique<Window> (app);
 
-    window->roll->show (clip);
-    window->closeRequested = false;
-    window->setVisible (true);
-    window->toFront (true); // with the keyboard: you opened it to edit
-    window->roll->grabKeyboardFocus();
+    window->content->show (clip);
+    window->showWithKeys();
 }
 
 void MidiEditor::close()
@@ -1511,7 +1450,7 @@ void MidiEditor::close()
 }
 
 bool MidiEditor::isOpen() const { return window != nullptr && window->isVisible(); }
-juce::ValueTree MidiEditor::clip() const { return window != nullptr ? window->roll->clip : juce::ValueTree(); }
+juce::ValueTree MidiEditor::clip() const { return window != nullptr ? window->content->clip : juce::ValueTree(); }
 void* MidiEditor::nativeHandle() const { return isOpen() ? window->getWindowHandle() : nullptr; }
 
 void MidiEditor::poll()
@@ -1520,7 +1459,7 @@ void MidiEditor::poll()
         return;
 
     // Closed with its button, or its clip gone (undone, deleted, the track removed).
-    if (window->closeRequested || ! window->roll->clip.getParent().isValid() || ! window->roll->clip.getParent().getParent().isValid())
+    if (window->closeRequested || ! window->content->clip.getParent().isValid() || ! window->content->clip.getParent().getParent().isValid())
         close();
 }
 } // namespace taw

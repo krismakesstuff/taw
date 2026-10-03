@@ -150,16 +150,37 @@ clicks by cell).
 
 - Click a track's lane: that track gets the focus and the cursor goes there (as in Pro Tools).
   Shift-click stretches the time and track selections to it.
-- Double-click a MIDI clip: selects it and opens it in the MIDI editor (shift+E, or `edit`,
-  from the keyboard).
+- Double-click a clip: selects it and opens it in its editor, MIDI or audio (shift+E, or
+  `edit`, from the keyboard).
 - `taw --exec` takes `:click X Y` and `:dblclick X Y` (cells of its 160×44 screen).
+
+### The editors
+
+**Shift+E** (or `edit`, `9 edit`) opens the focused track in a zoomed editor window: the MIDI
+editor on an instrument track, the audio editor on an audio track, on its clip at the cursor or
+else the nearest one. Shift+E again, or the close button, closes it; one is open at a time.
+`edit new` makes an empty MIDI clip to draw into (over the time selection, else the bar the
+cursor is in). Both sit over the terminal like the plugin windows, keep the keyboard while
+they're in front (Esc hands it back) and pass on the keys they don't use. Windows only so far.
+
+### The audio editor
+
+The focused audio track's clips, zoomable from the whole take down to single samples (a line
+through them, then dots). The time selection, cursor and playhead are taw's, so the editor is
+for placing them precisely and taw's keys do the editing.
+
+- **Drag across the waveform:** taw's time selection on this track, snapped to the editor's
+  grid (bar to 1/32, or off: to the sample; alt: free) and, with "zero crossings" on, to the
+  nearest zero crossing. Then Delete, ctrl+x / c / v, ctrl+d, `l`, `b` act on exactly that.
+  A click puts the cursor there; the ruler too. Double-click a clip: select all of it.
+- **A clip's edges:** drag to trim (it's a window into its file: never past the file, nothing
+  lost). **Its name bar:** drag to move it.
+- **Height:** starts scaled to the track's loudest peak (a quiet take isn't a flat line); alt+wheel
+  changes it. Ctrl+wheel (or `+` `-`, around the cursor) zooms; the wheel scrolls.
 
 ### The MIDI editor
 
-A window over the terminal, like the plugin windows, with one MIDI clip in it, for fine work
-with the mouse. Shift+E (or `edit`, `9 edit`) opens the clip at the cursor on the focused
-instrument track; where there's none, a new empty clip (over the time selection, else the bar
-the cursor is in) to draw into. Shift+E again, or its close button, closes it. Windows only so far.
+One MIDI clip, for fine work with the mouse.
 
 - **Shared with taw:** it edits the session itself, one undo step per gesture, so ctrl+z (from
   either side) and the timeline follow. The cursor and playhead are taw's: clicking the ruler
@@ -257,7 +278,7 @@ records the selected tracks, else whatever is armed.
 - Retroactive capture (`R`: keep what was just played while not recording).
 - Queries: `1 ?`, `? inputs`.
 - User keymaps and macros (config files).
-- Plugins out of process; CLAP. Audio clips in a zoomed editor window, like the MIDI editor.
+- Plugins out of process; CLAP. Fades and clip gain in the audio editor.
 - Headless engine + socket/MCP front end for agents.
 
 ## Recording

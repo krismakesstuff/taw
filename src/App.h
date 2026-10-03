@@ -2,6 +2,7 @@
 
 #include "AudioEngine.h"
 #include "Bounce.h"
+#include "AudioEditor.h"
 #include "Import.h"
 #include "MidiEditor.h"
 #include "Plugins.h"
@@ -541,12 +542,17 @@ public:
     const ClipData* audioFor (const juce::String& sessionRelativePath); // loads and caches
     void say (const Result&); // the message line
 
-    // The MIDI editor (MidiEditor.h): a window for one MIDI clip. Keys it passes on wait here
-    // for the main loop, so a key that closes the session never runs inside the editor.
+    // The editors (MidiEditor.h, AudioEditor.h): a window for the focused track's clips, one
+    // open at a time. Keys they pass on wait here for the main loop, so a key that closes the
+    // session never runs inside an editor.
     std::unique_ptr<MidiEditor> midiEditor;
+    std::unique_ptr<AudioEditor> audioEditor;
     std::vector<Key> deferredKeys;
     Result openMidiEditor (const juce::ValueTree& clip);
-    Result toggleMidiEditor (); // shift+E / "edit": the clip at the cursor on the focused track
+    Result openAudioEditor (const juce::ValueTree& clip);
+    Result toggleEditor();         // shift+E / "edit": the focused track's clip at the cursor, or the nearest
+    Result newMidiClipForEditor(); // "edit new": an empty MIDI clip to draw into
+    void* editorWindow() const;    // the open editor's window, which keeps the keyboard
 
 private:
     void rebuildGraph();

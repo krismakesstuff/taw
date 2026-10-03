@@ -80,6 +80,7 @@ void App::releaseSession()
         pluginQueue.clear();
         savePluginStates();
         midiEditor.reset();
+        audioEditor.reset();
 
         for (auto& in : hosted)
             if (in.slot != nullptr)
@@ -2240,7 +2241,7 @@ void App::handleKey (const Key& k)
 
 // The mouse in the terminal. A click on a lane focuses its track and puts the cursor there (as
 // in Pro Tools); shift-click stretches the time and track selections to it. A double-click on a
-// MIDI clip selects it and opens it in the MIDI editor.
+// clip selects it and opens it in its editor (MIDI or audio).
 void App::handleMouse (const Key& k)
 {
     const auto& map = ui.lanes();
@@ -2263,6 +2264,28 @@ void App::handleMouse (const Key& k)
                 setCursor (timeAnchor);
 
             say (openMidiEditor (clip));
+            return;
+        }
+
+        // An audio clip: the one on top there (later clips play over earlier ones).
+        const auto audio = Session::clips (session->track (track));
+
+        for (auto it = audio.rbegin(); it != audio.rend(); ++it)
+        {
+            const auto s = (double) (juce::int64) (*it)[ids::start], e = s + (double) (juce::int64) (*it)[ids::length];
+
+            if (s < t1 && e > t0)
+            {
+                focusTrack (track);
+                timeAnchor = (juce::int64) s;
+                timeHead = (juce::int64) e;
+
+                if (! engine.isRolling())
+                    setCursor (timeAnchor);
+
+                say (openAudioEditor (*it));
+                break;
+            }
         }
 
         return;
@@ -2283,14 +2306,42 @@ Result App::openMidiEditor (const juce::ValueTree& clip)
     if (midiEditor == nullptr)
         midiEditor = std::make_unique<MidiEditor> (*this);
 
+    if (audioEditor != nullptr)
+        audioEditor->close(); // one editor at a time
+
     midiEditor->open (clip);
     return Result::good (L"MIDI editor \x00b7 esc hands the keys back \x00b7 shift+E closes it");
 }
 
-// Shift+E / "edit": the MIDI clip at the cursor on the focused instrument track (open: closes
-// it). Where there's none, a new empty one to draw into: over the time selection, else the bar
-// the cursor is in.
-Result App::toggleMidiEditor()
+Result App::openAudioEditor (const juce::ValueTree& clip)
+{
+    if (! console.isOpen())
+        return Result::fail ("the audio editor needs the screen");
+
+    if (! clip.hasType (ids::CLIP) || ! Session::isAudioTrack (clip.getParent()))
+        return Result::fail ("that isn't an audio clip");
+
+    if (audioEditor == nullptr)
+        audioEditor = std::make_unique<AudioEditor> (*this);
+
+    if (midiEditor != nullptr)
+        midiEditor->close();
+
+    audioEditor->open (clip);
+    return Result::good (L"audio editor \x00b7 drag to select (taw's keys act on it) \x00b7 esc hands the keys back \x00b7 shift+E closes it");
+}
+
+void* App::editorWindow() const
+{
+    if (midiEditor != nullptr && midiEditor->isOpen())
+        return midiEditor->nativeHandle();
+
+    return audioEditor != nullptr ? audioEditor->nativeHandle() : nullptr;
+}
+
+// Shift+E / "edit": the editor for the focused track (open: closes it), on its clip at the
+// cursor or else the nearest one. MIDI clips on instrument tracks, audio clips on audio tracks.
+Result App::toggleEditor()
 {
     if (midiEditor != nullptr && midiEditor->isOpen())
     {
@@ -2298,11 +2349,65 @@ Result App::toggleMidiEditor()
         return Result::good ("MIDI editor closed");
     }
 
-    if (session == nullptr || focused >= session->numTracks() || ! Session::isInstrumentTrack (session->track (focused)))
-        return Result::fail (L"the MIDI editor opens an instrument track's clip \x2014 focus one (\x2191\x2193), or double-click a clip");
+    if (audioEditor != nullptr && audioEditor->isOpen())
+    {
+        audioEditor->close();
+        return Result::good ("audio editor closed");
+    }
 
-    if (auto clip = midiClipAt (focused, (double) cursor, (double) cursor + 1.0); clip.isValid())
-        return openMidiEditor (clip);
+    if (session == nullptr || focused >= session->numTracks())
+        return Result::fail (L"shift+E opens the focused track in an editor \x2014 focus a track (\x2191\x2193)");
+
+    const auto track = session->track (focused);
+    const auto label = "track " + juce::String (focused + 1);
+
+    // The clip at the cursor, else the one nearest it (by its nearer edge).
+    auto nearest = [this] (const std::vector<juce::ValueTree>& list, auto startOf, auto endOf)
+    {
+        juce::ValueTree best;
+        double bestD = 0.0;
+
+        for (auto it = list.rbegin(); it != list.rend(); ++it) // later ones play on top
+        {
+            const auto s = startOf (*it), e = endOf (*it), at = (double) cursor;
+            const auto d = at < s ? s - at : at >= e ? at - e + 1.0 : -1.0;
+
+            if (! best.isValid() || d < bestD)
+                best = *it, bestD = d;
+        }
+
+        return best;
+    };
+
+    const auto spb = session->samplesPerBeat();
+
+    if (Session::isInstrumentTrack (track))
+    {
+        const auto clip = nearest (Session::midiClips (track), [spb] (const juce::ValueTree& c) { return (double) c[ids::beat] * spb; },
+                                   [spb] (const juce::ValueTree& c) { return Session::clipEnd (c) * spb; });
+
+        return clip.isValid() ? openMidiEditor (clip)
+                              : Result::fail (label + L" has no MIDI clips \x2014 record one (ctrl+space), or edit new for an empty one to draw into");
+    }
+
+    if (Session::isAudioTrack (track))
+    {
+        const auto clip = nearest (Session::clips (track), [] (const juce::ValueTree& c) { return (double) (juce::int64) c[ids::start]; },
+                                   [] (const juce::ValueTree& c) { return (double) ((juce::int64) c[ids::start] + (juce::int64) c[ids::length]); });
+
+        return clip.isValid() ? openAudioEditor (clip) : Result::fail (label + L" has no clips \x2014 record or import one");
+    }
+
+    return Result::fail (label + (Session::isSampleTrack (track) ? L" is a sample track \x2014 its hits are edited on the timeline (pat, alt+/)"
+                                                                 : L" is a bus \x2014 it has no clips"));
+}
+
+// "edit new": an empty MIDI clip on the focused instrument track to draw into: over the time
+// selection, else the bar the cursor is in.
+Result App::newMidiClipForEditor()
+{
+    if (session == nullptr || focused >= session->numTracks() || ! Session::isInstrumentTrack (session->track (focused)))
+        return Result::fail (L"edit new makes a MIDI clip on an instrument track \x2014 focus one (\x2191\x2193)");
 
     if (recording)
         return Result::fail ("stop recording first");
@@ -2672,9 +2777,9 @@ void App::handleMainKey (const Key& k)
             // shift+T: the track menu (rename, input, output, effects, width, delete...).
             else if (lineEmpty && k.ch == 'T' && session != nullptr)
                 say (openTrackMenu());
-            // shift+E: the MIDI editor (or closes it).
+            // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
-                say (toggleMidiEditor());
+                say (toggleEditor());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

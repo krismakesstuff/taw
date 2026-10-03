@@ -705,13 +705,14 @@ Result App::execute (const juce::String& line)
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
 
-    // edit (shift+E): the MIDI editor on the clip at the cursor; "9 edit" on track 9.
+    // edit (shift+E): the focused track's clip at the cursor (or the nearest) in its editor;
+    // "9 edit" on track 9; "edit new" an empty MIDI clip to draw into.
     if (v == "edit")
     {
         if (p.hasSelector && ! p.tracks.empty())
             focusTrack (p.tracks.front());
 
-        return toggleMidiEditor();
+        return p.args[0].equalsIgnoreCase ("new") ? newMidiClipForEditor() : toggleEditor();
     }
 
     if (v == "ed")

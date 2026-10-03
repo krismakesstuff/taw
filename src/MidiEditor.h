@@ -10,8 +10,10 @@ class App;
 struct EditorColours
 {
     juce::Colour bg, panel, text, dim, faint, bar, whiteKey, blackKey, blackRow, note, noteSelected, accent, play, rec, outside;
+    juce::Colour wave, clip, selection; // the audio editor's waveforms, clips and the time selection
 };
 void setEditorColours (const EditorColours&);
+const EditorColours& editorColours();
 
 // The MIDI editor: one MIDI clip in a window over the terminal, for the mouse. Double-click a
 // clip (or shift+E, or "edit") to open it. Notes move, resize, draw (double-click) and delete;

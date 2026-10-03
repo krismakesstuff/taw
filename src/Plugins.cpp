@@ -127,6 +127,17 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
         }
     }
 
+    // JUCE disables a window's title buttons while it isn't the active window, and these windows
+    // almost never are (the keyboard goes back to taw), so keep them working regardless.
+    void activeWindowStatusChanged() override
+    {
+        DocumentWindow::activeWindowStatusChanged();
+
+        for (auto* b : { getMinimiseButton(), getCloseButton() })
+            if (b != nullptr)
+                b->setEnabled (true);
+    }
+
     // The title bar double-clicked: the owner gives this window the keyboard to keep (or takes
     // it back). Not maximise: plugin windows are their own size.
     void mouseDoubleClick (const juce::MouseEvent& e) override
@@ -233,6 +244,7 @@ void PluginSlot::markKeyboard (bool held)
 
 juce::Image PluginSlot::editorSnapshot()
 {
+
     return window != nullptr ? window->createComponentSnapshot (window->getLocalBounds()) : juce::Image();
 }
 

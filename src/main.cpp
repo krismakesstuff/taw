@@ -229,7 +229,8 @@ int main (int argc, char** argv)
                 if (! info.name.containsIgnoreCase (outName))
                     others.add (info.name);
 
-        std::array<taw::MidiQueue, taw::MidiInputs::maxPorts> queues;
+        auto queuesOwned = std::make_unique<std::array<taw::MidiQueue, taw::MidiInputs::maxPorts>>(); // big: off main's stack
+        auto& queues = *queuesOwned;
         taw::MidiInputs inputs (queues, others);
         std::unique_ptr<juce::MidiOutput> out;
 
@@ -318,7 +319,8 @@ int main (int argc, char** argv)
             return 1;
         }
 
-        taw::App app (dir, {}, {}, {});
+        auto appOwned = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String()); // see the note at the interactive App
+        auto& app = *appOwned;
 
         if (app.session == nullptr)
         {
@@ -476,7 +478,8 @@ int main (int argc, char** argv)
         // From a bar line, and from mid-beat: 4 clicks either way.
         for (const juce::int64 from : { (juce::int64) 96000, (juce::int64) 100000 })
         {
-            taw::AudioEngine engine;
+            auto engineOwned = std::make_unique<taw::AudioEngine>();
+            auto& engine = *engineOwned;
             engine.runWithoutDevice (rate, block);
 
             const auto file = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-counttest.wav");
@@ -564,7 +567,8 @@ int main (int argc, char** argv)
 
         for (const bool monitoring : { true, false })
         {
-            taw::AudioEngine engine;
+            auto engineOwned = std::make_unique<taw::AudioEngine>();
+            auto& engine = *engineOwned;
             engine.runWithoutDevice (rate, block, 1);
 
             auto g = std::make_unique<taw::Graph>();
@@ -970,7 +974,8 @@ int main (int argc, char** argv)
     // Headless check of the record path: open a device, record input 1 for two seconds.
     if (const auto st = args.indexOf ("--selftest"); st >= 0)
     {
-        taw::AudioEngine engine;
+        auto engineOwned = std::make_unique<taw::AudioEngine>();
+        auto& engine = *engineOwned;
         auto& dm = engine.devices();
         dm.initialise (taw::AudioEngine::maxInputs, 2, nullptr, false);
 #if JUCE_WINDOWS
@@ -1105,7 +1110,11 @@ int main (int argc, char** argv)
     int status = 0;
 
     {
-        taw::App app (openDir, newParent, newName, templateName);
+        // On the heap: App and AudioEngine are big (their queues), and main's stack frame holds
+        // every test's locals at once. Plugins load on this thread and some need a lot of stack;
+        // with these on it they overflowed it.
+        auto appOwned = std::make_unique<taw::App> (openDir, newParent, newName, templateName);
+        auto& app = *appOwned;
 
         if (unclean.found)
             app.reportUncleanExit (unclean.crashLog, reopen);

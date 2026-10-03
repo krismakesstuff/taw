@@ -257,7 +257,7 @@ private:
         const auto bpb = (double) juce::jmax (1, app.session->beatsPerBar());
         const auto first = posAt (0.0f), last = posAt ((float) getWidth());
 
-        // Ruler and the grid under the clips: bars, and beats when there's room.
+        // Ruler: bar numbers, and beat ticks when there's room.
         g.setColour (c.panel);
         g.fillRect (0, toolbarH, getWidth(), rulerH);
         const auto pxPerBeat = spb() / spp;
@@ -274,17 +274,44 @@ private:
                 g.setColour (c.text);
                 g.fillRect (x, (float) toolbarH, 1.0f, 12.0f);
                 g.drawText (juce::String ((int) bar + 1), (int) x + 3, toolbarH, 50, 14, juce::Justification::centredLeft, false);
-                g.setColour (c.bar);
-                g.fillRect (x, (float) lane.getY(), 1.0f, (float) lane.getHeight());
             }
             else if (! barLine && pxPerBeat >= 10.0)
             {
                 g.setColour (c.dim);
                 g.fillRect (x, (float) toolbarH + 8.0f, 1.0f, 5.0f);
-                g.setColour (c.faint);
-                g.fillRect (x, (float) lane.getY(), 1.0f, (float) lane.getHeight());
             }
         }
+
+        // The grid, down a strip of the lane: the snap grid faintly (when its lines are far enough
+        // apart), beats, then bars. Drawn in the gaps and again over each clip's background, under
+        // its waveform, so it shows through the audio.
+        const auto snapStep = gridSamples();
+
+        auto drawGrid = [&] (juce::Rectangle<float> strip)
+        {
+            if (snapStep > 0.0 && snapStep / spp >= 8.0 && snapStep < spb())
+                for (auto s = std::ceil (posAt (strip.getX()) / snapStep) * snapStep; s <= posAt (strip.getRight()); s += snapStep)
+                {
+                    g.setColour (c.faint.withAlpha (0.5f));
+                    g.fillRect (xOf (s), strip.getY(), 1.0f, strip.getHeight());
+                }
+
+            for (auto b = std::floor (posAt (strip.getX()) / spb()); b * spb() <= posAt (strip.getRight()); b += 1.0)
+            {
+                const bool barLine = std::fmod (b, bpb) == 0.0;
+
+                if (barLine && std::fmod (std::floor (b / bpb), everyBars) == 0.0)
+                    g.setColour (c.bar);
+                else if (! barLine && pxPerBeat >= 10.0)
+                    g.setColour (c.faint);
+                else
+                    continue;
+
+                g.fillRect (xOf (b * spb()), strip.getY(), 1.0f, strip.getHeight());
+            }
+        };
+
+        drawGrid (lane.toFloat());
 
         // Zoomed right in: every sample gets a tick on the ruler.
         if (spp < 0.25)
@@ -310,6 +337,7 @@ private:
             const juce::Rectangle<float> body (x0, (float) lane.getY(), x1 - x0, (float) lane.getHeight());
             g.setColour (c.clip);
             g.fillRect (body);
+            drawGrid (body.withTrimmedTop ((float) nameH));
             g.setColour (focus ? c.accent.withAlpha (0.55f) : c.faint);
             g.fillRect (body.withHeight ((float) nameH));
             g.setColour (focus ? c.bg : c.text);

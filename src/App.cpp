@@ -87,6 +87,7 @@ void App::releaseSession()
         hosted.clear();
         heldNotes.clear();
         midiRecordTracks.clear();
+        midiPassClips.clear();
         fillView = pluginPickerVisible = false;
 
         session->tree().removeListener (this);
@@ -757,10 +758,14 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
 
     midiRecordTracks.clear();
     heldNotes.clear();
+    midiPassClips.clear();
 
     for (auto i : armedTracks)
         if (Session::isInstrumentTrack (session->track (i)))
             midiRecordTracks.push_back (i);
+
+    // A punch starts where you are hearing; from a stop, at the cursor (after any count-in).
+    midiPassStart = juce::jmax (0.0, (double) (engine.isRolling() ? heardPosition (engine.playhead()) : cursor) / session->samplesPerBeat());
 
     recording = true;
     rebuildGraph();
@@ -1054,6 +1059,17 @@ Result App::discardTake (int trackIndex)
 
     if (Session::isSampleTrack (t))
         return Result::fail ("track " + juce::String (trackIndex + 1) + L" is a sample track \x00b7 pat or enter edit its hits");
+
+    if (Session::isInstrumentTrack (t))
+    {
+        const auto midi = Session::lastMidiClip (t);
+
+        if (! midi.isValid())
+            return Result::fail ("track " + juce::String (trackIndex + 1) + " has no clips");
+
+        t.removeChild (midi, um());
+        return Result::good ("dropped the latest clip on track " + juce::String (trackIndex + 1) + L" \x00b7 ctrl+z brings it back");
+    }
 
     auto clip = Session::lastClip (t);
 
@@ -1889,10 +1905,32 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
     {
         auto track = session->track (t);
 
-        // Hits on sample tracks, note starts on instrument tracks (a note keeps its length).
-        const auto items = Session::isSampleTrack (track) ? Session::hits (track) : Session::notes (track);
+        // Note starts on instrument tracks (a note keeps its length), in the clips they play in;
+        // one snapped back past its clip's start takes the clip with it.
+        for (const auto& p : Session::placedNotes (track))
+        {
+            const auto pos = (juce::int64) std::llround (p.start * spb);
 
-        for (auto h : items)
+            if (ranged && ! range.contains (pos))
+                continue;
+
+            const auto target = std::round (p.start / step) * step;
+
+            if (std::abs (target - p.start) > 1e-9)
+            {
+                const auto to = p.start + (target - p.start) * strength;
+                Session::growMidiClip (p.clip, to, to, um());
+                auto note = p.node;
+                note.setProperty (ids::beat, (double) note[ids::beat] + (to - p.start), um());
+                ++moved;
+            }
+        }
+
+        // Hits on sample tracks.
+        if (! Session::isSampleTrack (track))
+            continue;
+
+        for (auto h : Session::hits (track))
         {
             const auto beat = (double) h[ids::beat];
             const auto pos = (juce::int64) std::llround (beat * spb);
@@ -2126,10 +2164,17 @@ Result App::moveToNextClipEdge (bool extendSelection)
             for (const auto& h : Session::hits (track))
                 consider (std::llround ((double) h[ids::beat] * session->samplesPerBeat()));
 
-        for (const auto& n : Session::notes (track))
+        // MIDI clip edges, and the notes in them.
+        for (const auto& c : Session::midiClips (track))
         {
-            consider (std::llround ((double) n[ids::beat] * session->samplesPerBeat()));
-            consider (std::llround (((double) n[ids::beat] + (double) n[ids::len]) * session->samplesPerBeat()));
+            consider (std::llround ((double) c[ids::beat] * session->samplesPerBeat()));
+            consider (std::llround (Session::clipEnd (c) * session->samplesPerBeat()));
+        }
+
+        for (const auto& p : Session::placedNotes (track))
+        {
+            consider (std::llround (p.start * session->samplesPerBeat()));
+            consider (std::llround (p.end * session->samplesPerBeat()));
         }
     }
 

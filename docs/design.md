@@ -285,9 +285,18 @@ A VST3 instrument per track, played from a MIDI controller and recorded as notes
 
 ```
 TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
-  NOTE { beat, len, pitch, vel, ch? }   # beats, so parts follow the tempo; vel 1-127; ch 1-16 (absent = 1)
-  CC   { beat, num, val, ch? }          # num 0-127 controllers, 128 pitch bend (0-16383), 129 pressure
+  MIDICLIP { beat, len, offset }          # on the timeline at beat, for len beats, showing its content from offset
+    NOTE { beat, len, pitch, vel, ch? }   # content beats, so parts follow the tempo; vel 1-127; ch 1-16 (absent = 1)
+    CC   { beat, num, val, ch? }          # num 0-127 controllers, 128 pitch bend (0-16383), 129 pressure
 ```
+
+- **MIDI clips.** Notes live in clips, as audio lives in clips. A clip is a window onto its
+  content: `[offset, offset + len)`, placed at `beat`, so trimming hides notes without losing
+  them. A note belongs to the clip it starts in and is cut off at the clip's end. Overlapping
+  MIDI clips both play (recording over a part adds to it). Each recording pass makes a new clip,
+  from where it began to where it stopped (a pass with nothing played makes none); its content
+  beats are the timeline's. Version 2 sessions (notes on the track) get one clip per track around
+  their notes, out to whole bars.
 
 - `inst` opens the instrument picker (type to filter, enter loads); `inst vital` loads the best
   name match. Either makes a new instrument track, armed, so the controller plays it at once.
@@ -330,8 +339,11 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   tracks. On an instrument track that's a piano roll: one pitch per row, named on the left,
   black keys shaded. In the normal view a lane spans the pitches in use, one per half row.
   Audio tracks get the same zoom later.
-- `snap` quantizes note starts on instrument tracks as it does hits; Tab stops at note starts
-  and ends; copy, cut, paste, duplicate and delete take notes that start in the range.
+- `snap` quantizes note starts on instrument tracks as it does hits (a note snapped back past its
+  clip's start takes the clip with it); Tab stops at clip edges and note starts and ends; copy,
+  cut, paste, duplicate and delete work on MIDI clips as on audio clips: trimmed to the range,
+  split, removed. A copy keeps only the notes that start in what was copied. `x` drops the
+  latest clip.
 - **In process, for now.** `PluginSlot` is the only way taw talks to a plugin (prepare,
   render, state, editor), so an out-of-process proxy can replace it. Until then a crashing
   plugin takes taw down; the crash handler saves the session first.
@@ -452,7 +464,7 @@ TRACK { …, pan?, channels? }   # pan -1..1 (absent = centre); channels 1 or 2 
 
 Select a range with Shift+arrows (time) and Shift+↑↓ (tracks); with no track selection the
 focused track is used. What moves depends on the track: clips on audio tracks, hits on sample
-tracks.
+tracks, MIDI clips on instrument tracks.
 
 | Key | Command | Does |
 |---|---|---|

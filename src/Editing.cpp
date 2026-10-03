@@ -44,13 +44,12 @@ Clipboard App::gather (const std::vector<int>& tracks, juce::Range<juce::int64> 
 
         if (lane.instrument)
         {
-            // Notes that start in the range (whole, even if they run past it), and controllers.
-            for (const auto& n : track)
-                if ((n.hasType (ids::NOTE) || n.hasType (ids::CC)) && hitInRange (n[ids::beat], from, to))
+            // MIDI clips trimmed to the range, with the notes that start in what's left.
+            for (const auto& clip : Session::midiClips (track))
+                if (auto piece = Session::trimmedMidiClip (clip, from, to); piece.isValid())
                 {
-                    auto copy = n.createCopy();
-                    copy.setProperty (ids::beat, (double) n[ids::beat] - from, nullptr);
-                    lane.items.push_back (copy);
+                    piece.setProperty (ids::beat, (double) piece[ids::beat] - from, nullptr);
+                    lane.items.push_back (piece);
                 }
         }
         else if (lane.sample)
@@ -88,14 +87,38 @@ int App::clearRange (int trackIndex, juce::Range<juce::int64> range)
 
     if (Session::isInstrumentTrack (track))
     {
-        const auto from = snapBeats (range.getStart()), to = snapBeats (range.getEnd());
+        // As with audio clips: trimmed, split or removed. Trimming only hides notes; the tail of
+        // a split keeps just the notes that start in it.
+        const auto a = snapBeats (range.getStart()), b = snapBeats (range.getEnd());
+        const auto slack = 0.5 / session->samplesPerBeat();
 
-        for (int i = track.getNumChildren(); --i >= 0;)
-            if (const auto n = track.getChild (i); (n.hasType (ids::NOTE) || n.hasType (ids::CC)) && hitInRange (n[ids::beat], from, to))
+        for (auto clip : Session::midiClips (track))
+        {
+            const double s = clip[ids::beat], e = Session::clipEnd (clip), offset = clip[ids::offset];
+
+            if (s >= b - slack || e <= a + slack)
+                continue;
+
+            ++changed;
+
+            if (s >= a - slack && e <= b + slack)
             {
-                track.removeChild (n, um());
-                ++changed;
+                track.removeChild (clip, um());
             }
+            else if (s < a && e > b)
+            {
+                track.addChild (Session::trimmedMidiClip (clip, b, e), track.indexOf (clip) + 1, um());
+                clip.setProperty (ids::len, a - s, um());
+            }
+            else if (s < a)
+            {
+                clip.setProperty (ids::len, a - s, um());
+            }
+            else
+            {
+                clip.setProperty (ids::beat, b, um()).setProperty (ids::offset, offset + (b - s), um()).setProperty (ids::len, e - b, um());
+            }
+        }
 
         return changed;
     }
@@ -189,7 +212,7 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
         {
             if (lane.instrument)
             {
-                // Notes add to what's there, like playing them in again.
+                // MIDI clips add to what's there (overlapping ones both play).
                 auto copy = item.createCopy();
                 copy.setProperty (ids::beat, atBeats + (double) item[ids::beat], nullptr);
                 track.appendChild (copy, um());

@@ -14,8 +14,9 @@ TAW_ID (TAKE) // version 1 only; loaded sessions are migrated to CLIP
 TAW_ID (CLIP)
 TAW_ID (HIT) // sample tracks: one trigger of the track's sample
 TAW_ID (MARKER)
-TAW_ID (NOTE) // instrument tracks: one MIDI note
-TAW_ID (CC)   // instrument tracks: a controller, pitch bend or pressure change
+TAW_ID (MIDICLIP) // instrument tracks: a window onto the NOTEs and CCs inside it
+TAW_ID (NOTE) // in a MIDICLIP: one MIDI note (version 2 kept them on the track)
+TAW_ID (CC)   // in a MIDICLIP: a controller, pitch bend or pressure change
 TAW_ID (SEND) // a track's send to a bus: one of five slots, a to e
 TAW_ID (INSERT) // an effect plugin in one of a track's five insert slots, a to e
 
@@ -56,9 +57,9 @@ TAW_ID (pluginState)  // ...and the file its state is kept in, relative to the s
 TAW_ID (sample)       // sample track: the file it plays
 TAW_ID (sampleOffset) // ...from here in the file
 TAW_ID (sampleLength) // ...for this long (0 = to the end)
-TAW_ID (beat)         // HIT: position in beats from the session start (follows tempo)
+TAW_ID (beat)         // HIT, MIDICLIP: position in beats from the session start (follows tempo); NOTE, CC: in their clip's content
 TAW_ID (vel)          // HIT: velocity 0..1; NOTE: velocity 1..127
-TAW_ID (len)          // NOTE: length in beats
+TAW_ID (len)          // NOTE, MIDICLIP: length in beats
 TAW_ID (pitch)        // NOTE: MIDI note number (60 = C4)
 TAW_ID (ch)           // NOTE, CC: MIDI channel 1-16 (absent = 1)
 TAW_ID (num)          // CC: controller 0-127, 128 = pitch bend, 129 = channel pressure
@@ -75,7 +76,7 @@ TAW_ID (channels) // TRACK: 1 (mono) or 2 (stereo); absent = from what it plays 
 
 TAW_ID (file)
 TAW_ID (start)  // CLIP: timeline position, samples
-TAW_ID (offset) // CLIP: where in the file it starts playing, samples
+TAW_ID (offset) // CLIP: where in the file it starts playing, samples; MIDICLIP: where in its content, beats
 TAW_ID (length)
 TAW_ID (position)
 

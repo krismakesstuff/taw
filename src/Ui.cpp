@@ -833,14 +833,19 @@ void Ui::drawTimeline (App& app)
         std::vector<LaneNote> notes;
         const auto spb = s.samplesPerBeat();
 
-        for (const auto& node : Session::notes (t))
-        {
-            const double b = node[ids::beat], len = node[ids::len];
-            notes.push_back ({ b * spb, (b + len) * spb, (int) node[ids::pitch], false });
-        }
+        for (const auto& p : Session::placedNotes (t))
+            notes.push_back ({ p.start * spb, p.end * spb, (int) p.node[ids::pitch], false });
+
+        // The clips, in samples. The one a pass is recording into reaches to the playhead.
+        const bool recordingHere = std::find (app.midiRecordTracks.begin(), app.midiRecordTracks.end(), i) != app.midiRecordTracks.end();
+        const auto passClip = recordingHere && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
+        std::vector<std::pair<double, double>> clipSpans;
+
+        for (const auto& c : Session::midiClips (t))
+            clipSpans.push_back ({ (double) c[ids::beat] * spb, std::max (Session::clipEnd (c) * spb, c == passClip ? (double) playhead : 0.0) });
 
         // Keys still down while recording reach to the playhead.
-        if (std::find (app.midiRecordTracks.begin(), app.midiRecordTracks.end(), i) != app.midiRecordTracks.end())
+        if (recordingHere)
             for (const auto& held : app.heldNotes)
                 notes.push_back ({ held.second.beat * spb, (double) playhead + 1.0, held.second.pitch, true });
 
@@ -907,11 +912,34 @@ void Ui::drawTimeline (App& app)
             const bool playheadHere = rolling && c == playCol;
             const bool cursorHere = c == cursorCol && ! playheadHere;
 
+            // The topmost clip here, shaded like audio clips (neighbours alternate), with an
+            // edge on its first and last column when it's wide enough to have one.
+            int inClip = -1;
+            wchar_t edgeCh = 0;
+
+            for (int k = (int) clipSpans.size(); --k >= 0;)
+                if (const auto [start, end] = clipSpans[(size_t) k]; t1 > start && t0 < end)
+                {
+                    inClip = k;
+
+                    if (end - start >= 3.0 * spc)
+                    {
+                        if (start >= t0 && start < t1)
+                            edgeCh = edges ? L'\x258f' : L'\x258c';
+                        else if (end > t0 && end <= t1)
+                            edgeCh = edges ? L'\x2595' : L'\x2590';
+                    }
+                    break;
+                }
+
             for (int r = 0; r < rowsPerTrack; ++r)
             {
                 const int up = cover[(size_t) (r * 2)], down = cover[(size_t) (r * 2 + 1)];
                 const int pitch = top - r;
-                int cellBg = selected ? colour::selBg : (pianoRoll && isBlackKey (pitch) ? colour::blackKeyBg : laneBg);
+                const int clipBg = inClip < 0 ? -1 : inClip % 2 == 0 ? colour::clipBg : colour::clipAltBg;
+                int cellBg = selected ? (inClip >= 0 ? colour::selClipBg : colour::selBg)
+                             : inClip >= 0 ? clipBg
+                             : pianoRoll && isBlackKey (pitch) ? colour::blackKeyBg : laneBg;
                 wchar_t ch = line > 0 ? gridMark : L' ';
                 int fg = line == 2 ? colour::gridBar : colour::faint;
 
@@ -920,9 +948,17 @@ void Ui::drawTimeline (App& app)
                     ch = up > 0 && down > 0 ? L'\x2588' : up > 0 ? L'\x2580' : L'\x2584';
                     fg = std::max (up, down) == 2 ? colour::liveWave : colour::note;
                 }
+                else if (edgeCh != 0)
+                {
+                    ch = edgeCh, fg = colour::note;
+                }
+                else if (inClip >= 0 && (r == 0 || r == rowsPerTrack - 1))
+                {
+                    ch = L' ', fg = colour::note; // the outline is drawn in the cell's colour: no grid marks on it
+                }
 
                 // As in audio lanes: a colour behind the notes, a line where there are none.
-                const bool empty = up == 0 && down == 0;
+                const bool empty = up == 0 && down == 0 && edgeCh == 0;
 
                 if (playheadHere)
                 {
@@ -942,6 +978,14 @@ void Ui::drawTimeline (App& app)
                     ch = cursorMark, fg = colour::dim;
 
                 canvas.put (laneX + c, y + r, ch, fg, cellBg);
+
+                // A clip's outline: its top along the first row, its bottom along the last.
+                if (inClip >= 0)
+                {
+                    auto& cell = canvas.at (laneX + c, y + r);
+                    cell.over = r == 0;
+                    cell.under = r == rowsPerTrack - 1;
+                }
             }
         }
     };

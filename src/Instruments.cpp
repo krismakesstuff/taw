@@ -22,25 +22,25 @@ MidiMsg controlMessage (int num, int val, int channel)
 int channelOf (const juce::ValueTree& node) { return juce::jlimit (1, 16, (int) node.getProperty (ids::ch, 1)) - 1; }
 } // namespace
 
-// Builds the track's notes and controllers in samples (the graph's copy of them).
+// Builds the track's notes and controllers in samples (the graph's copy of them): what its MIDI
+// clips show, each note cut off at its clip's end.
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat)
 {
     Sequence seq;
 
-    for (const auto& n : Session::notes (track))
+    for (const auto& p : Session::placedNotes (track))
     {
         Sequence::Note note;
-        const double beat = n[ids::beat], len = n[ids::len];
-        note.start = std::llround (beat * samplesPerBeat);
-        note.end = juce::jmax (note.start + 1, (juce::int64) std::llround ((beat + len) * samplesPerBeat));
-        note.channel = (juce::uint8) channelOf (n);
-        note.pitch = (juce::uint8) juce::jlimit (0, 127, (int) n[ids::pitch]);
-        note.vel = (juce::uint8) juce::jlimit (1, 127, (int) n[ids::vel]);
+        note.start = std::llround (p.start * samplesPerBeat);
+        note.end = juce::jmax (note.start + 1, (juce::int64) std::llround (p.end * samplesPerBeat));
+        note.channel = (juce::uint8) channelOf (p.node);
+        note.pitch = (juce::uint8) juce::jlimit (0, 127, (int) p.node[ids::pitch]);
+        note.vel = (juce::uint8) juce::jlimit (1, 127, (int) p.node[ids::vel]);
         seq.notes.push_back (note);
     }
 
-    for (const auto& c : Session::controls (track))
-        seq.controls.push_back ({ std::llround ((double) c[ids::beat] * samplesPerBeat), controlMessage (c[ids::num], c[ids::val], channelOf (c)) });
+    for (const auto& p : Session::placedControls (track))
+        seq.controls.push_back ({ std::llround (p.at * samplesPerBeat), controlMessage (p.node[ids::num], p.node[ids::val], channelOf (p.node)) });
 
     std::stable_sort (seq.notes.begin(), seq.notes.end(), [] (const auto& a, const auto& b) { return a.start < b.start; });
     std::stable_sort (seq.controls.begin(), seq.controls.end(), [] (const auto& a, const auto& b) { return a.pos < b.pos; });
@@ -617,9 +617,8 @@ void App::drainRecordedMidi()
         auto finish = [&] (const HeldNote& h, double endBeat)
         {
             beginEdit ("record notes", "midi");
-
-            for (auto t : midiRecordTracks)
-                session->track (t).appendChild (Session::makeNote (h.beat, endBeat - h.played, h.pitch, h.vel, h.channel + 1), um());
+            const auto len = endBeat - h.played;
+            recordMidiNode (Session::makeNote (h.beat, len, h.pitch, h.vel, h.channel + 1), h.beat, h.beat + len);
         };
 
         if (msg.isNoteOn())
@@ -658,28 +657,56 @@ void App::drainRecordedMidi()
                 continue;
 
             beginEdit ("record notes", "midi");
-
-            for (auto t : midiRecordTracks)
-                session->track (t).appendChild (Session::makeControl (played, num, val, msg.channel() + 1), um());
+            recordMidiNode (Session::makeControl (played, num, val, msg.channel() + 1), played, played);
         }
     }
 }
 
-// Keys still down when recording stops end there.
+// Each pass records into a new clip on each track, made with its first note or controller: from
+// where the pass began (or earlier, for a note quantized back past it), its content beats the
+// timeline's, so everything lands where it was played. Nothing played, no clip.
+void App::recordMidiNode (juce::ValueTree node, double from, double to)
+{
+    for (auto t : midiRecordTracks)
+    {
+        auto& clip = midiPassClips[t];
+
+        if (! clip.isValid())
+        {
+            const auto start = std::min (midiPassStart, from);
+            clip = Session::makeMidiClip (start, start, std::max (to, start) - start);
+            session->track (t).appendChild (clip, um());
+        }
+
+        Session::growMidiClip (clip, from, to, um());
+        clip.appendChild (node.createCopy(), um());
+    }
+}
+
+// Keys still down when recording stops end there, and so do the pass's clips.
 void App::finishHeldNotes (juce::int64 at)
 {
     drainRecordedMidi();
 
-    if (session != nullptr && ! heldNotes.empty())
+    if (session != nullptr)
     {
         const auto endBeat = juce::jmax (0.0, (double) heardPosition (at) / session->samplesPerBeat());
-        beginEdit ("record notes", "midi");
 
-        for (const auto& [key, h] : heldNotes)
-            for (auto t : midiRecordTracks)
-                session->track (t).appendChild (Session::makeNote (h.beat, endBeat - h.played, h.pitch, h.vel, h.channel + 1), um());
+        if (! heldNotes.empty())
+        {
+            beginEdit ("record notes", "midi");
+
+            for (const auto& [key, h] : heldNotes)
+                recordMidiNode (Session::makeNote (h.beat, endBeat - h.played, h.pitch, h.vel, h.channel + 1), h.beat, h.beat + endBeat - h.played);
+        }
+
+        // Out to where you stopped. Not its own undo step: undoing the pass takes the clip.
+        for (auto& [t, clip] : midiPassClips)
+            if (clip.getParent().isValid())
+                Session::growMidiClip (clip, (double) clip[ids::beat], endBeat, nullptr);
     }
 
     heldNotes.clear();
+    midiPassClips.clear();
 }
 } // namespace taw

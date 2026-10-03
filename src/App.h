@@ -274,6 +274,8 @@ public:
     };
     std::map<int, HeldNote> heldNotes; // by channel * 128 + pitch
     std::vector<int> midiRecordTracks;
+    double midiPassStart = 0.0;                  // beats: where this recording pass began
+    std::map<int, juce::ValueTree> midiPassClips; // by track: the clip this pass records into (made on its first note)
 
     // "f": the focused track fills the track area (instrument tracks become a piano roll).
     bool fillView = false;
@@ -443,6 +445,7 @@ private:
     juce::int64 heardPosition (juce::int64 playhead); // minus output latency, when compensating
     void drainRecordedMidi();
     void finishHeldNotes (juce::int64 at);
+    void recordMidiNode (juce::ValueTree node, double from, double to); // into this pass's clip on each recording track
     bool handlePluginPickerKey (const Key&);
     bool handleBusPickerKey (const Key&);
     bool handleIoKey (const Key&);

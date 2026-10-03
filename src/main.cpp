@@ -397,11 +397,18 @@ int main (int argc, char** argv)
             // Sample tracks: their hits by beat. Audio tracks: each clip as start+length in samples.
             if (taw::Session::isInstrumentTrack (track))
             {
-                const auto notes = taw::Session::notes (track);
-                what << track[taw::ids::pluginName].toString() << ", " << (int) notes.size() << " notes:";
+                // Each MIDI clip as beat+length, then the notes that play (timeline beats).
+                const auto clips = taw::Session::midiClips (track);
+                const auto notes = taw::Session::placedNotes (track);
+                what << track[taw::ids::pluginName].toString() << ", " << (int) clips.size() << " clips:";
+
+                for (const auto& c : clips)
+                    what << " " << juce::String ((double) c[taw::ids::beat], 2) << "+" << juce::String ((double) c[taw::ids::len], 2);
+
+                what << ", " << (int) notes.size() << " notes:";
 
                 for (const auto& n : notes)
-                    what << " " << (int) n[taw::ids::pitch] << "@" << juce::String ((double) n[taw::ids::beat], 2) << "+" << juce::String ((double) n[taw::ids::len], 2);
+                    what << " " << (int) n.node[taw::ids::pitch] << "@" << juce::String (n.start, 2) << "+" << juce::String (n.end - n.start, 2);
             }
             else if (taw::Session::isSampleTrack (track))
             {
@@ -672,6 +679,84 @@ int main (int argc, char** argv)
             m.recorder.reset();
             m.inputOnly = true;
             check ("armed + mon, playing back (audition)", true, true);
+        }
+
+        // MIDI clips: a window onto their content, notes cut off at the clip's end.
+        {
+            using taw::Session;
+            namespace ids = taw::ids;
+            auto check = [&] (const char* what, bool ok)
+            {
+                std::printf ("%-44s %s\n", what, ok ? "ok" : "FAILED");
+                failures += ok ? 0 : 1;
+            };
+            auto approx = [] (double a, double b) { return std::abs (a - b) < 1e-9; };
+
+            juce::ValueTree track (ids::TRACK);
+            track.setProperty (ids::kind, "instrument", nullptr);
+            auto clip = Session::makeMidiClip (8.0, 2.0, 4.0); // timeline 8..12 shows content 2..6
+            clip.appendChild (Session::makeNote (1.0, 1.0, 60, 100), nullptr); // before the window: hidden
+            clip.appendChild (Session::makeNote (2.0, 1.0, 62, 100), nullptr); // on its first beat
+            clip.appendChild (Session::makeNote (5.0, 3.0, 64, 100), nullptr); // runs past the end
+            clip.appendChild (Session::makeNote (6.0, 1.0, 65, 100), nullptr); // at the end: hidden
+            clip.appendChild (Session::makeControl (3.0, 1, 64), nullptr);
+            track.appendChild (clip, nullptr);
+
+            const auto placed = Session::placedNotes (track);
+            check ("MIDI clip plays the notes in its window", placed.size() == 2);
+            check ("a note lands at clip start + (beat - offset)", placed.size() == 2 && approx (placed[0].start, 8.0));
+            check ("a note is cut off at the clip's end", placed.size() == 2 && approx (placed[1].start, 11.0) && approx (placed[1].end, 12.0));
+            check ("controllers in the window play", Session::placedControls (track).size() == 1
+                                                         && approx (Session::placedControls (track)[0].at, 9.0));
+
+            const auto seq = taw::buildSequence (track, 100.0);
+            check ("the sequence has them in samples", seq.notes.size() == 2 && seq.notes[1].start == 1100 && seq.notes[1].end == 1200);
+
+            // Trimmed to 10..20: just the note at 11, content kept where it was.
+            const auto piece = Session::trimmedMidiClip (clip, 10.0, 20.0);
+            check ("a trimmed copy is cut to the range", piece.isValid() && approx (piece[ids::beat], 10.0) && approx (piece[ids::len], 2.0)
+                                                             && approx (Session::contentZero (piece), Session::contentZero (clip)));
+            check ("...and keeps only the notes it shows", piece.getNumChildren() == 1);
+            check ("no copy when the range misses", ! Session::trimmedMidiClip (clip, 12.0, 14.0).isValid());
+
+            // Grown back to 7: content doesn't move, so the hidden note at content 1 shows.
+            auto grown = clip.createCopy();
+            Session::growMidiClip (grown, 7.0, 7.0, nullptr);
+            juce::ValueTree t2 (ids::TRACK);
+            t2.appendChild (grown, nullptr);
+            check ("growing a clip keeps its content in place", approx (grown[ids::beat], 7.0) && approx (grown[ids::len], 5.0)
+                                                                    && Session::placedNotes (t2).size() == 3 && approx (Session::placedNotes (t2)[0].start, 7.0));
+
+            // Version 2: notes on the track go into one clip, out to whole bars.
+            juce::ValueTree v2 (ids::SESSION);
+            v2.setProperty (ids::version, 2, nullptr).setProperty (ids::timeSigNum, 4, nullptr);
+            juce::ValueTree old (ids::TRACK);
+            old.setProperty (ids::kind, "instrument", nullptr);
+            old.appendChild (Session::makeNote (5.5, 1.0, 60, 90), nullptr);
+            old.appendChild (Session::makeNote (9.0, 3.5, 62, 90), nullptr);
+            v2.appendChild (old, nullptr);
+            const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getNonexistentChildFile ("taw-cliptest", "", false);
+            dir.createDirectory();
+            dir.getChildFile ("session.json").replaceWithText (juce::JSON::toString (taw::treeToVar (v2)));
+            juce::String error;
+
+            if (auto s = Session::load (dir, error))
+            {
+                const auto t = s->track (0);
+                const auto clips = Session::midiClips (t);
+                const auto notes = Session::placedNotes (t);
+                check ("v2 notes move into one MIDI clip", clips.size() == 1 && t.getNumChildren() == 1 && notes.size() == 2);
+                check ("...covering whole bars (beats 4 to 16)", clips.size() == 1 && approx (clips[0][ids::beat], 4.0) && approx (clips[0][ids::len], 12.0));
+                check ("...with every note where it was", notes.size() == 2 && approx (notes[0].start, 5.5) && approx (notes[1].start, 9.0)
+                                                              && approx (notes[1].end, 12.5));
+                check ("...and the session is version 3", (int) s->tree()[ids::version] == 3);
+            }
+            else
+            {
+                check ("v2 session loads", false);
+            }
+
+            dir.deleteRecursively();
         }
 
         if (args[1].isNotEmpty())

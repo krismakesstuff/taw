@@ -8,7 +8,7 @@ namespace taw
 class Session
 {
 public:
-    static constexpr int currentVersion = 2; // 2: tracks hold CLIPs instead of TAKEs
+    static constexpr int currentVersion = 3; // 2: tracks hold CLIPs instead of TAKEs; 3: notes live in MIDICLIPs
 
     // Creates <parentDir>/<name>/ with session.json and audio/, seeded from a template tree.
     static std::unique_ptr<Session> create (const juce::File& dir, const juce::ValueTree& templateTree,
@@ -68,10 +68,33 @@ public:
     static juce::ValueTree send (const juce::ValueTree& track, int slot); // invalid when the slot is empty
     static juce::ValueTree insert (const juce::ValueTree& track, int slot); // the effect in slot a-e, or invalid
     static juce::String slotName (int slot) { return juce::String::charToString ((juce::juce_wchar) ('A' + slot)); }
-    static std::vector<juce::ValueTree> notes (const juce::ValueTree& track);
-    static std::vector<juce::ValueTree> controls (const juce::ValueTree& track);
     static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);
     static juce::ValueTree makeControl (double beat, int num, int val, int channel = 1);
+
+    // MIDI clips: a window [offset, offset + len) onto the clip's content (its NOTEs and CCs,
+    // positioned in content beats), placed at beat on the timeline. Like an audio clip's window
+    // into its file, trimming hides notes without losing them. A note belongs to the clip it
+    // starts in, and is cut off at the clip's end. Overlapping MIDI clips both play.
+    static std::vector<juce::ValueTree> midiClips (const juce::ValueTree& track);
+    static juce::ValueTree makeMidiClip (double beat, double offset, double len);
+    static juce::ValueTree lastMidiClip (const juce::ValueTree& track);
+    // Where the clip's content beat 0 falls on the timeline.
+    static double contentZero (const juce::ValueTree& clip) { return (double) clip[ids::beat] - (double) clip[ids::offset]; }
+    static double clipEnd (const juce::ValueTree& clip) { return (double) clip[ids::beat] + (double) clip[ids::len]; }
+    static bool inWindow (const juce::ValueTree& clip, double contentBeat);
+    // Grows the clip (never shrinks it) to take in [from, to) on the timeline; its content stays put.
+    static void growMidiClip (juce::ValueTree clip, double from, double to, juce::UndoManager*);
+
+    // The notes and controllers that play, placed on the timeline (in beats), each with its node
+    // and the clip it's in. Notes end at their clip's end.
+    struct PlacedNote { juce::ValueTree node, clip; double start, end; };
+    struct PlacedControl { juce::ValueTree node, clip; double at; };
+    static std::vector<PlacedNote> placedNotes (const juce::ValueTree& track);
+    static std::vector<PlacedControl> placedControls (const juce::ValueTree& track);
+
+    // A copy of a clip cut down to [from, to) on the timeline, keeping only the notes and
+    // controllers inside that (the rest would be hidden for good). Invalid if they don't meet.
+    static juce::ValueTree trimmedMidiClip (const juce::ValueTree& clip, double from, double to);
 
     // The fine grid step (alt + arrows, step editing), in beats: 1 for quarters, 0.25 for 16ths.
     double fineStepBeats() const { return 4.0 / juce::jmax (1, (int) state[ids::gridDiv]); }

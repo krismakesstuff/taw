@@ -709,32 +709,113 @@ void Ui::drawTimeline (App& app)
         return db < -54.0f ? levels[0] : levels[juce::jlimit (1, 4, 1 + (int) ((db + 54.0f) / 54.0f * 4.0f))];
     };
 
-    // Taller tracks draw the waveform centred: loudness sets how far it reaches up and down from
-    // the middle, and a row it only partly reaches gets a lighter shade.
-    auto waveGlyph = [&] (float peak, int r)
+    // Loudness on the waveform's scale: 0 at -54 dB and below, 1 at full scale.
+    auto waveLevel = [] (float gain)
     {
-        if (rowsPerTrack == 1)
-            return glyphFor (peak);
-
-        const auto db = toDb (peak);
-        const auto level = db < -54.0f ? 0.0 : juce::jlimit (0.0, 1.0, (db + 54.0) / 54.0);
-        const auto reach = level * rowsPerTrack * 0.5 + 0.25;                              // rows from the middle
-        const auto from = std::max (0.0, std::abs (r + 0.5 - rowsPerTrack * 0.5) - 0.5); // where this row starts
-        const auto cover = juce::jlimit (0.0, 1.0, reach - from);
-        return level <= 0.0 ? levels[0] : levels[juce::jlimit (0, 4, (int) std::ceil (cover * 4.0 - 0.5))];
+        const auto db = toDb (gain);
+        return db < -54.0f ? 0.0 : juce::jlimit (0.0, 1.0, (db + 54.0) / 54.0);
     };
 
-    // Peak of an overview over [t0, t1) relative to a clip start.
-    auto overviewPeak = [] (const std::vector<float>& ov, juce::int64 start, double t0, double t1)
+    // Taller tracks draw the waveform centred: the highest sample sets how far it reaches up from
+    // the middle, the lowest how far down. Fonts with eighth blocks (Cascadia, the edge-glyph
+    // fonts) draw that to an eighth of a row; below the middle the fill hangs from a cell's top,
+    // which no font has, so it's the lower block for the gap drawn inverted (invert: swap the
+    // cell's colours). Consolas keeps shades: a row the wave only partly reaches is lighter.
+    static const wchar_t eighths[] = L" \x2581\x2582\x2583\x2584\x2585\x2586\x2587\x2588"; // filled from the bottom
+    struct WaveCell { wchar_t ch; bool invert; };
+
+    auto waveCell = [&] (WavePoint p, int r) -> WaveCell
     {
+        const auto peak = std::max (-p.lo, p.hi);
+
+        if (! edges)
+        {
+            if (rowsPerTrack == 1)
+                return { glyphFor (peak), false };
+
+            const auto level = waveLevel (peak);
+            const auto reach = level * rowsPerTrack * 0.5 + 0.25;                              // rows from the middle
+            const auto from = std::max (0.0, std::abs (r + 0.5 - rowsPerTrack * 0.5) - 0.5); // where this row starts
+            const auto cover = juce::jlimit (0.0, 1.0, reach - from);
+            return { level <= 0.0 ? levels[0] : levels[juce::jlimit (0, 4, (int) std::ceil (cover * 4.0 - 0.5))], false };
+        }
+
+        // One row: a bar rising from the bottom (on the same scale as below).
+        if (rowsPerTrack == 1)
+        {
+            const auto level = waveLevel (peak);
+            const auto n = level <= 0.0 ? 0 : juce::jlimit (1, 8, juce::roundToInt (level * 8.0));
+            return { n == 8 ? L' ' : eighths[n], n == 8 };
+        }
+
+        // In eighths from the track's bottom: the fill spans [bottom, top) around the middle.
+        const int middle = rowsPerTrack * 4;
+        auto reach = [&] (float v)
+        {
+            const auto level = waveLevel (v);
+            return level <= 0.0 ? 0 : std::max (1, juce::roundToInt (level * middle));
+        };
+        const int top = middle + reach (p.hi), bottom = middle - reach (-p.lo);
+        const int cellBottom = (rowsPerTrack - 1 - r) * 8;
+        const int a = juce::jlimit (0, 8, bottom - cellBottom), b = juce::jlimit (0, 8, top - cellBottom); // [a, b) of this cell
+
+        // A full cell is a space in the wave's colour: block glyphs stop a pixel short of the
+        // cell, which would leave a seam between rows.
+        if (b <= a) return { L' ', false };
+        if (a == 0 && b == 8) return { L' ', true };
+        if (a == 0) return { eighths[b], false };
+        if (b == 8) return { eighths[a], true };
+
+        // Odd heights put the middle inside a row, where a wave can touch neither edge of it:
+        // whichever glyph covers [a, b) closest, a block from an edge or a line through the middle.
+        auto miss = [&] (double lo, double hi) { return (hi - lo) + (b - a) - 2.0 * std::max (0.0, std::min (hi, (double) b) - std::max (lo, (double) a)); };
+        WaveCell best { L'\x2501', false };
+        auto bestMiss = miss (3.5, 4.5);
+
+        for (int k = 1; k <= 8; ++k)
+        {
+            if (miss (0.0, k) < bestMiss)
+                best = k == 8 ? WaveCell { L' ', true } : WaveCell { eighths[k], false }, bestMiss = miss (0.0, k);
+
+            if (k < 8 && miss (k, 8.0) < bestMiss)
+                best = { eighths[k], true }, bestMiss = miss (k, 8.0);
+        }
+
+        return best;
+    };
+
+    // The lowest and highest sample over [t0, t1) of a clip or take whose first sample sits at
+    // timeline position start: from its overview, or from the audio itself once a column is
+    // shorter than an overview block (zoomed right in).
+    auto waveRange = [] (const std::vector<WavePoint>& ov, const juce::AudioBuffer<float>* audio, juce::int64 start, double t0, double t1)
+    {
+        WavePoint p;
+
+        if (audio != nullptr && t1 - t0 < Recorder::overviewBlock)
+        {
+            const auto a = std::max (0, (int) std::floor (t0 - (double) start));
+            const auto b = std::min (audio->getNumSamples(), (int) std::ceil (t1 - (double) start));
+
+            for (int ch = 0; ch < audio->getNumChannels() && b > a; ++ch)
+            {
+                const auto r = audio->findMinMax (ch, a, b - a);
+                p.lo = std::min (p.lo, r.getStart());
+                p.hi = std::max (p.hi, r.getEnd());
+            }
+
+            return p;
+        }
+
         const auto a = std::max (0, (int) std::floor ((t0 - (double) start) / Recorder::overviewBlock));
         const auto b = std::min ((int) ov.size(), (int) std::ceil ((t1 - (double) start) / Recorder::overviewBlock));
-        float peak = 0.0f;
 
         for (int i = a; i < b; ++i)
-            peak = std::max (peak, ov[(size_t) i]);
+        {
+            p.lo = std::min (p.lo, ov[(size_t) i].lo);
+            p.hi = std::max (p.hi, ov[(size_t) i].hi);
+        }
 
-        return peak;
+        return p;
     };
 
     // Instrument tracks: each note a bar at its pitch. The lane spans the pitches in use, one per
@@ -996,8 +1077,8 @@ void Ui::drawTimeline (App& app)
                 wchar_t ch = L' ';
                 int fg = colour::wave, cellBg = laneBg;
                 bool inClip = false;
-                float wavePeak = -1.0f; // a clip or take here: drawn per row by waveGlyph
-                wchar_t edgeCh = 0;     // a clip's first or last column
+                std::optional<WavePoint> wave; // a clip or take here: drawn per row by waveCell
+                wchar_t edgeCh = 0;            // a clip's first or last column
 
                 const auto line = gridLevel (t0, t1);
 
@@ -1038,7 +1119,7 @@ void Ui::drawTimeline (App& app)
                     if (t1 > start && t0 < end)
                     {
                         const auto fileZero = lc.start - lc.offset; // timeline position of the file's first sample
-                        wavePeak = overviewPeak (lc.data->overview, fileZero, std::max (t0, start), std::min (t1, end));
+                        wave = waveRange (lc.data->overview, lc.data->audio.get(), fileZero, std::max (t0, start), std::min (t1, end));
                         fg = colour::wave;
                         cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
                         inClip = true;
@@ -1063,7 +1144,7 @@ void Ui::drawTimeline (App& app)
 
                     if (t1 > (double) liveTake->start && t0 < end)
                     {
-                        wavePeak = overviewPeak (liveTake->overview, liveTake->start, t0, t1);
+                        wave = waveRange (liveTake->overview, nullptr, liveTake->start, t0, t1);
                         edgeCh = 0;
                         inClip = false;
                         fg = colour::liveWave;
@@ -1082,10 +1163,11 @@ void Ui::drawTimeline (App& app)
 
                 for (int r = 0; r < rowsPerTrack; ++r)
                 {
-                    auto rowCh = edgeCh != 0 ? edgeCh : wavePeak >= 0.0f ? waveGlyph (wavePeak, r) : ch;
+                    const auto cell = edgeCh == 0 && wave ? waveCell (*wave, r) : WaveCell { edgeCh != 0 ? edgeCh : ch, false };
+                    auto rowCh = cell.ch;
                     auto rowFg = fg;
                     auto rowBg = cellBg;
-                    const bool empty = rowCh == L' ' || rowCh == gridMark;
+                    const bool empty = ! cell.invert && (rowCh == L' ' || rowCh == gridMark);
 
                     if (playheadHere)
                     {
@@ -1103,6 +1185,9 @@ void Ui::drawTimeline (App& app)
                     }
                     else if (cursorHere && empty)
                         rowCh = cursorMark, rowFg = colour::dim; // playing: the cursor is just a mark
+
+                    if (cell.invert)
+                        std::swap (rowFg, rowBg);
 
                     canvas.put (laneX + c, y + r, rowCh, rowFg, rowBg);
 

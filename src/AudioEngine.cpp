@@ -437,12 +437,14 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
 
             for (int i = 0; i < n; ++i)
             {
-                rec.ovPeak = juce::jmax (rec.ovPeak, std::abs (srcs[0][i]), rec.numChannels > 1 ? std::abs (srcs[1][i]) : 0.0f);
+                const auto l = srcs[0][i], r = rec.numChannels > 1 ? srcs[1][i] : l;
+                rec.ovPoint.lo = juce::jmin (rec.ovPoint.lo, l, r);
+                rec.ovPoint.hi = juce::jmax (rec.ovPoint.hi, l, r);
 
                 if (++rec.ovCount == Recorder::overviewBlock)
                 {
-                    rec.overview.push (rec.ovPeak);
-                    rec.ovPeak = 0.0f;
+                    rec.overview.push (rec.ovPoint);
+                    rec.ovPoint = {};
                     rec.ovCount = 0;
                 }
             }

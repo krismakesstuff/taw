@@ -24,6 +24,13 @@ struct AtomicPeak
     float take() noexcept { return value.exchange (0.0f, std::memory_order_relaxed); }
 };
 
+// One waveform overview point: the lowest and highest sample over a block, both channels
+// together. Both start at zero, so a block always spans the centre line.
+struct WavePoint
+{
+    float lo = 0.0f, hi = 0.0f;
+};
+
 // Writes one track's input to disk. Created on the message thread, fed by the audio thread.
 struct Recorder
 {
@@ -39,10 +46,10 @@ struct Recorder
     std::atomic<juce::int64> samplesWritten { 0 };
     std::atomic<int> droppedBlocks { 0 };
 
-    SpscQueue<float, (1 << 15)> overview; // audio -> message: one peak per overviewBlock samples
+    SpscQueue<WavePoint, (1 << 15)> overview; // audio -> message: one point per overviewBlock samples
 
     // audio thread only
-    float ovPeak = 0.0f;
+    WavePoint ovPoint;
     int ovCount = 0;
 };
 

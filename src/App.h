@@ -36,13 +36,13 @@ struct MeterState
 struct ClipData
 {
     std::shared_ptr<const juce::AudioBuffer<float>> audio;
-    std::vector<float> overview; // peak per Recorder::overviewBlock samples
+    std::vector<WavePoint> overview; // one per Recorder::overviewBlock samples
 };
 
 struct LiveTake
 {
     std::shared_ptr<Recorder> recorder;
-    std::vector<float> overview;
+    std::vector<WavePoint> overview;
     juce::int64 start = -1;
     bool finishing = false;
 };

@@ -792,7 +792,7 @@ void App::drainLiveOverviews()
 
     for (auto& l : live)
     {
-        for (float v; l.recorder->overview.pop (v);)
+        for (WavePoint v; l.recorder->overview.pop (v);)
             l.overview.push_back (v);
 
         if (l.start < 0)
@@ -1100,7 +1100,16 @@ const ClipData* App::audioFor (const juce::String& path)
     for (int i = 0; i < buffer->getNumSamples(); i += Recorder::overviewBlock)
     {
         const auto n = juce::jmin (Recorder::overviewBlock, buffer->getNumSamples() - i);
-        data.overview.push_back (buffer->getMagnitude (i, n));
+        WavePoint p;
+
+        for (int ch = 0; ch < channels; ++ch)
+        {
+            const auto r = buffer->findMinMax (ch, i, n);
+            p.lo = juce::jmin (p.lo, r.getStart());
+            p.hi = juce::jmax (p.hi, r.getEnd());
+        }
+
+        data.overview.push_back (p);
     }
 
     data.audio = std::move (buffer);

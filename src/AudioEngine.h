@@ -400,6 +400,9 @@ public:
     // thread passed on comes back with the playhead it arrived at.
     std::array<MidiQueue, MidiInputs::maxPorts>& midiInputQueues() { return midiIn; }
     bool popRecordedMidi (TimedMidi& m) noexcept { return recordedMidi.pop (m); }
+    // A message straight to a track's instrument, armed or not, never recorded: the MIDI editor
+    // auditioning a note. Its note-offs are the sender's to send.
+    void audition (int trackIndex, MidiMsg m) noexcept { auditions.push ({ trackIndex, m }); }
     // Bumped whenever the device (re)starts: plugins then get prepared for its rate and block.
     int deviceGeneration() const noexcept { return generation.load(); }
     double deviceSampleRate() const noexcept { return liveRate.load(); }
@@ -449,6 +452,16 @@ private:
     std::array<MidiQueue, MidiInputs::maxPorts> midiIn;
     SpscQueue<TimedMidi, 4096> recordedMidi;
     std::array<MidiMsg, 512> liveMidi; // this block's controller messages, audio thread only
+
+    struct Audition
+    {
+        int track;
+        MidiMsg msg;
+    };
+    SpscQueue<Audition, 256> auditions;
+    std::array<Audition, 64> blockAuditions;         // this block's, audio thread only
+    std::array<MidiMsg, 512 + 64> mergedMidi;          // a track's live messages plus its auditions
+    std::array<int, maxTracks> auditionsHeld {};      // notes on without their off yet, per track
     std::atomic<int> generation { 0 }, maxBlock { 8192 };
     std::atomic<double> liveRate { 0.0 };
 

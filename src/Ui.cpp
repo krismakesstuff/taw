@@ -172,8 +172,20 @@ juce::String Ui::snapshot (App& app, int w, int h)
 
     // Plugin windows' title bars in the same colours.
     if (app.theme != themeDrawn)
-        PluginSlot::setWindowColours ({ colour::xtermColour (colour::headerBg), colour::xtermColour (colour::text), colour::xtermColour (colour::dim),
-                                        colour::xtermColour (colour::accent) });
+    {
+        using colour::xtermColour;
+        PluginSlot::setWindowColours ({ xtermColour (colour::headerBg), xtermColour (colour::text), xtermColour (colour::dim),
+                                        xtermColour (colour::accent) });
+
+        // The MIDI editor too: the lane's colours, the notes', the playhead's.
+        const auto bg = xtermColour (colour::screenBg >= 0 ? colour::screenBg : -1);
+        const bool lightTheme = bg.getPerceivedBrightness() > 0.5f;
+        setEditorColours ({ bg, xtermColour (colour::headerBg), xtermColour (colour::text), xtermColour (colour::dim), xtermColour (colour::faint),
+                            xtermColour (colour::gridBar), lightTheme ? juce::Colours::white : xtermColour (252),
+                            lightTheme ? xtermColour (240) : xtermColour (236), xtermColour (colour::blackKeyBg), xtermColour (colour::note),
+                            xtermColour (colour::accent).brighter (0.2f), xtermColour (colour::accent), xtermColour (colour::play), xtermColour (colour::rec),
+                            lightTheme ? bg.darker (0.08f) : bg.darker (0.5f) });
+    }
     canvas.resize (w, h);
     drawMain (app);
 
@@ -1571,7 +1583,7 @@ void Ui::drawHelp (App&)
         { Heading, L"INSTRUMENTS", nullptr, L"ROUTING", nullptr },
         { Pair, L"inst  inst juno", L"instrument track (picker)", L"bus Verb", L"new bus track" },
         { Pair, L"shift+R  |", L"arm for MIDI / plugin window", L"2 send verb", L"send A-E (a new name: a bus)" },
-        { Pair, L"f", L"focused track fills: piano roll", L"2 send b -6", L"level; pre post off on x" },
+        { Pair, L"f  shift+E", L"piano roll / MIDI editor", L"2 send b -6", L"level; pre post off on x" },
         { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
         { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },
         { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"\\   io", L"inserts+sends column / hide" },

@@ -160,7 +160,27 @@ void Console::toggleKeyboardHold (void* window)
     }
 }
 
-void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
+void Console::focusTerminal()
+{
+    if (! opened || terminal == nullptr)
+        return;
+
+    held_by = nullptr;
+
+    // Windows only lets the app in front move the focus, and sometimes not even then; tapping
+    // Alt (nothing reads it) lifts that lock.
+    if (! SetForegroundWindow ((HWND) terminal))
+    {
+        INPUT alt[2] {};
+        alt[0].type = alt[1].type = INPUT_KEYBOARD;
+        alt[0].ki.wVk = alt[1].ki.wVk = VK_MENU;
+        alt[1].ki.dwFlags = KEYEVENTF_KEYUP;
+        SendInput (2, alt, sizeof (INPUT));
+        SetForegroundWindow ((HWND) terminal);
+    }
+}
+
+void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows, void* keeper)
 {
     const auto front = GetForegroundWindow();
 
@@ -168,12 +188,26 @@ void Console::reclaimKeyboard (const std::vector<void*>& pluginWindows)
     // always-on-top when its app goes to the background, which is what handing the keyboard
     // back looks like; put it back, without taking the keyboard. (In another app they're let go.)
     if (front != nullptr && front == (HWND) terminal)
-        for (auto* w : pluginWindows)
+    {
+        auto onTop = pluginWindows;
+
+        if (keeper != nullptr)
+            onTop.push_back (keeper);
+
+        for (auto* w : onTop)
             if ((GetWindowLongPtrW ((HWND) w, GWL_EXSTYLE) & WS_EX_TOPMOST) == 0)
             {
                 SetWindowPos ((HWND) w, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
                 logFocus ("put " + describeWindow ((HWND) w) + " back on top");
             }
+    }
+
+    // The MIDI editor keeps the keyboard while it's in front (esc in it hands it back).
+    if (keeper != nullptr && front == (HWND) keeper)
+    {
+        readySince = 0.0;
+        return;
+    }
 
     // Held by a plugin until its window closes or the terminal is clicked.
     if (held_by != nullptr)

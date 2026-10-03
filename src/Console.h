@@ -61,7 +61,10 @@ public:
     // Plugin windows (their native handles): when one of them has the keyboard and the mouse
     // is done with it, the terminal gets the keyboard back, so keys keep reaching taw while you
     // click and drag in a plugin. Windows only; elsewhere it does nothing. Call once a frame.
-    void reclaimKeyboard (const std::vector<void*>& pluginWindows);
+    // keeper: one of taw's own windows (the MIDI editor) that keeps the keyboard while it's in
+    // front; it's kept on top like the plugin windows.
+    void reclaimKeyboard (const std::vector<void*>& pluginWindows, void* keeper = nullptr);
+    void focusTerminal(); // the keyboard back to the terminal
 
     // Double-clicking a plugin window's title bar gives it the keyboard to keep (typing into the
     // plugin); this is that window until the terminal is clicked, it closes, or it's

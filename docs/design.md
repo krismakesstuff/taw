@@ -150,8 +150,40 @@ clicks by cell).
 
 - Click a track's lane: that track gets the focus and the cursor goes there (as in Pro Tools).
   Shift-click stretches the time and track selections to it.
-- Double-click a MIDI clip: selects it (tab, shift+tab does the same from the keyboard).
+- Double-click a MIDI clip: selects it and opens it in the MIDI editor (shift+E, or `edit`,
+  from the keyboard).
 - `taw --exec` takes `:click X Y` and `:dblclick X Y` (cells of its 160×44 screen).
+
+### The MIDI editor
+
+A window over the terminal, like the plugin windows, with one MIDI clip in it, for fine work
+with the mouse. Shift+E (or `edit`, `9 edit`) opens the clip at the cursor on the focused
+instrument track; where there's none, a new empty clip (over the time selection, else the bar
+the cursor is in) to draw into. Shift+E again, or its close button, closes it. Windows only so far.
+
+- **Shared with taw:** it edits the session itself, one undo step per gesture, so ctrl+z (from
+  either side) and the timeline follow. The cursor and playhead are taw's: clicking the ruler
+  moves the cursor; the view follows the playhead while playing.
+- **Notes:** drag to move (snapped to the editor's grid; alt: free), drag an edge to change the
+  length, double-click empty space to draw one (as long and loud as the last one touched),
+  right-click or Delete to remove. Drag on empty space selects (shift adds). A note moved or
+  stretched past the clip takes the clip with it. Other clips' notes on the track show as
+  outlines; double-click one to open its clip. Hidden notes (trimmed off) show faint.
+- **Ruler:** bars and beats; the track's clips as strips, this one with handles: drag its edges
+  to trim or extend it (notes are only hidden).
+- **Keyboard down the side:** click (and drag) to play notes. Clicking or dragging a note
+  plays it too, through the track's instrument, armed or not (the engine's audition queue).
+- **Lane:** velocity (drag a stalk; across several to set each; a selected one moves every
+  selected velocity together), or a controller: mod wheel, breath, volume, pan, expression,
+  sustain, pitch bend, pressure. Click to add a point, drag to move, right-click to remove; a
+  controller holds its value until the next point.
+- **Toolbar:** the grid (bar to 1/32, triplets, off; it starts at the session's `grid` step) and
+  quantize (note starts in the selection, or the whole clip, to the grid; also `q`).
+- **Keys** while it's in front: Delete, ↑↓ transpose (shift: an octave), ←→ move by the grid
+  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `+` `-`
+  zoom, Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
+  space plays, ctrl+z undoes, ctrl+s saves, shift+E closes it.
+- **Mouse wheel:** scrolls pitch; shift: time; ctrl: zoom time around the mouse; alt: row height.
 
 ### Command grammar
 
@@ -225,7 +257,7 @@ records the selected tracks, else whatever is armed.
 - Retroactive capture (`R`: keep what was just played while not recording).
 - Queries: `1 ?`, `? inputs`.
 - User keymaps and macros (config files).
-- Note editing in the piano roll; plugins out of process; insert effects; CLAP.
+- Plugins out of process; CLAP. Audio clips in a zoomed editor window, like the MIDI editor.
 - Headless engine + socket/MCP front end for agents.
 
 ## Recording

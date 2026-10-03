@@ -251,8 +251,12 @@ void App::pollPlugins()
     }
 
     // Clicking in a plugin's window takes the keyboard; it comes back to taw once the mouse is
-    // done, unless its title was double-clicked (then it keeps it, and says so).
-    console.reclaimKeyboard (windows);
+    // done, unless its title was double-clicked (then it keeps it, and says so). The MIDI
+    // editor keeps it while it's in front.
+    if (midiEditor != nullptr)
+        midiEditor->poll();
+
+    console.reclaimKeyboard (windows, midiEditor != nullptr ? midiEditor->nativeHandle() : nullptr);
 
     for (auto& in : hosted)
         if (in.slot != nullptr)

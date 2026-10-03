@@ -295,7 +295,8 @@ Console::~Console()
     tcsetattr (STDIN_FILENO, TCSAFLUSH, &oldMode);
 }
 
-void Console::reclaimKeyboard (const std::vector<void*>&) {}
+void Console::reclaimKeyboard (const std::vector<void*>&, void*) {}
+void Console::focusTerminal() {}
 void* Console::keyboardHeldBy() const { return nullptr; }
 void Console::toggleKeyboardHold (void*) {}
 

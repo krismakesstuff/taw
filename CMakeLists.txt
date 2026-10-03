@@ -37,6 +37,7 @@ target_sources(taw PRIVATE
     src/Inserts.cpp
     src/TrackMenu.cpp
     src/Midi.cpp
+    src/MidiEditor.cpp
     src/Plugins.cpp
     src/Ui.cpp)
 

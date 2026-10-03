@@ -9,6 +9,19 @@
 
 namespace taw
 {
+// taw's own title bar, for plugin windows and the MIDI editor: the theme's colours, a name on the
+// left, a status on the right (who has the keyboard), minimise and close. A window using
+// windowLook() says what goes in it by being one of these.
+struct TitledWindow
+{
+    virtual ~TitledWindow() = default;
+    virtual juce::String titleName() const = 0;
+    virtual juce::String titleStatus() const = 0;
+    virtual bool titleLit() const = 0; // a line of the accent along the bottom (it has the keyboard)
+};
+
+juce::LookAndFeel& windowLook();
+
 // One hosted plugin and everything the audio thread needs to drive it: its MIDI buffer, the
 // notes the timeline started (so a stop or jump can end them), the keys held from the
 // controller, and an output buffer.
@@ -50,6 +63,7 @@ public:
         juce::Colour bg, text, dim, accent;
     };
     static void setWindowColours (const WindowColours&);
+    static const WindowColours& windowColours();
 
     struct EditorWindow;
 

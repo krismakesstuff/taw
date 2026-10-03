@@ -327,6 +327,17 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
                 recordedMidi.push ({ pos, m });
         }
 
+    // Notes the MIDI editor auditions, for whichever track they're for.
+    int numAuditions = 0;
+
+    for (Audition a; numAuditions < (int) blockAuditions.size() && auditions.pop (a);)
+        if (a.track >= 0 && a.track < maxTracks)
+        {
+            blockAuditions[(size_t) numAuditions++] = a;
+            auto& held = auditionsHeld[(size_t) a.track];
+            held = a.msg.isNoteOn() ? held + 1 : a.msg.isNoteOff() ? juce::jmax (0, held - 1) : held;
+        }
+
     HostTransport transport;
     transport.bpm = current->bpm;
     transport.sampleRate = deviceRate;
@@ -396,7 +407,32 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         renderPads (tp, t, trackL, trackR, n);
 
         if (tp.plugin != nullptr)
-            tp.plugin->render (tp.sequence, transport, n, tp.midiLive ? liveMidi.data() : nullptr, numLive, trackL, trackR);
+        {
+            const MidiMsg* liveIn = tp.midiLive ? liveMidi.data() : nullptr;
+            int numLiveIn = tp.midiLive ? numLive : 0;
+
+            // Auditioned notes join the controller's. While one is down the track keeps a live
+            // input (even an empty one), or the plugin would let go of it at the next block.
+            if (numAuditions > 0 || auditionsHeld[(size_t) t] > 0)
+            {
+                int m = 0;
+
+                for (int i = 0; i < numLiveIn; ++i)
+                    mergedMidi[(size_t) m++] = liveIn[i];
+
+                for (int i = 0; i < numAuditions; ++i)
+                    if (blockAuditions[(size_t) i].track == t)
+                        mergedMidi[(size_t) m++] = blockAuditions[(size_t) i].msg;
+
+                if (m > 0 || auditionsHeld[(size_t) t] > 0)
+                {
+                    liveIn = mergedMidi.data();
+                    numLiveIn = m;
+                }
+            }
+
+            tp.plugin->render (tp.sequence, transport, n, liveIn, numLiveIn, trackL, trackR);
+        }
 
         // Effects run stopped too, so reverb tails ring out and monitored inputs go through them.
         for (const auto& fx : tp.inserts)

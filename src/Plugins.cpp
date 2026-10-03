@@ -10,7 +10,8 @@ namespace taw
 static PluginSlot::WindowColours windowColours { juce::Colour (0xff262626), juce::Colour (0xffd0d0d0), juce::Colour (0xff767676),
                                                   juce::Colour (0xffffaf00) };
 
-void PluginSlot::setWindowColours (const WindowColours& c) { windowColours = c; }
+void PluginSlot::setWindowColours (const WindowColours& c) { taw::windowColours = c; }
+const PluginSlot::WindowColours& PluginSlot::windowColours() { return taw::windowColours; }
 
 static juce::Font titleFont()
 {
@@ -76,7 +77,9 @@ static TitleLook& titleLook()
     return look;
 }
 
-struct PluginSlot::EditorWindow final : juce::DocumentWindow
+juce::LookAndFeel& windowLook() { return titleLook(); }
+
+struct PluginSlot::EditorWindow final : juce::DocumentWindow, TitledWindow
 {
     EditorWindow (const juce::String& title, juce::AudioProcessorEditor* editor)
         : DocumentWindow (title, juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton), title (title)
@@ -146,6 +149,10 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
             titleDoubleClicked = true;
     }
 
+    juce::String titleName() const override { return title; }
+    juce::String titleStatus() const override { return keyboardHeld ? juce::String (L"keys here \x00b7 double-click: back to taw") : juce::String ("keys: taw"); }
+    bool titleLit() const override { return keyboardHeld; }
+
     bool closeRequested = false, titleDoubleClicked = false;
     const juce::String title;
     bool keyboardHeld = false; // double-clicked title: it keeps the keyboard
@@ -154,12 +161,12 @@ struct PluginSlot::EditorWindow final : juce::DocumentWindow
 void TitleLook::drawDocumentWindowTitleBar (juce::DocumentWindow& window, juce::Graphics& g, int w, int h, int, int, const juce::Image*, bool)
 {
     const auto& c = windowColours;
-    const auto* editor = dynamic_cast<PluginSlot::EditorWindow*> (&window);
-    const bool held = editor != nullptr && editor->keyboardHeld;
+    const auto* titled = dynamic_cast<const TitledWindow*> (&window);
+    const bool held = titled != nullptr && titled->titleLit();
 
     g.fillAll (c.bg);
 
-    // A line of the accent along the bottom while the plugin has the keyboard.
+    // A line of the accent along the bottom while the window has the keyboard.
     if (held)
     {
         g.setColour (c.accent);
@@ -167,14 +174,14 @@ void TitleLook::drawDocumentWindowTitleBar (juce::DocumentWindow& window, juce::
     }
 
     const int buttons = h * 3, pad = 10;
-    const auto status = held ? juce::String (L"keys here \x00b7 double-click: back to taw") : juce::String ("keys: taw");
+    const auto status = titled != nullptr ? titled->titleStatus() : juce::String();
     g.setFont (titleFont());
     const int statusW = juce::GlyphArrangement::getStringWidthInt (titleFont(), status) + pad;
 
     g.setColour (held ? c.accent : c.dim);
     g.drawText (status, w - buttons - statusW, 0, statusW, h, juce::Justification::centredRight, true);
 
-    auto name = editor != nullptr ? editor->title : window.getName();
+    auto name = titled != nullptr ? titled->titleName() : window.getName();
     name = name.upToLastOccurrenceOf (juce::String (L" \x00b7 taw"), false, false);
     g.setColour (c.text);
     g.drawText (name, pad, 0, juce::jmax (0, w - buttons - statusW - pad * 2), h, juce::Justification::centredLeft, true);

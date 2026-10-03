@@ -3,6 +3,7 @@
 #include "AudioEngine.h"
 #include "Bounce.h"
 #include "Import.h"
+#include "MidiEditor.h"
 #include "Plugins.h"
 #include "Console.h"
 #include "Session.h"
@@ -538,6 +539,14 @@ private:
 
 public:
     const ClipData* audioFor (const juce::String& sessionRelativePath); // loads and caches
+    void say (const Result&); // the message line
+
+    // The MIDI editor (MidiEditor.h): a window for one MIDI clip. Keys it passes on wait here
+    // for the main loop, so a key that closes the session never runs inside the editor.
+    std::unique_ptr<MidiEditor> midiEditor;
+    std::vector<Key> deferredKeys;
+    Result openMidiEditor (const juce::ValueTree& clip);
+    Result toggleMidiEditor (); // shift+E / "edit": the clip at the cursor on the focused track
 
 private:
     void rebuildGraph();
@@ -552,7 +561,6 @@ private:
     juce::String dropBuffer;
     void updateMeters (double dt);
     void keepInView (juce::int64 pos);
-    void say (const Result&);
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { treeDirty = true; }
     void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { treeDirty = true; }

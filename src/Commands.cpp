@@ -58,7 +58,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
-                              "inst", "ed", "scan", "midi", "fill",
+                              "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
                               "pan", "mono", "stereo", "lowlat" };
 
@@ -704,6 +704,16 @@ Result App::execute (const juce::String& line)
     if (v == "inst")                return loadInstrument (p.hasSelector ? p.tracks : std::vector<int> {}, p.rest);
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
+
+    // edit (shift+E): the MIDI editor on the clip at the cursor; "9 edit" on track 9.
+    if (v == "edit")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            focusTrack (p.tracks.front());
+
+        return toggleMidiEditor();
+    }
+
     if (v == "ed")
     {
         // ed close (ctrl+\): every plugin window, wherever you are.

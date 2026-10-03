@@ -224,6 +224,9 @@ void Ui::render (App& app)
             drawClosing (app);
     }
 
+    if (app.loadingPlugin.isNotEmpty() && w >= 70 && h >= 16)
+        drawPluginLoading (app);
+
     previous.resize ((size_t) h);
     std::wstring frame;
 
@@ -1767,6 +1770,22 @@ void Ui::drawProgress (App& app, const juce::String& title, const juce::String& 
         canvas.put (x0 + 2 + i, y0 + 4, i < filled ? L'\x2588' : L'\x2591', i < filled ? colour::accent : colour::faint, bg);
 
     canvas.text (x0 + 3 + barW, y0 + 4, juce::String ((int) shown) + "/" + juce::String ((int) total), colour::dim, bg);
+}
+
+// A plugin loading: taw can't draw again until it's in (plugins load on this thread), so this
+// box is the last frame until then.
+void Ui::drawPluginLoading (App& app)
+{
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 64), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
+
+    for (int y = 0; y < 5; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const auto title = juce::String ("LOADING");
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1, app.loadingPlugin, colour::accent, bg, true, boxW - title.length() - 5);
+    canvas.text (x0 + 2, y0 + 3, app.loadingWhy, colour::dim, bg, false, boxW - 4);
 }
 
 void Ui::drawOpening (App& app)

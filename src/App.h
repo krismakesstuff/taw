@@ -493,6 +493,12 @@ public:
 
 private:
     std::shared_ptr<PluginSlot> createPlugin (const juce::ValueTree& node, double rate, int block, juce::String& problem);
+
+public:
+    // The plugin being loaded right now (the screen shows it; it's blocked until it's in).
+    juce::String loadingPlugin, loadingWhy;
+
+private:
     void savePluginStates();
     void writePluginState (Hosted&);
     void pollPlugins(); // closed editor windows, device changes, periodic state saves

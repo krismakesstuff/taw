@@ -131,7 +131,7 @@ Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc
         toggleInsertEditor (index, slot);
 
     return Result::good ("track " + juce::String (index + 1) + " insert " + Session::slotName (slot) + ": " + desc.name
-                         + L" \x00b7 enter on it opens its window \x00b7 M bypasses \x00b7 shift+\x2190\x2192 moves it");
+                         + L" \x00b7 | on it opens its window \x00b7 M bypasses \x00b7 shift+\x2190\x2192 moves it");
 }
 
 Result App::removeInsert (int index, int slot)

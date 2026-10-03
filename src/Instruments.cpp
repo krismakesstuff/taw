@@ -64,22 +64,34 @@ std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, doub
         return {};
     }
 
+    // Loading can take seconds (Roland Cloud, big sample libraries) and nothing redraws until
+    // it's done, plugins load on this thread, so put up a box saying what's loading first.
+    const auto track = node.hasType (ids::INSERT) ? node.getParent() : node;
+    loadingPlugin = desc->name;
+    loadingWhy = "for " + track[ids::name].toString()
+                 + (node.hasType (ids::INSERT) ? " (insert " + node[ids::slot].toString().toUpperCase() + ")" : juce::String())
+                 + L" \x00b7 big ones take a few seconds; taw waits";
+
+    if (console.isOpen())
+        ui.render (*this);
+
     const auto channels = node.hasType (ids::INSERT) && ! trackIsStereo (node.getParent()) ? 1 : 2;
     auto slot = plugins.create (*desc, rate, block, problem, channels);
 
-    if (slot == nullptr)
-        return {};
-
-    const auto stateFile = node[ids::pluginState].toString();
-
-    if (stateFile.isNotEmpty())
+    if (slot != nullptr)
     {
-        juce::MemoryBlock state;
+        const auto stateFile = node[ids::pluginState].toString();
 
-        if (session->folder().getChildFile (stateFile).loadFileAsData (state))
-            slot->setState (state);
+        if (stateFile.isNotEmpty())
+        {
+            juce::MemoryBlock state;
+
+            if (session->folder().getChildFile (stateFile).loadFileAsData (state))
+                slot->setState (state);
+        }
     }
 
+    loadingPlugin.clear();
     return slot;
 }
 

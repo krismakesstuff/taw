@@ -24,13 +24,19 @@ struct Key
         PageUp,
         PageDown,
         Delete,
-        F1
+        F1,
+        Mouse // a button pressed in the terminal (Windows only so far)
     };
 
     Code code = None;
     wchar_t ch = 0; // for Char
     bool shift = false, ctrl = false, alt = false;
     bool repeat = false; // the key is being held (auto-repeat); Windows only, terminals can't tell
+
+    // Mouse: the cell it was pressed in, which button, and whether it was the second click of a
+    // double-click (the first arrives as an ordinary press).
+    int x = 0, y = 0;
+    bool right = false, doubleClick = false;
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.
@@ -75,6 +81,7 @@ private:
     void* out = nullptr;
     unsigned long oldInMode = 0, oldOutMode = 0;
     std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
+    unsigned long buttonsDown = 0;    // mouse buttons down at the last event, to spot presses
     void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
     double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
     void* held_by = nullptr;          // a plugin window keeping the keyboard (keyboardHeldBy)

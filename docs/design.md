@@ -143,6 +143,16 @@ move clears the selection; `Esc` clears it too. A time selection with no track
 selection spans all tracks. Selections are the basis for editing later (cut, loop, punch
 ranges).
 
+### Mouse
+
+The keyboard does everything; the mouse is a shortcut. Windows only so far (the console reports
+clicks by cell).
+
+- Click a track's lane: that track gets the focus and the cursor goes there (as in Pro Tools).
+  Shift-click stretches the time and track selections to it.
+- Double-click a MIDI clip: selects it (tab, shift+tab does the same from the keyboard).
+- `taw --exec` takes `:click X Y` and `:dblclick X Y` (cells of its 160×44 screen).
+
 ### Command grammar
 
 ```

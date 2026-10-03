@@ -73,7 +73,30 @@ public:
     void render (App&);
     juce::String snapshot (App&, int w, int h);
 
+    // The timeline as last drawn, so a click can be turned into a track and a position.
+    struct LaneMap
+    {
+        int laneX = 0, laneW = 0, rulerY = 0, tracksTop = 0, rowsPerTrack = 1, firstTrack = 0, tracks = 0;
+        double origin = 0.0, spc = 1.0; // column 0 starts at origin; a column is spc samples
+        bool valid = false;
+
+        bool inLane (int x) const { return valid && x >= laneX && x < laneX + laneW; }
+        // The track drawn on row y, or -1.
+        int trackAt (int y) const
+        {
+            const int i = y >= tracksTop ? (y - tracksTop) / rowsPerTrack : -1;
+            return valid && i >= 0 && i < tracks ? firstTrack + i : -1;
+        }
+        // Where column x starts, in samples.
+        juce::int64 positionAt (int x) const { return (juce::int64) std::llround (origin + 0.5 + (x - laneX) * spc); }
+        // The span column x covers, in samples.
+        std::pair<double, double> span (int x) const { return { origin + (x - laneX) * spc, origin + (x - laneX + 1) * spc }; }
+    };
+    const LaneMap& lanes() const { return laneMap; }
+
 private:
+    LaneMap laneMap;
+
     void drawMain (App&);
     void drawTitle (App&);
     void drawInterface (App&);

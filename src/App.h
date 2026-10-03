@@ -430,6 +430,9 @@ public:
 private:
     void handleKey (const Key&);
     void handleMainKey (const Key&);
+    void handleMouse (const Key&);
+    // The MIDI clip on top in [from, to) samples on a track, or invalid.
+    juce::ValueTree midiClipAt (int track, double from, double to) const;
     void handleDevicePickerKey (const Key&);
     void handleTemplatePickerKey (const Key&);
 

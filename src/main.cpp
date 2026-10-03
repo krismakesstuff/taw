@@ -337,6 +337,22 @@ int main (int argc, char** argv)
                 continue;
             }
 
+            // ":click 80 12" / ":dblclick 80 12" press the mouse in that cell of the 160x44 screen.
+            if (args[i].startsWith (":click ") || args[i].startsWith (":dblclick "))
+            {
+                app.screenText (160, 44); // the layout the click lands on
+                const auto xy = juce::StringArray::fromTokens (args[i].fromFirstOccurrenceOf (" ", false, false), " ", "");
+                taw::Key k;
+                k.code = taw::Key::Mouse;
+                k.x = xy[0].getIntValue();
+                k.y = xy[1].getIntValue();
+                k.doubleClick = args[i].startsWith (":dbl");
+                app.pressKey (k);
+                std::printf ("%-29s cursor %s  track %d  selection %s\n", args[i].toRawUTF8(), app.formatBars (app.cursor).toRawUTF8(), app.focused + 1,
+                             app.hasTimeSelection() ? (app.formatBars (app.timeSelection().getStart()) + " - " + app.formatBars (app.timeSelection().getEnd())).toRawUTF8() : "none");
+                continue;
+            }
+
             // ":sleep 500" waits (timing tests: tap tempo).
             if (args[i].startsWith (":sleep "))
             {

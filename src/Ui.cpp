@@ -208,6 +208,7 @@ void Ui::render (App& app)
     }
 
     canvas.resize (w, h);
+    laneMap.valid = false; // until the timeline is drawn (a picker or a box over it: clicks pass it by)
 
     if (w < 70 || h < 16)
         canvas.text (1, 0, L"taw needs at least 70x16 \x2014 make the window bigger", colour::error);
@@ -267,6 +268,10 @@ void Ui::drawMain (App& app)
         drawTimeline (app);
 
     drawBottom (app);
+
+    // A box over the timeline takes the clicks out of it.
+    if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.midiPanelVisible || app.settingsVisible)
+        laneMap.valid = false;
 
     if (app.helpVisible)
         drawHelp (app);
@@ -700,6 +705,9 @@ void Ui::drawTimeline (App& app)
         app.trackScroll = std::max (0, focusRow);
     if (focusRow >= app.trackScroll + visible)
         app.trackScroll = focusRow - visible + 1;
+
+    // Where things were drawn, for the mouse.
+    laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, app.trackScroll, std::min (visible, n - app.trackScroll), origin, spc, true };
 
     // Loudness as shade density; these four blocks exist in every console font.
     static const wchar_t levels[] = L" \x2591\x2592\x2593\x2588";
@@ -1445,8 +1453,9 @@ void Ui::drawBottom (App& app)
                 parts.add (app.formatBars (sel.getStart()) + L" \x2192 " + app.formatBars (sel.getEnd()));
 
                 // How long: bars and beats on the grid, and always seconds.
+                // A sample of slack: a range in beats (a MIDI clip) rounds to whole samples at each end.
                 const auto beats = (double) sel.getLength() / s.samplesPerBeat();
-                const auto bars = (int) std::floor (beats / s.beatsPerBar() + 1e-6);
+                const auto bars = (int) std::floor ((beats + 1.0 / s.samplesPerBeat()) / s.beatsPerBar());
                 const auto restBeats = std::max (0.0, beats - bars * s.beatsPerBar());
                 juce::StringArray length;
 

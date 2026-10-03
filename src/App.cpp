@@ -2216,12 +2216,67 @@ void App::handleKey (const Key& k)
     if (opening != nullptr || closing != nullptr)
         return; // keys wait until the session is open (or closed)
 
+    if (k.code == Key::Mouse)
+    {
+        if (mode == Mode::Main)
+            handleMouse (k);
+
+        return;
+    }
+
     switch (mode)
     {
         case Mode::Main:           handleMainKey (k); break;
         case Mode::DevicePicker:   handleDevicePickerKey (k); break;
         case Mode::TemplatePicker: handleTemplatePickerKey (k); break;
     }
+}
+
+// The mouse in the terminal. A click on a lane focuses its track and puts the cursor there (as
+// in Pro Tools); shift-click stretches the time and track selections to it. A double-click on a
+// MIDI clip selects it (the click before it already put the cursor in it).
+void App::handleMouse (const Key& k)
+{
+    const auto& map = ui.lanes();
+    const int track = map.trackAt (k.y);
+
+    if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
+        return;
+
+    if (k.doubleClick)
+    {
+        const auto [t0, t1] = map.span (k.x);
+
+        if (const auto clip = midiClipAt (track, t0, t1); clip.isValid())
+        {
+            const auto spb = session->samplesPerBeat();
+            timeAnchor = std::llround ((double) clip[ids::beat] * spb);
+            timeHead = std::llround (Session::clipEnd (clip) * spb);
+
+            if (! engine.isRolling())
+                setCursor (timeAnchor);
+        }
+
+        return;
+    }
+
+    focusTrack (track, k.shift);
+    moveTo (juce::jmax<juce::int64> (0, map.positionAt (k.x)), k.shift);
+}
+
+juce::ValueTree App::midiClipAt (int track, double from, double to) const
+{
+    if (session == nullptr || track < 0 || track >= session->numTracks())
+        return {};
+
+    const auto clips = Session::midiClips (session->track (track));
+    const auto spb = session->samplesPerBeat();
+
+    for (auto it = clips.rbegin(); it != clips.rend(); ++it)
+        if ((double) (*it)[ids::beat] * spb < to && Session::clipEnd (*it) * spb > from)
+            return *it;
+
+    return {};
 }
 
 void App::handleMainKey (const Key& k)

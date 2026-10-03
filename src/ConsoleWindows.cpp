@@ -100,8 +100,8 @@ bool Console::open()
     safety::rememberConsole (in, oldInMode, out, oldOutMode);
 
     // No line buffering, no echo, Ctrl+C arrives as a key, and QuickEdit is off so a stray
-    // click can't freeze the screen.
-    SetConsoleMode (in, ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS);
+    // click can't freeze the screen. Clicks arrive as events (cells), for the mouse.
+    SetConsoleMode (in, ENABLE_WINDOW_INPUT | ENABLE_EXTENDED_FLAGS | ENABLE_MOUSE_INPUT);
 
     if (! SetConsoleMode (out, ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING | DISABLE_NEWLINE_AUTO_RETURN))
     {
@@ -279,6 +279,35 @@ std::vector<Key> Console::poll()
         // Keys released while the window was in the background never report it.
         if (records[i].EventType == FOCUS_EVENT)
             held.clear();
+
+        // A left or right button going down (not moves, not releases, not the wheel). The second
+        // click of a double-click comes as its own event, after the first one's press.
+        if (records[i].EventType == MOUSE_EVENT)
+        {
+            const auto& m = records[i].Event.MouseEvent;
+            const auto buttons = m.dwButtonState & (FROM_LEFT_1ST_BUTTON_PRESSED | RIGHTMOST_BUTTON_PRESSED);
+            const auto pressed = buttons & ~buttonsDown;
+            const bool twice = (m.dwEventFlags & DOUBLE_CLICK) != 0;
+
+            if (m.dwEventFlags != MOUSE_MOVED && m.dwEventFlags != MOUSE_WHEELED && m.dwEventFlags != MOUSE_HWHEELED)
+                buttonsDown = buttons;
+
+            if ((m.dwEventFlags == 0 && pressed != 0) || (twice && buttons != 0))
+            {
+                Key k;
+                k.code = Key::Mouse;
+                k.x = m.dwMousePosition.X;
+                k.y = m.dwMousePosition.Y;
+                k.right = ((twice ? buttons : pressed) & RIGHTMOST_BUTTON_PRESSED) != 0;
+                k.doubleClick = twice;
+                k.shift = (m.dwControlKeyState & SHIFT_PRESSED) != 0;
+                k.ctrl = (m.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
+                k.alt = (m.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
+                keys.push_back (k);
+            }
+
+            continue;
+        }
 
         if (records[i].EventType != KEY_EVENT)
             continue;

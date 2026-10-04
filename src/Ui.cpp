@@ -36,6 +36,15 @@ int kind (const juce::String& k)
     return lightScreen ? 242 : 250;
 }
 
+// A folder's colour in the browser (colours by folder): one of a dozen, from its name.
+int group (const juce::String& name)
+{
+    static const int dark[] = { 203, 214, 150, 74, 111, 141, 183, 137, 43, 222, 117, 210 };
+    static const int light[] = { 160, 166, 64, 31, 19, 91, 133, 94, 30, 136, 25, 125 };
+    const auto i = (size_t) ((juce::uint32) name.hashCode() % (juce::uint32) std::size (dark));
+    return lightScreen ? light[i] : dark[i];
+}
+
 // A palette index as the colour terminals show it (the xterm 256-colour table).
 juce::Colour xtermColour (int index)
 {
@@ -293,7 +302,7 @@ void Ui::render (App& app)
 void Ui::drawMain (App& app)
 {
     // The docked browser: about a third of the screen, under the mix row.
-    dockCols = layout::browserDock (app.console.width(), app.browserVisible);
+    dockCols = layout::browserDock (canvas.width() + 1, app.browserVisible); // the screen being drawn (a snapshot has no console)
     app.browserGeometry.valid = false;
 
     drawTitle (app);
@@ -1887,6 +1896,34 @@ void Ui::drawBrowser (App& app)
         return;
     }
 
+    // The selectors: what the axes show and what the colours group by. ←→ steps the focused one.
+    auto selector = [&] (int row, const juce::String& label, const juce::String& value, App::BrowserFocus which, const juce::String& note, bool off)
+    {
+        const bool focus = active && app.browserFocus == which;
+        const int y0 = top + 1 + row;
+        g.axisRow[row] = y0;
+        int sx = canvas.text (x0, y0, label.paddedRight (' ', 8), focus ? colour::accent : colour::dim, -1, focus);
+
+        if (off)
+        {
+            canvas.text (sx + 2, y0, value, colour::faint);
+            return;
+        }
+
+        sx = canvas.text (sx, y0, L"\x2039 ", focus ? colour::accent : colour::faint);
+        sx = canvas.text (sx, y0, value, colour::text, focus ? colour::selBg : -1, true);
+        sx = canvas.text (sx, y0, L" \x203a", focus ? colour::accent : colour::faint);
+        canvas.text (sx + 2, y0, note, colour::faint, -1, false, x0 + cw - sx - 2);
+    };
+
+    const auto& axisNames = App::browserAxisNames();
+    const bool similar = app.browserAxisX == 0;
+    selector (0, similar ? juce::String ("map") : juce::String (L"x \x2192"), axisNames[app.browserAxisX], App::BrowserFocus::xAxis,
+              similar ? juce::String ("close together = sounds alike") : app.browserAxisRange (false), false);
+    selector (1, L"y \x2191", similar ? juce::String (L"\x2014") : axisNames[app.browserAxisY], App::BrowserFocus::yAxis,
+              similar ? juce::String() : app.browserAxisRange (true), similar);
+    selector (2, "colours", app.browserColourByFolder ? "folder" : "kind", App::BrowserFocus::colours, {}, false);
+
     // Badges, wrapping: the chosen one filled in its colour.
     const auto kinds = app.browserKinds();
     const int chosenKind = juce::jlimit (0, (int) kinds.size() - 1, app.browserKind);
@@ -1895,7 +1932,10 @@ void Ui::drawBrowser (App& app)
     for (const auto& s : lib->samples())
         ++counts[s.kind().isEmpty() ? juce::String ("other") : s.kind()];
 
-    int y = top + 1;
+    // What a sample's colour stands for, and the colour.
+    auto groupColour = [&] (const juce::String& key) { return app.browserColourByFolder ? colour::group (key) : colour::kind (key); };
+
+    int y = top + 4;
     x = x0;
 
     for (int b = 0; b < (int) kinds.size(); ++b)
@@ -1936,6 +1976,11 @@ void Ui::drawBrowser (App& app)
     const int mapH = std::max (3, bodyRows * 11 / 20), listY = bodyY + mapH + 1, listRows = std::max (1, infoY - listY);
     canvas.fill (x0, bodyY + mapH, cw, L'\x2500', colour::faint);
 
+    // Under the map, what its axes are.
+    if (! similar)
+        canvas.text (x0 + 1, bodyY + mapH, " " + axisNames[app.browserAxisX] + L" \x2192  \x00b7  " + axisNames[app.browserAxisY] + L" \x2191 ",
+                     colour::dim, -1, false, cw - 2);
+
     // The map: half blocks, two square-ish pixels a cell (top and bottom), each in the colour
     // most of its samples have.
     const int mapX = x0, mapW = cw;
@@ -1953,7 +1998,7 @@ void Ui::drawBrowser (App& app)
     {
         const auto [dx, dy] = dotOf (i);
         const auto& s = lib->samples()[(size_t) i];
-        ++pixelKinds[(size_t) (dy * mapW + dx)][s.kind().isEmpty() ? juce::String ("other") : s.kind()];
+        ++pixelKinds[(size_t) (dy * mapW + dx)][app.browserGroup (s)];
     }
 
     auto pixelColour = [&] (int px, int py)
@@ -1963,7 +2008,7 @@ void Ui::drawBrowser (App& app)
         if (k.empty())
             return -1;
 
-        return colour::kind (std::max_element (k.begin(), k.end(), [] (const auto& a, const auto& b) { return a.second < b.second; })->first);
+        return groupColour (std::max_element (k.begin(), k.end(), [] (const auto& a, const auto& b) { return a.second < b.second; })->first);
     };
 
     for (int cy = 0; cy < mapH; ++cy)
@@ -1991,10 +2036,8 @@ void Ui::drawBrowser (App& app)
         const auto& s = lib->samples()[(size_t) i];
         const bool chosen = i == app.browserSample;
         const int rowBg = chosen ? (active && app.browserFocus == App::BrowserFocus::list ? colour::selBg : colour::focusBg) : -1;
-        const auto kindName = s.kind().isEmpty() ? juce::String ("other") : s.kind();
-
         canvas.fill (x0, listY + r, cw, L' ', -1, rowBg);
-        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', colour::kind (kindName), rowBg); // hollow: kind by sound
+        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', groupColour (app.browserGroup (s)), rowBg); // hollow: kind by sound
         const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
         canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), colour::text, rowBg, chosen, cw - 3 - len.length());
         canvas.text (x0 + cw - len.length(), listY + r, len, colour::dim, rowBg);
@@ -2008,7 +2051,7 @@ void Ui::drawBrowser (App& app)
         const auto [dx, dy] = dotOf (app.browserSample);
         const int cx = dx, cy = dy / 2;
         const bool mapFocus = active && app.browserFocus == App::BrowserFocus::map;
-        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : colour::kind (kindName), mapFocus ? colour::accent : colour::selBg, true);
+        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : groupColour (app.browserGroup (s)), mapFocus ? colour::accent : colour::selBg, true);
 
         const auto name = juce::File (s.path).getFileNameWithoutExtension();
         const int nameX = cx + 2 + name.length() < mapW ? mapX + cx + 2 : std::max (mapX, mapX + cx - 1 - name.length());

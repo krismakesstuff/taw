@@ -603,7 +603,18 @@ line, which stays full width; the session stays in view while you look. In the c
 sits on top, the list under it, the badges wrap. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
 keys into it and `Esc` gives them back (clearing the filter first). Inside:
 
-- **Badges** across the top, one per kind with its count, in the kind's colour: `←→` picks one,
+- **Selectors** at the very top, `↑` from the badges, `←→` (or a click) to change:
+  - **x** and **y**: what the map's axes show. `similar` (the default) is the sound-alike map
+    below, both axes at once, where only nearness means anything. Otherwise two measurements:
+    brightness, attack, decay, tail, length, pitch (unpitched at the bottom), loudness (RMS),
+    punch (crest), noise (flatness), low end (energy under 120 Hz). Each is spread by rank within
+    the kind shown, so the map fills evenly; the row shows the real range ("49 Hz → 335 Hz"), the
+    rule under the map names the axes. The two are never the same; `y` is skipped on the
+    sound-alike map.
+  - **colours**: by kind, or by folder (each folder one of a dozen colours from its name), on
+    the map and the list's dots alike, to see which pack a sound comes from.
+  - All three are kept in settings.json.
+- **Badges**, one per kind with its count, in the kind's colour: `←→` picks one,
   and the map and list show only that kind. `↓` goes to the map; `↑` past the top of the map or
   list comes back.
 - **The map**: each kind's samples on a map of their own (so 187 kicks spread over the whole

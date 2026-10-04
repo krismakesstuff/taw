@@ -1,8 +1,9 @@
-// The sample browser: docked under the tracks (ctrl+B shows or hides it, shift+B takes the keys
-// into it, Esc gives them back). Badges across the top pick a kind; the map shows that kind's
-// samples placed by how they sound, the list the same samples one by one, in the same colours;
-// typing filters both by name. Every move auditions, at the browser's own level. Enter gives the
-// focused sample track that sample (keeping its hits) or makes a new sample track.
+// The sample browser: docked right of the timeline (ctrl+B shows or hides it, shift+B takes the
+// keys into it, Esc gives them back). Selectors at the top choose the map's axes (the sound-alike
+// map, or two measurements) and what its colours group by; badges pick a kind; the map shows that
+// kind's samples, the list the same samples one by one, in the same colours; typing filters both
+// by name. Every move auditions, at the browser's own level. Enter gives the focused sample track
+// that sample (keeping its hits) or makes a new sample track.
 
 #include "App.h"
 
@@ -17,7 +18,156 @@ juce::String kindOf (const SampleInfo& s) { return s.kind().isEmpty() ? juce::St
 
 juce::File libraryFile() { return configFolder().getChildFile ("library.json"); }
 
+juce::String hz (double f) { return f >= 1000.0 ? juce::String (f / 1000.0, 1) + " kHz" : juce::String (juce::roundToInt (f)) + " Hz"; }
+juce::String ms (double t) { return t >= 1000.0 ? juce::String (t / 1000.0, 2) + " s" : juce::String (t, t < 10.0 ? 1 : 0) + " ms"; }
+
+// What an axis can show: a measurement and how to write it. Index 0 is the sound-alike map.
+struct Axis
+{
+    const char* name;
+    double (*value) (const SampleInfo&);
+    juce::String (*format) (double);
+};
+
+const Axis axisTable[] = {
+    { "similar", nullptr, nullptr },
+    { "brightness", [] (const SampleInfo& s) { return s.centroidHz; }, hz },
+    { "attack", [] (const SampleInfo& s) { return s.attackMs; }, ms },
+    { "decay", [] (const SampleInfo& s) { return s.decayMs; }, ms },
+    { "tail", [] (const SampleInfo& s) { return s.tailMs; }, ms },
+    { "length", [] (const SampleInfo& s) { return s.seconds * 1000.0; }, ms },
+    { "pitch", [] (const SampleInfo& s) { return s.pitchConfidence >= 0.6 ? s.pitchHz : 0.0; },
+      [] (double f) { return f <= 0.0 ? juce::String ("none") : hz (f) + " " + juce::MidiMessage::getMidiNoteName (juce::roundToInt (69.0 + 12.0 * std::log2 (f / 440.0)), true, true, 4); } },
+    { "loudness", [] (const SampleInfo& s) { return s.rmsDb; }, [] (double db) { return formatDb (db) + " dB rms"; } },
+    { "punch", [] (const SampleInfo& s) { return s.crestDb; }, [] (double db) { return juce::String (db, 1) + " dB crest"; } },
+    { "noise", [] (const SampleInfo& s) { return s.flatness; }, [] (double f) { return juce::String (f, 2) + " flat"; } },
+    { "low end", [] (const SampleInfo& s) { return 10.0 * std::log10 (std::pow (10.0, s.bandsDb[0] / 10.0) + std::pow (10.0, s.bandsDb[1] / 10.0)); },
+      [] (double db) { return juce::String (db, 1) + " dB < 120 Hz"; } },
+};
 } // namespace
+
+const juce::StringArray& App::browserAxisNames()
+{
+    static const juce::StringArray names = []
+    {
+        juce::StringArray n;
+
+        for (const auto& a : axisTable)
+            n.add (a.name);
+
+        return n;
+    }();
+    return names;
+}
+
+// Steps one axis through the list. "similar" is both axes or neither: choosing it on one sets
+// both, leaving it on one gives the other its own measurement.
+void App::setBrowserAxis (bool y, int step)
+{
+    const int n = (int) std::size (axisTable);
+    auto& axis = y ? browserAxisY : browserAxisX;
+    auto& other = y ? browserAxisX : browserAxisY;
+
+    if (axis == 0)
+    {
+        // Off the sound-alike map: brightness across, decay up, to start from.
+        browserAxisX = 1;
+        browserAxisY = 3;
+    }
+    else
+    {
+        axis = (axis + step + n) % n;
+
+        if (axis == 0)
+            other = 0;
+        else if (axis == other)
+            axis = (axis + step + n) % n == 0 ? 0 : (axis + step + n) % n; // never the same on both
+
+        if (axis == 0)
+            other = 0;
+    }
+
+    saveSettings();
+    message = browserAxisX == 0 ? juce::String (L"map: close together = sounds alike")
+                                : "map: " + juce::String (axisTable[browserAxisX].name) + L" \x2192  \x00b7  " + axisTable[browserAxisY].name + L" \x2191";
+    messageIsError = false;
+}
+
+juce::String App::browserGroup (const SampleInfo& s) const
+{
+    return browserColourByFolder ? juce::File (s.path).getParentDirectory().getFileName() : kindOf (s);
+}
+
+// Ranks (ties share one) within the kind shown, so the map fills evenly whatever the spread of
+// the values; the filter doesn't move anything.
+const App::AxisCache& App::axes() const
+{
+    auto& c = axisCache;
+
+    if (library == nullptr || browserAxisX == 0)
+        return c;
+
+    const auto& all = library->samples();
+
+    if (c.library == library.get() && c.count == all.size() && c.kind == browserKind && c.x == browserAxisX && c.y == browserAxisY)
+        return c;
+
+    c.library = library.get();
+    c.count = all.size();
+    c.kind = browserKind;
+    c.x = browserAxisX;
+    c.y = browserAxisY;
+    c.rankX.assign (all.size(), 0.5f);
+    c.rankY.assign (all.size(), 0.5f);
+
+    const auto kinds = browserKinds();
+    const auto kind = kinds[(size_t) juce::jlimit (0, (int) kinds.size() - 1, browserKind)];
+    std::vector<int> members;
+
+    for (int i = 0; i < (int) all.size(); ++i)
+        if (kind == "all" || kindOf (all[(size_t) i]) == kind)
+            members.push_back (i);
+
+    auto rank = [&] (const Axis& a, std::vector<float>& out, juce::String& range)
+    {
+        std::vector<std::pair<double, int>> v;
+
+        for (auto i : members)
+            v.push_back ({ a.value (all[(size_t) i]), i });
+
+        std::sort (v.begin(), v.end());
+
+        for (size_t lo = 0; lo < v.size();)
+        {
+            auto hi = lo;
+
+            while (hi + 1 < v.size() && v[hi + 1].first == v[lo].first)
+                ++hi;
+
+            const float r = v.size() > 1 ? (float) (lo + hi) / 2.0f / (float) (v.size() - 1) : 0.5f;
+
+            for (auto k = lo; k <= hi; ++k)
+                out[(size_t) v[k].second] = r;
+
+            lo = hi + 1;
+        }
+
+        range = v.empty() ? juce::String() : a.format (v.front().first) + L" \x2192 " + a.format (v.back().first);
+    };
+
+    rank (axisTable[browserAxisX], c.rankX, c.rangeX);
+    rank (axisTable[browserAxisY], c.rankY, c.rangeY);
+    return c;
+}
+
+juce::String App::browserAxisRange (bool y) const
+{
+    if (browserAxisX == 0)
+        return {};
+
+    const auto& c = axes();
+    return y ? c.rangeY : c.rangeX;
+}
 
 void App::loadLibrary()
 {
@@ -133,6 +283,13 @@ std::vector<int> App::browserShown() const
 std::pair<float, float> App::browserPosition (int sample) const
 {
     const auto& s = library->samples()[(size_t) sample];
+
+    if (browserAxisX != 0)
+    {
+        const auto& c = axes();
+        return { c.rankX[(size_t) sample], 1.0f - c.rankY[(size_t) sample] }; // up is more
+    }
+
     return browserKind == 0 ? std::pair { s.mapX, s.mapY } : std::pair { s.kindX, s.kindY };
 }
 
@@ -211,6 +368,21 @@ bool App::handleBrowserKey (const Key& k)
         loadLibrary();
         browserActive = true;
         const auto shown = browserShown();
+
+        // A selector row: the click steps it (‹ on the left half back, else on).
+        for (int r = 0; r < 3; ++r)
+            if (k.y == g.axisRow[r])
+            {
+                browserFocus = r == 0 ? BrowserFocus::xAxis : r == 1 ? BrowserFocus::yAxis : BrowserFocus::colours;
+                const int step = k.x < g.left + 14 ? -1 : 1;
+
+                if (r == 2)
+                    browserColourByFolder = ! browserColourByFolder, saveSettings();
+                else
+                    setBrowserAxis (r == 1, step);
+
+                return true;
+            }
 
         if (std::any_of (g.badges.begin(), g.badges.end(), [&] (const auto& b) { return b.y == k.y; }))
         {
@@ -344,7 +516,16 @@ bool App::handleBrowserKey (const Key& k)
         {
             const int step = k.code == Key::Left ? -1 : 1;
 
-            if (browserFocus == BrowserFocus::kinds)
+            if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis)
+                setBrowserAxis (browserFocus == BrowserFocus::yAxis, step);
+            else if (browserFocus == BrowserFocus::colours)
+            {
+                browserColourByFolder = ! browserColourByFolder;
+                saveSettings();
+                message = browserColourByFolder ? "colours: by folder" : "colours: by kind";
+                messageIsError = false;
+            }
+            else if (browserFocus == BrowserFocus::kinds)
             {
                 browserKind = juce::jlimit (0, (int) kinds.size() - 1, browserKind + step);
                 keepSelection();
@@ -368,10 +549,17 @@ bool App::handleBrowserKey (const Key& k)
                 return true;
             }
 
-            if (browserFocus == BrowserFocus::kinds)
+            // The selectors and the badges, top to bottom: x, y, colours, kinds, then the map.
+            if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis
+                || browserFocus == BrowserFocus::colours || browserFocus == BrowserFocus::kinds)
             {
-                if (step > 0)
-                    browserFocus = BrowserFocus::map;
+                // y is skipped while the map is the sound-alike one (it has no y of its own).
+                auto next = (int) browserFocus + step;
+
+                if (next == (int) BrowserFocus::yAxis && browserAxisX == 0)
+                    next += step;
+
+                browserFocus = (BrowserFocus) juce::jlimit ((int) BrowserFocus::xAxis, (int) BrowserFocus::map, next);
             }
             else if (browserFocus == BrowserFocus::map)
             {

@@ -18,8 +18,63 @@ juce::String kindOf (const SampleInfo& s) { return s.kind().isEmpty() ? juce::St
 
 juce::File libraryFile() { return configFolder().getChildFile ("library.json"); }
 
+// The filter: words match file or folder names; "decay<200", "bright>1k", "pitch=60" match
+// measurements (the --library names, or short ones: bright, att, dec, len, loud, low). Numbers
+// take k (thousands) and s (seconds, for times). A term still being typed ("decay<") is skipped.
+struct FilterTerm { juce::String word, measure; juce::juce_wchar op = 0; double value = 0.0; };
+
+std::vector<FilterTerm> filterTerms (const juce::String& filter)
+{
+    static const std::pair<const char*, const char*> aliases[] = { { "bright", "brightness" }, { "att", "attack" }, { "dec", "decay" },
+                                                                    { "len", "length" }, { "loud", "loudness" }, { "low", "lowend" },
+                                                                    { "crest", "punch" }, { "flat", "noise" } };
+    std::vector<FilterTerm> out;
+
+    for (const auto& token : juce::StringArray::fromTokens (filter, " ", ""))
+    {
+        FilterTerm t;
+        const int op = token.indexOfAnyOf ("<>=");
+
+        if (op > 0)
+        {
+            auto key = token.substring (0, op).toLowerCase();
+
+            for (const auto& [shortName, full] : aliases)
+                if (key == shortName)
+                    key = full;
+
+            if (Library::measureNames().contains (key))
+            {
+                auto number = token.substring (op + 1).trim().toLowerCase();
+
+                if (number.isEmpty() || ! juce::CharacterFunctions::isDigit (number[0]) && number[0] != '-' && number[0] != '.')
+                    continue; // still typing
+
+                double scale = 1.0;
+                const bool time = key == "attack" || key == "decay" || key == "tail" || key == "length";
+
+                if (number.endsWith ("k") || number.endsWith ("khz"))
+                    scale = 1000.0;
+                else if (time && number.endsWith ("s") && ! number.endsWith ("ms"))
+                    scale = 1000.0;
+
+                t.measure = key;
+                t.op = token[op];
+                t.value = number.getDoubleValue() * scale;
+                out.push_back (t);
+                continue;
+            }
+        }
+
+        t.word = token;
+        out.push_back (t);
+    }
+
+    return out;
+}
+
 juce::String hz (double f) { return f >= 1000.0 ? juce::String (f / 1000.0, 1) + " kHz" : juce::String (juce::roundToInt (f)) + " Hz"; }
-juce::String ms (double t) { return t >= 1000.0 ? juce::String (t / 1000.0, 2) + " s" : juce::String (t, t < 10.0 ? 1 : 0) + " ms"; }
+juce::String ms (double t) { return t >= 1000.0 ? juce::String (t / 1000.0, 2) + " s" : (t < 10.0 ? juce::String (t, 1) : juce::String (juce::roundToInt (t))) + " ms"; }
 
 // What an axis can show: a measurement and how to write it. Index 0 is the sound-alike map.
 struct Axis
@@ -93,13 +148,8 @@ void App::setBrowserAxis (bool y, int step)
     messageIsError = false;
 }
 
-juce::String App::browserGroup (const SampleInfo& s) const
-{
-    return browserColourByFolder ? juce::File (s.path).getParentDirectory().getFileName() : kindOf (s);
-}
-
-// Ranks (ties share one) within the kind shown, so the map fills evenly whatever the spread of
-// the values; the filter doesn't move anything.
+// Ranks (ties share one) within what's shown (the kind and the filter), so the map fills evenly
+// whatever the spread of the values: filtering down to a few spreads those few over the map.
 const App::AxisCache& App::axes() const
 {
     auto& c = axisCache;
@@ -109,8 +159,11 @@ const App::AxisCache& App::axes() const
 
     const auto& all = library->samples();
 
-    if (c.library == library.get() && c.count == all.size() && c.kind == browserKind && c.x == browserAxisX && c.y == browserAxisY)
+    if (c.library == library.get() && c.count == all.size() && c.kind == browserKind && c.x == browserAxisX && c.y == browserAxisY
+        && c.filter == browserFilter)
         return c;
+
+    c.filter = browserFilter;
 
     c.library = library.get();
     c.count = all.size();
@@ -120,13 +173,7 @@ const App::AxisCache& App::axes() const
     c.rankX.assign (all.size(), 0.5f);
     c.rankY.assign (all.size(), 0.5f);
 
-    const auto kinds = browserKinds();
-    const auto kind = kinds[(size_t) juce::jlimit (0, (int) kinds.size() - 1, browserKind)];
-    std::vector<int> members;
-
-    for (int i = 0; i < (int) all.size(); ++i)
-        if (kind == "all" || kindOf (all[(size_t) i]) == kind)
-            members.push_back (i);
+    const auto members = browserShown();
 
     auto rank = [&] (const Axis& a, std::vector<float>& out, juce::String& low, juce::String& high)
     {
@@ -255,14 +302,23 @@ std::vector<int> App::browserShown() const
     const auto kinds = browserKinds();
     const auto kind = kinds[(size_t) juce::jlimit (0, (int) kinds.size() - 1, browserKind)];
     const auto& all = library->samples();
+    const auto terms = filterTerms (browserFilter);
 
     for (int i = 0; i < (int) all.size(); ++i)
     {
         const auto& s = all[(size_t) i];
         const juce::File f (s.path);
+        const auto name = f.getParentDirectory().getFileName() + "/" + f.getFileName();
 
         if ((kind == "all" || kindOf (s) == kind)
-            && (browserFilter.isEmpty() || (f.getParentDirectory().getFileName() + "/" + f.getFileName()).containsIgnoreCase (browserFilter)))
+            && std::all_of (terms.begin(), terms.end(), [&] (const FilterTerm& t)
+               {
+                   if (t.measure.isEmpty())
+                       return name.containsIgnoreCase (t.word);
+
+                   const auto m = Library::measure (s, t.measure);
+                   return t.op == '<' ? m < t.value : t.op == '>' ? m > t.value : std::abs (m - t.value) <= std::abs (t.value) * 0.05;
+               }))
             out.push_back (i);
     }
 
@@ -381,17 +437,11 @@ bool App::handleBrowserKey (const Key& k)
         const auto shown = browserShown();
 
         // A selector row: the click steps it (‹ on the left half back, else on).
-        for (int r = 0; r < 3; ++r)
+        for (int r = 0; r < 2; ++r)
             if (k.y == g.axisRow[r])
             {
-                browserFocus = r == 0 ? BrowserFocus::xAxis : r == 1 ? BrowserFocus::yAxis : BrowserFocus::colours;
-                const int step = k.x < g.left + 14 ? -1 : 1;
-
-                if (r == 2)
-                    browserColourByFolder = ! browserColourByFolder, saveSettings();
-                else
-                    setBrowserAxis (r == 1, step);
-
+                browserFocus = r == 0 ? BrowserFocus::xAxis : BrowserFocus::yAxis;
+                setBrowserAxis (r == 1, k.x < g.left + 14 ? -1 : 1);
                 return true;
             }
 
@@ -506,6 +556,14 @@ bool App::handleBrowserKey (const Key& k)
         return best >= 0;
     };
 
+    // alt+arrows: the axes, from anywhere in the browser (left/right x, up/down y).
+    if (k.alt && ! k.ctrl && (k.code == Key::Left || k.code == Key::Right || k.code == Key::Up || k.code == Key::Down))
+    {
+        const bool y = k.code == Key::Up || k.code == Key::Down;
+        setBrowserAxis (y && browserAxisX != 0, k.code == Key::Right || k.code == Key::Up ? 1 : -1);
+        return true;
+    }
+
     switch (k.code)
     {
         case Key::Escape:
@@ -534,13 +592,6 @@ bool App::handleBrowserKey (const Key& k)
 
             if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis)
                 setBrowserAxis (browserFocus == BrowserFocus::yAxis, step);
-            else if (browserFocus == BrowserFocus::colours)
-            {
-                browserColourByFolder = ! browserColourByFolder;
-                saveSettings();
-                message = browserColourByFolder ? "colours: by folder" : "colours: by kind";
-                messageIsError = false;
-            }
             else if (browserFocus == BrowserFocus::kinds)
             {
                 browserKind = juce::jlimit (0, (int) kinds.size() - 1, browserKind + step);
@@ -565,9 +616,9 @@ bool App::handleBrowserKey (const Key& k)
                 return true;
             }
 
-            // The selectors and the badges, top to bottom: x, y, colours, kinds, then the map.
+            // The selectors and the badges, top to bottom: x, y, kinds, then the map.
             if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis
-                || browserFocus == BrowserFocus::colours || browserFocus == BrowserFocus::kinds)
+                || browserFocus == BrowserFocus::kinds)
             {
                 // y is skipped while the map is the sound-alike one (it has no y of its own).
                 auto next = (int) browserFocus + step;
@@ -631,8 +682,13 @@ bool App::handleBrowserKey (const Key& k)
             return true;
 
         case Key::Char:
-            if (k.ch == ' ')
+            if (k.ch == ' ' && browserFilter.isEmpty())
                 browserPick (browserSample); // again
+            else if (k.ch == ' ')
+            {
+                if (! browserFilter.endsWithChar (' '))
+                    browserFilter += " "; // between filter terms
+            }
             else if (k.ch >= 32)
             {
                 browserFilter += juce::String::charToString ((juce::juce_wchar) k.ch);

@@ -36,15 +36,6 @@ int kind (const juce::String& k)
     return lightScreen ? 242 : 250;
 }
 
-// A folder's colour in the browser (colours by folder): one of a dozen, from its name.
-int group (const juce::String& name)
-{
-    static const int dark[] = { 203, 214, 150, 74, 111, 141, 183, 137, 43, 222, 117, 210 };
-    static const int light[] = { 160, 166, 64, 31, 19, 91, 133, 94, 30, 136, 25, 125 };
-    const auto i = (size_t) ((juce::uint32) name.hashCode() % (juce::uint32) std::size (dark));
-    return lightScreen ? light[i] : dark[i];
-}
-
 // A palette index as the colour terminals show it (the xterm 256-colour table).
 juce::Colour xtermColour (int index)
 {
@@ -1881,7 +1872,7 @@ void Ui::drawBrowser (App& app)
         canvas.text (x, top, L" \x00b7 indexing " + juce::String (app.indexDone.load()) + " / " + juce::String (app.indexTotal.load()), colour::meterYellow);
 
     const int hintY = top + rows - 1;
-    canvas.text (x0, hintY, active ? L"\x2190\x2192 kinds \x00b7 tab map/list \x00b7 type filters \x00b7 enter uses \x00b7 esc tracks"
+    canvas.text (x0, hintY, active ? L"alt+arrows axes \x00b7 ctrl jumps \x00b7 tab list \x00b7 enter uses \x00b7 esc tracks"
                                    : L"ctrl+B browse (again: hide)", colour::faint, -1, false, cw);
 
     if (lib == nullptr || total == 0)
@@ -1922,7 +1913,6 @@ void Ui::drawBrowser (App& app)
               similar ? juce::String ("close together = sounds alike") : app.browserAxisRange (false), false);
     selector (1, L"y \x2191", similar ? juce::String (L"\x2014") : axisNames[app.browserAxisY], App::BrowserFocus::yAxis,
               similar ? juce::String() : app.browserAxisRange (true), similar);
-    selector (2, "colours", app.browserColourByFolder ? "folder" : "kind", App::BrowserFocus::colours, {}, false);
 
     // Badges, wrapping: the chosen one filled in its colour.
     const auto kinds = app.browserKinds();
@@ -1933,9 +1923,10 @@ void Ui::drawBrowser (App& app)
         ++counts[s.kind().isEmpty() ? juce::String ("other") : s.kind()];
 
     // What a sample's colour stands for, and the colour.
-    auto groupColour = [&] (const juce::String& key) { return app.browserColourByFolder ? colour::group (key) : colour::kind (key); };
+    auto groupColour = [] (const juce::String& kind) { return colour::kind (kind); };
+    auto kindName = [] (const SampleInfo& s) { return s.kind().isEmpty() ? juce::String ("other") : s.kind(); };
 
-    int y = top + 4;
+    int y = top + 3;
     x = x0;
 
     for (int b = 0; b < (int) kinds.size(); ++b)
@@ -1962,7 +1953,7 @@ void Ui::drawBrowser (App& app)
     x = canvas.text (x0, filterY, L"\x203a ", colour::accent);
 
     if (app.browserFilter.isEmpty() && ! active)
-        x = canvas.text (x, filterY, "type to filter by name", colour::faint);
+        x = canvas.text (x, filterY, "type: names, decay<200 bright>1k", colour::faint);
     else
         x = canvas.text (x, filterY, app.browserFilter, colour::text, -1, true);
 
@@ -1973,7 +1964,8 @@ void Ui::drawBrowser (App& app)
 
     // The rest: the map on top, the list under it, two rows of numbers, the hint row.
     const int bodyY = filterY + 1, infoY = hintY - 2, bodyRows = std::max (4, infoY - bodyY);
-    const int mapH = std::max (3, bodyRows * 11 / 20), listY = bodyY + mapH + 1, listRows = std::max (1, infoY - listY);
+    // The list is a few rows (the map is where you look); filter to get to fewer samples.
+    const int listRows = juce::jlimit (2, 4, bodyRows / 6), mapH = std::max (3, bodyRows - listRows - 1), listY = bodyY + mapH + 1;
     canvas.fill (x0, bodyY + mapH, cw, L'\x2500', colour::faint);
 
     // The x axis on the rule under the map: its low end, its name, its high end.
@@ -2003,7 +1995,7 @@ void Ui::drawBrowser (App& app)
     {
         const auto [dx, dy] = dotOf (i);
         const auto& s = lib->samples()[(size_t) i];
-        ++pixelKinds[(size_t) (dy * mapW + dx)][app.browserGroup (s)];
+        ++pixelKinds[(size_t) (dy * mapW + dx)][kindName (s)];
     }
 
     auto pixelColour = [&] (int px, int py)
@@ -2054,7 +2046,7 @@ void Ui::drawBrowser (App& app)
         const bool listFocus = active && app.browserFocus == App::BrowserFocus::list;
         const int rowBg = chosen ? (listFocus ? colour::selBg : colour::focusBg) : -1;
         canvas.fill (x0, listY + r, cw, L' ', -1, rowBg);
-        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', listFocus || chosen ? groupColour (app.browserGroup (s)) : colour::faint, rowBg); // hollow: kind by sound
+        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', listFocus || chosen ? groupColour (kindName (s)) : colour::faint, rowBg); // hollow: kind by sound
         const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
         canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), listFocus ? colour::text : chosen ? colour::dim : colour::faint, rowBg, chosen && listFocus,
                      cw - 3 - len.length());
@@ -2065,18 +2057,18 @@ void Ui::drawBrowser (App& app)
     if (at < (int) shown.size())
     {
         const auto& s = lib->samples()[(size_t) app.browserSample];
-        const auto kindName = s.kind().isEmpty() ? juce::String ("other") : s.kind();
+        const auto kind = kindName (s);
         const auto [dx, dy] = dotOf (app.browserSample);
         const int cx = dx, cy = dy / 2;
         const bool mapFocus = active && app.browserFocus == App::BrowserFocus::map;
-        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : groupColour (app.browserGroup (s)), mapFocus ? colour::accent : colour::selBg, true);
+        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : groupColour (kind), mapFocus ? colour::accent : colour::selBg, true);
 
         const auto name = juce::File (s.path).getFileNameWithoutExtension();
         const int nameX = cx + 2 + name.length() < mapW ? mapX + cx + 2 : std::max (mapX, mapX + cx - 1 - name.length());
         canvas.text (nameX, bodyY + cy, name, colour::text, -1, false, std::min (name.length(), mapX + mapW - nameX));
 
         juce::StringArray parts;
-        parts.add (kindName + (s.nameKind.isEmpty() ? " (by its sound)" : ""));
+        parts.add (kind + (s.nameKind.isEmpty() ? " (by its sound)" : ""));
         parts.add (juce::String (s.seconds, 2) + " s");
         parts.add ("attack " + juce::String (s.attackMs, 1) + " ms");
         parts.add ("decay " + juce::String (juce::roundToInt (s.decayMs)) + " ms");

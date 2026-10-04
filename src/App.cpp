@@ -2105,7 +2105,6 @@ void App::loadSettings()
     browserVisible = (bool) json.getProperty ("browser", false);
     browserAxisX = std::max (0, browserAxisNames().indexOf (json["browserX"].toString()));
     browserAxisY = std::max (0, browserAxisNames().indexOf (json["browserY"].toString()));
-    browserColourByFolder = json["browserColours"].toString() == "folder";
 
     if ((browserAxisX == 0) != (browserAxisY == 0) || (browserAxisX != 0 && browserAxisX == browserAxisY))
         browserAxisX = browserAxisY = 0; // a half-saved pair: the sound-alike map
@@ -2127,7 +2126,6 @@ void App::saveSettings() const
     o->setProperty ("browser", browserVisible);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
     o->setProperty ("browserY", browserAxisNames()[browserAxisY]);
-    o->setProperty ("browserColours", browserColourByFolder ? "folder" : "kind");
 
     juce::Array<juce::var> off;
 

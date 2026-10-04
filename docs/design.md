@@ -618,19 +618,18 @@ line, which stays full width; the session stays in view while you look. In the c
 sits on top, the list under it, the badges wrap. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
 filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too; remembered). Inside:
 
-- **Selectors** at the very top, `↑` from the badges, `←→` (or a click) to change:
-  - **x** and **y**: what the map's axes show. `similar` (the default) is the sound-alike map
-    below, both axes at once, where only nearness means anything. Otherwise two measurements:
-    brightness, attack, decay, tail, length, pitch (unpitched at the bottom), loudness (RMS),
-    punch (crest), noise (flatness), low end (energy under 120 Hz). Each is spread by rank within
-    the kind shown, so the map fills evenly; the row shows the real range ("49 Hz → 335 Hz"). On
-    the map itself the y axis is named with its high end in the top-left corner and its low end
-    in the bottom-left (on a plate over the dots), the x axis on the rule under it: low end, name,
-    high end. The two are never the same; `y` is skipped on the
-    sound-alike map.
-  - **colours**: by kind, or by folder (each folder one of a dozen colours from its name), on
-    the map and the list's dots alike, to see which pack a sound comes from.
-  - All three are kept in settings.json.
+- **Selectors** at the very top show what the map's axes are; `alt+←→` steps x and `alt+↑↓`
+  steps y from anywhere in the browser (or `↑` up to a row and `←→`, or a click):
+  - `similar` (the default) is the sound-alike map below, both axes at once, where only nearness
+    means anything. Otherwise two measurements: brightness, attack, decay, tail, length, pitch
+    (unpitched at the bottom), loudness (RMS), punch (crest), noise (flatness), low end (energy
+    under 120 Hz). Each is spread by rank over what's shown (the kind and the filter), so the map
+    fills evenly and filtering down spreads the few left over the whole map; the row shows the
+    real range ("49 Hz → 335 Hz"). On the map the y axis is named with its high end in the
+    top-left corner and its low end in the bottom-left (on a plate over the dots), the x axis on
+    the rule under it: low end, name, high end. The two are never the same; `y` is skipped on
+    the sound-alike map. Kept in settings.json.
+  - Colours are always by kind, like the badges.
 - **Badges**, one per kind with its count, in the kind's colour: `←→` picks one,
   and the map and list show only that kind. `↓` goes to the map; `↑` past the top of the map or
   list comes back.
@@ -640,15 +639,18 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
   that direction; `ctrl+arrow` jumps a fifth of the map that way (to the sample nearest that
   spot), to cross it quickly and then home in with the plain arrows. A click picks the nearest
   one. The chosen one is a ring with its name.
-- **The list** (under the map), `Tab` from the map: the same samples kind by kind, then by name, each with its
+- **The list** (under the map, two to four rows: the map is where you look), `Tab` from the map: the same samples kind by kind, then by name, each with its
   kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓` (`ctrl` ten
   at a time), page keys, Home/End. Greyed out unless it has the keys, so it's plain which of map
   and list does.
-- **Typing** filters both by file and folder name. The last row shows the chosen sample's
+- **Typing** filters both: words match file and folder names, and measurement terms the sounds,
+  `decay<200 bright>1k pitch>60 len<0.5s` (the `--library` names or short ones: bright, att, dec,
+  len, loud, low; numbers take k and s). `Space` between terms (with the filter empty it plays
+  the sample again). The idea: filter to the qualities you want, then move on a smaller map. The last row shows the chosen sample's
   numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS, folder.
 - **Every move auditions**: the file, resampled to the device rate, straight to the outputs,
   stopped or rolling (not metered, never bounced), at the browser's own level (`shift+↑↓`, `browse
-  vol -6`, saved). `Space` plays it again; `shift+Space` is the transport.
+  vol -6`, saved). `Space` plays it again (while the filter is empty); `shift+Space` is the transport.
 - **Enter** puts it on a track: on a focused sample track it replaces the sample and keeps the
   hits, so with the loop playing you hear each candidate in the pattern; anywhere else it makes a
   new sample track. The browser stays open for the next.

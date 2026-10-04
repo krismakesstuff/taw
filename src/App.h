@@ -222,27 +222,25 @@ public:
     // kind where samples that sound alike sit together, and a list; typing filters by name, and
     // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)
     // or makes a new one. index <folder> adds folders to the library. See Browser.cpp.
-    enum class BrowserFocus { xAxis, yAxis, colours, kinds, map, list }; // top to bottom
+    enum class BrowserFocus { xAxis, yAxis, kinds, map, list }; // top to bottom
     // Where the Ui drew the browser, for the mouse and for moving on the map.
     struct BrowserGeometry
     {
         int left = 0, top = 0, rows = 0;               // the column
         int listX = 0, listY = 0, listW = 0, listRows = 0, listFirst = 0;
         int mapX = 0, mapY = 0, mapW = 0, mapH = 0;    // cells (two pixels each, top and bottom)
-        int axisRow[3] = { -1, -1, -1 };               // the x, y and colour selector rows
+        int axisRow[2] = { -1, -1 };                   // the x and y selector rows
         struct Badge { int x, y, w; };
         std::vector<Badge> badges;                     // they wrap onto as many rows as they need
         bool valid = false;
     } browserGeometry;
 
-    // What the map's axes show (0, "similar": the sound-alike map on both) and what its colours
-    // group by. Kept in settings.json.
+    // What the map's axes show (0, "similar": the sound-alike map on both). Kept in settings.json;
+    // alt+arrows step them.
     static const juce::StringArray& browserAxisNames();
     int browserAxisX = 0, browserAxisY = 0;
-    bool browserColourByFolder = false;
     juce::String browserAxisRange (bool y) const; // "51 Hz → 12 kHz" over the kind shown
     std::pair<juce::String, juce::String> browserAxisEnds (bool y) const; // low, high
-    juce::String browserGroup (const SampleInfo&) const; // what its colour stands for: kind or folder
     void setBrowserAxis (bool y, int step);
     bool browserActive = false; // the keys go to the browser (else it's just showing)
     Result focusBrowser();      // ctrl+B from the tracks
@@ -643,6 +641,7 @@ private:
         int kind = -1, x = -1, y = -1;
         std::vector<float> rankX, rankY; // by sample index, 0..1
         juce::String lowX, highX, lowY, highY; // the values at the ends, written out
+        juce::String filter;
     };
     mutable AxisCache axisCache;
     const AxisCache& axes() const;

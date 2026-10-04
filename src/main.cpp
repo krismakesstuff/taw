@@ -1,6 +1,7 @@
 ﻿#include "App.h"
 #include "Bounce.h"
 #include "Import.h"
+#include "Library.h"
 #include "Plugins.h"
 #include "Safety.h"
 #include "Ui.h"
@@ -893,6 +894,78 @@ int main (int argc, char** argv)
         return failures;
     }
 #endif
+
+    // taw --index <folder> [<folder> ...]   measure the samples there into the library index (only
+    // new or changed files), sort them by kind, and print what it found: how far the sound alone
+    // agrees with the names, the kinds, the samples the names don't explain, and a few neighbours.
+    if (args[0] == "--index")
+    {
+        juce::Array<juce::File> folders;
+
+        for (int i = 1; i < args.size(); ++i)
+            folders.add (juce::File::getCurrentWorkingDirectory().getChildFile (args[i]));
+
+        taw::Library library (taw::configFolder().getChildFile ("library.json"));
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        library.scan (folders, [] (int done, int total) { std::printf ("\r  measuring %d / %d", done, total); std::fflush (stdout); });
+        const auto accuracy = library.classify();
+        library.layout();
+        library.save();
+
+        const auto& all = library.samples();
+        std::printf ("\r%d samples in %.1f s \xc2\xb7 the sound alone agrees with the name for %.0f%% of named ones\n\n", (int) all.size(),
+                     (juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, accuracy * 100.0);
+
+        std::map<juce::String, std::pair<int, int>> kinds; // named, by sound only
+        std::map<juce::String, int> confusions;
+
+        for (const auto& s : all)
+        {
+            if (s.nameKind.isNotEmpty())
+                ++kinds[s.nameKind].first;
+            else
+                ++kinds[s.soundKind].second;
+
+            if (s.nameKind.isNotEmpty() && s.soundKind != s.nameKind)
+                ++confusions[s.nameKind + " heard as " + s.soundKind];
+        }
+
+        for (const auto& [kind, n] : kinds)
+            std::printf ("  %-10s %4d by name  %4d by sound\n", kind.toRawUTF8(), n.first, n.second);
+
+        std::printf ("\nmismatches:");
+
+        for (const auto& [what, n] : confusions)
+            std::printf ("  %s %d", what.toRawUTF8(), n);
+
+        auto row = [] (const taw::SampleInfo& s)
+        {
+            std::printf ("  %-10s %3.0f%%  pk %5.1f  rms %5.1f  att %5.1f ms  dec %6.0f ms  tail %6.0f ms  hits %d  pitch %6.1f Hz (%.2f)  bright %6.0f Hz  flat %.2f  %s\n",
+                         s.kind().toRawUTF8(), s.soundKindScore * 100.0, s.peakDb, s.rmsDb, s.attackMs, s.decayMs, s.tailMs, s.hits, s.pitchHz,
+                         s.pitchConfidence, s.centroidHz, s.flatness, juce::File (s.path).getFileName().toRawUTF8());
+        };
+
+        std::printf ("\n\nnot named, sorted by sound:\n");
+
+        for (const auto& s : all)
+            if (s.nameKind.isEmpty())
+                row (s);
+
+        // Neighbours of a few samples, to see "sounds alike" at work.
+        std::printf ("\nneighbours:\n");
+        juce::Random rng (7);
+
+        for (int t = 0; t < 4 && ! all.empty(); ++t)
+        {
+            const int i = rng.nextInt ((int) all.size());
+            std::printf ("%s\n", juce::File (all[(size_t) i].path).getFileName().toRawUTF8());
+
+            for (auto j : library.nearest (i, 5))
+                row (all[(size_t) j]);
+        }
+
+        return 0;
+    }
 
     // taw --importtest <dest> <files...>   import files at 44.1 kHz into <dest> (no device needed)
     if (args[0] == "--importtest")

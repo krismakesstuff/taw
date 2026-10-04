@@ -591,6 +591,33 @@ are read as UTF-16 for the same reason.
 
 `taw --importtest <dest> <files...>` imports without a device, for testing.
 
+## The sample library
+
+For finding the right sample among thousands: taw measures each one once, sorts them by kind
+and lays them out on a map where samples that sound alike sit together. (Proof of concept so
+far: `taw --index <folder> ...` builds the index and prints what it found; the browser and map
+views come next.)
+
+- **The index** is `library.json` in taw's config folder. Nothing is written beside the samples.
+  A file is measured again only when its size or date changes; `._` files (Mac resource forks
+  on shared drives) are skipped. All cores; about 500 one-shots a second.
+- **Measured** (from the first 10 s, in mono): peak; RMS over the part that sounds; crest
+  factor; attack (10% to 90% of the peak); decay (to 20 dB down for good) and tail (40 dB down);
+  hits, attacks above 500 Hz in the first second (a clap has several; above 500 Hz so a kick's
+  slow wave isn't a hit per cycle); pitch and its confidence (YIN after the attack); brightness
+  (spectral centroid), rolloff, flatness (tonal versus noise); energy in nine bands from sub to
+  air; 13 MFCCs.
+- **Kinds** (kick, snare, clap, rim, hihat, open hat, cymbal, tom, perc) come from the file's
+  name, then its two folders, in the shorthand packs use (`808BD`, `snar5`, `HiHat/`). The sound
+  sorts the rest: the five nearest named samples vote, nearer ones counting more. Measured on
+  samples whose names say what they are, the sound alone agrees 92% of the time (808 kit plus
+  an HR16); the misses are between neighbouring kinds (a short open hat and a closed one).
+- **Sounds alike** means close in the measurements, each scaled to its spread across the
+  library and weighted: the envelope most, then the brightness and noisiness, then the bands
+  and MFCCs.
+- **The map** is a t-SNE of the same distances, scaled to 0..1 and kept in the index. It's the
+  exact O(n²) form, fine to a few thousand samples; a whole drive will want Barnes-Hut.
+
 ## Bouncing
 
 `b` renders the mix bus (track volume, mute/solo, mix volume; never the click or live inputs)

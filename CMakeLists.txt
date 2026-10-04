@@ -31,6 +31,7 @@ target_sources(taw PRIVATE
     src/AudioEngine.cpp
     src/Bounce.cpp
     src/Import.cpp
+    src/Library.cpp
     src/Safety.cpp
     src/Editing.cpp
     src/Instruments.cpp
@@ -80,6 +81,7 @@ target_link_libraries(taw PRIVATE
     juce::juce_audio_formats
     juce::juce_audio_processors
     juce::juce_data_structures
+    juce::juce_dsp
     juce::juce_events
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)

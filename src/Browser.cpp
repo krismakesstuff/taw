@@ -668,7 +668,9 @@ bool App::handleBrowserKey (const Key& k)
             if (browserSample < 0)
                 return true;
 
-            const int target = ! onTopLane() && ! mixFocused() && focused >= 0 && focused < session->numTracks()
+            // Enter: the focused sample track gets this sample (keeping its hits), else a new
+            // sample track. shift+Enter: always a new one.
+            const int target = ! k.shift && ! onTopLane() && ! mixFocused() && focused >= 0 && focused < session->numTracks()
                                        && Session::isSampleTrack (session->track (focused))
                                    ? focused : -1;
             say (startImport ({ library->samples()[(size_t) browserSample].path }, target, ImportAs::sample));

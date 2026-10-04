@@ -1046,7 +1046,7 @@ void Ui::drawTimeline (App& app)
         const auto t = s.track (i);
         const bool focusedRow = i == app.focused && ! app.onTopLane();
         const bool selectedRow = std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end();
-        const int bg = focusedRow ? colour::focusBg : (selectedRow ? colour::selBg : -1);
+        const int bg = app.trackFlashing (t) ? colour::accent : focusedRow ? colour::focusBg : (selectedRow ? colour::selBg : -1);
         // A time selection covers the tracks edits will act on: the selected ones, else the focused
         // one, or every track from the bar or markers row (App::defaultTargets).
         const bool rowInTimeSelection = timeSel && (app.onTopLane() || (selTracks.empty() ? focusedRow : selectedRow));
@@ -1875,7 +1875,7 @@ void Ui::drawBrowser (App& app)
 
     // The bottom two rows: the hints, then the filter's input line.
     const int inputY = top + rows - 1, hintY = inputY - 1;
-    canvas.text (x0, hintY, active ? L"alt+arrows axes \x00b7 ctrl+arrows jump \x00b7 enter uses \x00b7 esc tracks"
+    canvas.text (x0, hintY, active ? L"alt+arrows axes \x00b7 ctrl jump \x00b7 enter on track \x00b7 shift+enter new track \x00b7 esc"
                                    : L"ctrl+B browse (again: hide)", colour::faint, -1, false, cw);
 
     if (lib == nullptr || total == 0)

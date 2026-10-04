@@ -1496,7 +1496,7 @@ void App::pollImport()
         return;
     }
 
-    juce::StringArray placed, failed;
+    juce::StringArray placed, failed, replaced;
     beginEdit ("import"); // the whole import is one undo step
 
     for (const auto& item : import->results())
@@ -1523,7 +1523,23 @@ void App::pollImport()
         if (asSample)
         {
             // A new sample track starts with no hits; giving an existing track a new sample
-            // keeps its hits, so a pattern can swap its sound.
+            // keeps its hits, so a pattern can swap its sound. That says so, and the track's
+            // header flashes; a track still named after its old sample takes the new one's name.
+            if (Session::isSampleTrack (track) && track[ids::sample].toString().isNotEmpty())
+            {
+                const auto oldName = juce::File (track[ids::sample].toString()).getFileNameWithoutExtension();
+                const auto newName = item.source.getFileNameWithoutExtension();
+                // An imported sample's copy can carry a number after the original's name.
+                const bool namedAfterIt = oldName.startsWithIgnoreCase (track[ids::name].toString()) || track[ids::name].toString().startsWithIgnoreCase (oldName);
+
+                if (namedAfterIt)
+                    track.setProperty (ids::name, newName.substring (0, 24), um());
+
+                replaced.add ("track " + juce::String (session->tree().indexOf (track) + 1) + " " + track[ids::name].toString() + " now plays "
+                              + newName + " (was " + juce::File (track[ids::sample].toString()).getFileName() + ")");
+                flashTrack (track);
+            }
+
             track.setProperty (ids::kind, "sample", um())
                 .setProperty (ids::sample, file, um())
                 .setProperty (ids::sampleOffset, 0, um())
@@ -1545,6 +1561,8 @@ void App::pollImport()
     else if (! failed.isEmpty())
         say (Result::fail ((placed.isEmpty() ? juce::String() : "imported " + placed.joinIntoString (", ") + L" \x00b7 ")
                            + failed.joinIntoString (juce::String (L" \x00b7 "))));
+    else if (! replaced.isEmpty() && replaced.size() == placed.size())
+        say (Result::good (replaced.joinIntoString (juce::String (L" \x00b7 ")) + L" \x00b7 ctrl+z undoes"));
     else
         say (Result::good ("imported " + placed.joinIntoString (", ") + " at " + formatBars (importAt)));
 

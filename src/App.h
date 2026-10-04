@@ -260,6 +260,12 @@ public:
     std::unique_ptr<Library> library;
     std::atomic<int> indexDone { 0 }, indexTotal { 0 };
     bool isIndexing() const { return indexThread.joinable(); }
+
+    // A track whose sample the browser just swapped: its header flashes for a moment.
+    void flashTrack (const juce::ValueTree& t) { flashedTrack = t; flashUntil = juce::Time::getMillisecondCounterHiRes() + 1200.0; }
+    bool trackFlashing (const juce::ValueTree& t) const { return t == flashedTrack && juce::Time::getMillisecondCounterHiRes() < flashUntil; }
+    juce::ValueTree flashedTrack;
+    double flashUntil = 0.0;
     // Routing (Routing.cpp): bus tracks, and each track's output and five sends (A to E).
     // Buses are named in commands by track number or name; a name nothing matches makes a new bus.
     Result addBus (const juce::String& name);                                         // "bus Verb"

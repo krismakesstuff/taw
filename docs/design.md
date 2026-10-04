@@ -655,7 +655,10 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
   vol -6`, saved). `Space` plays it again (while the filter is empty); `shift+Space` is the transport.
 - **Enter** puts it on a track: on a focused sample track it replaces the sample and keeps the
   hits, so with the loop playing you hear each candidate in the pattern; anywhere else it makes a
-  new sample track. The browser stays open for the next.
+  new sample track. **shift+Enter** always makes a new sample track. A replacement shows: the
+  track's header flashes, the message says "track 5 Kick now plays bd6 (was …) · ctrl+z undoes",
+  and a track still named after its old sample takes the new one's name (a name you gave it
+  stays). The browser stays open for the next.
 
 - **The index** is `library.json` in taw's config folder. Nothing is written beside the samples.
   A file is measured again only when its size or date changes; `._` files (Mac resource forks

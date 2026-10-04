@@ -202,7 +202,7 @@ bool App::handleBrowserKey (const Key& k)
     // A click in the pane takes the keys into it; elsewhere gives them back to the tracks.
     if (k.code == Key::Mouse)
     {
-        if (! g.valid || k.y < g.top || k.y >= g.top + g.rows)
+        if (! g.valid || k.x < g.left || k.y < g.top || k.y >= g.top + g.rows)
         {
             browserActive = false;
             return false;
@@ -212,10 +212,10 @@ bool App::handleBrowserKey (const Key& k)
         browserActive = true;
         const auto shown = browserShown();
 
-        if (k.y == g.top + 1)
+        if (std::any_of (g.badges.begin(), g.badges.end(), [&] (const auto& b) { return b.y == k.y; }))
         {
             for (size_t b = 0; b < g.badges.size(); ++b)
-                if (k.x >= g.badges[b].first && k.x < g.badges[b].first + g.badges[b].second)
+                if (k.y == g.badges[b].y && k.x >= g.badges[b].x && k.x < g.badges[b].x + g.badges[b].w)
                 {
                     browserKind = (int) b;
                     browserFocus = BrowserFocus::kinds;

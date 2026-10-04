@@ -172,7 +172,8 @@ public:
     // than what the engine is rendering. For drawing it and for markers dropped while playing.
     int laneColumns() const
     {
-        return layout::laneWidth (console.width(), ioVisible, session != nullptr && session->trackHeight() > 1);
+        const int width = console.width() - layout::browserDock (console.width(), browserVisible);
+        return layout::laneWidth (width, ioVisible, session != nullptr && session->trackHeight() > 1);
     }
 
     juce::int64 heardPlayhead() const
@@ -225,10 +226,11 @@ public:
     // Where the Ui drew the browser, for the mouse and for moving on the map.
     struct BrowserGeometry
     {
-        int top = 0, rows = 0;                         // the pane
+        int left = 0, top = 0, rows = 0;               // the column
         int listX = 0, listY = 0, listW = 0, listRows = 0, listFirst = 0;
         int mapX = 0, mapY = 0, mapW = 0, mapH = 0;    // cells (each 2x4 braille dots)
-        std::vector<std::pair<int, int>> badges;       // each badge's first column and width, on row top + 1
+        struct Badge { int x, y, w; };
+        std::vector<Badge> badges;                     // they wrap onto as many rows as they need
         bool valid = false;
     } browserGeometry;
     bool browserActive = false; // the keys go to the browser (else it's just showing)

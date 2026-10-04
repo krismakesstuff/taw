@@ -35,6 +35,13 @@ inline int laneWidth (int consoleWidth, bool io, bool twoRows)
 {
     return std::max (10, consoleWidth - 1 - laneStart (io, twoRows) - 1 - meterPanel);
 }
+
+// The docked sample browser: a column on the right of the timeline (and its meters), from the
+// transport row down to the input line. Narrow consoles don't have room for it.
+inline int browserDock (int consoleWidth, bool visible)
+{
+    return visible && consoleWidth >= 140 ? std::clamp (consoleWidth * 2 / 5, 56, 100) : 0;
+}
 } // namespace layout
 
 struct Cell
@@ -110,7 +117,7 @@ private:
     void drawTrackMenu (App&);
     void drawMidiPanel (App&);
     void drawBrowser (App&);
-    int dockRows = 0; // rows the docked browser takes under the tracks
+    int dockCols = 0; // columns the docked browser takes on the right
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawOpening (App&);

@@ -597,8 +597,10 @@ For finding the right sample among thousands: taw measures each one once, sorts 
 and lays them out on a map where samples that sound alike sit together. `index <folder>` (on its
 own thread; `taw --index <folder> ...` from a shell prints a report) adds folders.
 
-**The browser** docks under the tracks (the timeline gives up about a third of the rows), so the
-session stays in view while you look. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
+**The browser** docks in a column right of the timeline and its meters (about two fifths of the
+width, 56 to 100 columns; not on consoles under 140), from the transport row down to the input
+line, which stays full width; the session stays in view while you look. In the column the map
+sits on top, the list under it, the badges wrap. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
 keys into it and `Esc` gives them back (clearing the filter first). Inside:
 
 - **Badges** across the top, one per kind with its count, in the kind's colour: `←→` picks one,
@@ -608,7 +610,7 @@ keys into it and `Esc` gives them back (clearing the filter first). Inside:
   area, not their corner of the full one), drawn in half blocks, two near-square pixels a cell,
   each in the colour most of its samples have. The arrows go to the nearest sample within 60° of
   that direction; a click picks the nearest one. The chosen one is a ring with its name.
-- **The list**, `Tab` from the map: the same samples kind by kind, then by name, each with its
+- **The list** (under the map), `Tab` from the map: the same samples kind by kind, then by name, each with its
   kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓`, page keys,
   Home/End.
 - **Typing** filters both by file and folder name. The last row shows the chosen sample's

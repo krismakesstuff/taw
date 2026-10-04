@@ -293,7 +293,7 @@ void Ui::render (App& app)
 void Ui::drawMain (App& app)
 {
     // The docked browser: about a third of the screen, under the mix row.
-    dockRows = app.browserVisible && canvas.height() >= 30 ? juce::jlimit (10, 18, canvas.height() / 3) : 0;
+    dockCols = layout::browserDock (app.console.width(), app.browserVisible);
     app.browserGeometry.valid = false;
 
     drawTitle (app);
@@ -303,7 +303,7 @@ void Ui::drawMain (App& app)
     if (app.session != nullptr)
         drawTimeline (app);
 
-    if (dockRows > 0)
+    if (dockCols > 0)
         drawBrowser (app);
 
     drawBottom (app);
@@ -420,7 +420,7 @@ void Ui::drawTransport (App& app)
     if (s == nullptr)
         return;
 
-    const int w = canvas.width(), y = 3, bg = colour::headerBg;
+    const int w = canvas.width() - dockCols, y = 3, bg = colour::headerBg; // centred over the timeline
     const auto rolling = app.engine.isRolling();
     const auto pos = rolling ? app.heardPlayhead() : app.cursor;
 
@@ -540,7 +540,7 @@ void Ui::drawTimeline (App& app)
 {
     using namespace layout;
     auto& s = *app.session;
-    const int w = canvas.width(), h = canvas.height() - dockRows; // the docked browser sits under the tracks
+    const int w = canvas.width() - dockCols, h = canvas.height(); // the docked browser is on the right
     const bool io = app.ioVisible;
     const bool twoRows = s.trackHeight() > 1; // the flags go on a track's second row
     const int leftW = leftPanel (twoRows);
@@ -1841,47 +1841,53 @@ void Ui::drawTrackMenu (App& app)
 }
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).
-// The docked sample browser, under the mix row: a header, the kinds as badges, the filter, then
-// the list (left) and the map (right) in the kinds' colours, and the chosen sample's numbers.
+// The docked sample browser, a column right of the timeline from the transport row down to the
+// input line: a header, the kinds as badges (wrapping), the filter, the map, the list (in the
+// kinds' colours), and the chosen sample's numbers.
 void Ui::drawBrowser (App& app)
 {
     auto& g = app.browserGeometry;
-    const int w = canvas.width(), top = canvas.height() - 4 - dockRows, rows = dockRows;
+    const int h = canvas.height(), left = canvas.width() - dockCols, top = 2, rows = h - 4 - top;
+    const int x0 = left + 2, cw = std::max (10, canvas.width() - x0 - 1); // content: after the border
     const bool active = app.browserActive;
     g = {};
+    g.left = left;
     g.top = top;
     g.rows = rows;
     g.valid = true;
 
     for (int y = top; y < top + rows; ++y)
-        canvas.fill (0, y, w, L' ');
+    {
+        canvas.fill (left, y, dockCols, L' ');
+        canvas.put (left, y, L'\x2502', active ? colour::dim : colour::faint);
+    }
 
-    // Header: a rule with the title in it.
-    canvas.fill (0, top, w, L'\x2500', colour::faint);
-    int x = canvas.text (1, top, " SAMPLES ", active ? colour::accent : colour::dim, -1, true);
+    // Header.
+    int x = canvas.text (x0, top, "SAMPLES ", active ? colour::accent : colour::dim, -1, true);
     const auto* lib = app.library.get();
     const int total = lib != nullptr ? (int) lib->samples().size() : 0;
-    x = canvas.text (x, top, juce::String (total) + L" \x00b7 audition " + formatDb (app.auditionDb) + " dB ", colour::dim);
+    x = canvas.text (x, top, juce::String (total) + L" \x00b7 audition " + formatDb (app.auditionDb) + " dB", colour::dim);
 
     if (app.isIndexing())
-        x = canvas.text (x, top, L"\x00b7 indexing " + juce::String (app.indexDone.load()) + " / " + juce::String (app.indexTotal.load()) + " ", colour::meterYellow);
+        canvas.text (x, top, L" \x00b7 indexing " + juce::String (app.indexDone.load()) + " / " + juce::String (app.indexTotal.load()), colour::meterYellow);
 
-    const juce::String keysHint = active ? L" esc tracks \x00b7 ctrl+B hide " : L" shift+B browse \x00b7 ctrl+B hide ";
-    canvas.text (w - keysHint.length() - 1, top, keysHint, colour::faint);
+    const int hintY = top + rows - 1;
+    canvas.text (x0, hintY, active ? L"\x2190\x2192 kinds \x00b7 tab map/list \x00b7 type filters \x00b7 enter uses \x00b7 esc tracks"
+                                   : L"shift+B browse \x00b7 ctrl+B hide", colour::faint, -1, false, cw);
 
     if (lib == nullptr || total == 0)
     {
-        canvas.text (2, top + 2, app.isIndexing() ? juce::String (L"measuring samples\x2026")
+        canvas.text (x0, top + 2, app.isIndexing() ? juce::String (L"measuring samples\x2026") : juce::String (L"no samples yet \x2014 type"), colour::dim, -1, false, cw);
 #if JUCE_WINDOWS
-                                                  : juce::String (L"no samples yet \x2014 type  index D:\\Samples\\Drums  (folders are only read)"),
+        canvas.text (x0 + 2, top + 3, L"index D:\\Samples\\Drums", colour::text, -1, false, cw - 2);
 #else
-                                                  : juce::String (L"no samples yet \x2014 type  index ~/Samples/Drums  (folders are only read)"),
+        canvas.text (x0 + 2, top + 3, L"index ~/Samples/Drums", colour::text, -1, false, cw - 2);
 #endif
-                     colour::dim);
+        canvas.text (x0, top + 4, "(folders are only read)", colour::faint, -1, false, cw);
         return;
     }
 
-    // Badges: the chosen one filled in its colour.
+    // Badges, wrapping: the chosen one filled in its colour.
     const auto kinds = app.browserKinds();
     const int chosenKind = juce::jlimit (0, (int) kinds.size() - 1, app.browserKind);
     std::map<juce::String, int> counts;
@@ -1889,7 +1895,8 @@ void Ui::drawBrowser (App& app)
     for (const auto& s : lib->samples())
         ++counts[s.kind().isEmpty() ? juce::String ("other") : s.kind()];
 
-    x = 2;
+    int y = top + 1;
+    x = x0;
 
     for (int b = 0; b < (int) kinds.size(); ++b)
     {
@@ -1898,59 +1905,40 @@ void Ui::drawBrowser (App& app)
         const int c = k == "all" ? colour::text : colour::kind (k);
         const bool chosen = b == chosenKind;
 
-        if (x + label.length() + 1 >= w)
-            break;
+        if (x > x0 && x + label.length() > x0 + cw)
+            x = x0, ++y;
 
         if (chosen && active && app.browserFocus == App::BrowserFocus::kinds)
-            canvas.put (x - 1, top + 1, L'\x25b8', colour::accent);
+            canvas.put (x - 1, y, L'\x25b8', colour::accent);
 
-        g.badges.push_back ({ x, label.length() });
-        canvas.text (x, top + 1, label, chosen ? 16 : c, chosen ? c : -1, chosen);
+        g.badges.push_back ({ x, y, label.length() });
+        canvas.text (x, y, label, chosen ? 16 : c, chosen ? c : -1, chosen, x0 + cw - x);
         x += label.length() + 1;
     }
 
     // The filter.
     const auto shown = app.browserShown();
-    x = canvas.text (1, top + 2, L"\x203a ", colour::accent);
+    const int filterY = y + 1;
+    x = canvas.text (x0, filterY, L"\x203a ", colour::accent);
 
     if (app.browserFilter.isEmpty() && ! active)
-        x = canvas.text (x, top + 2, "type to filter by name", colour::faint);
+        x = canvas.text (x, filterY, "type to filter by name", colour::faint);
     else
-        x = canvas.text (x, top + 2, app.browserFilter, colour::text, -1, true);
+        x = canvas.text (x, filterY, app.browserFilter, colour::text, -1, true);
 
     if (active)
-        x = canvas.text (x, top + 2, L"\x2581", colour::accent);
+        x = canvas.text (x, filterY, L"\x2581", colour::accent);
 
-    canvas.text (x + 2, top + 2, juce::String ((int) shown.size()) + " shown", colour::dim);
+    canvas.text (x + 2, filterY, juce::String ((int) shown.size()) + " shown", colour::dim);
 
-    // The list.
-    const int bodyY = top + 3, bodyRows = std::max (1, rows - 4);
-    const int listW = juce::jlimit (28, 56, w / 3);
-    const int at = (int) (std::find (shown.begin(), shown.end(), app.browserSample) - shown.begin());
-    const int first = juce::jlimit (0, std::max (0, (int) shown.size() - bodyRows), at - bodyRows / 2);
-    g.listX = 1, g.listY = bodyY, g.listW = listW, g.listRows = bodyRows, g.listFirst = first;
-
-    for (int r = 0; r < bodyRows && first + r < (int) shown.size(); ++r)
-    {
-        const int i = shown[(size_t) (first + r)];
-        const auto& s = lib->samples()[(size_t) i];
-        const bool chosen = i == app.browserSample;
-        const int rowBg = chosen ? (active && app.browserFocus == App::BrowserFocus::list ? colour::selBg : colour::focusBg) : -1;
-        const auto kindName = s.kind().isEmpty() ? juce::String ("other") : s.kind();
-
-        canvas.fill (1, bodyY + r, listW, L' ', -1, rowBg);
-        canvas.put (2, bodyY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', colour::kind (kindName), rowBg); // hollow: kind by sound
-        const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
-        canvas.text (4, bodyY + r, juce::File (s.path).getFileName(), colour::text, rowBg, chosen, listW - 5 - len.length());
-        canvas.text (1 + listW - len.length() - 1, bodyY + r, len, colour::dim, rowBg);
-    }
-
-    for (int r = 0; r < bodyRows; ++r)
-        canvas.put (listW + 2, bodyY + r, L'\x2502', colour::faint);
+    // The rest: the map on top, the list under it, two rows of numbers, the hint row.
+    const int bodyY = filterY + 1, infoY = hintY - 2, bodyRows = std::max (4, infoY - bodyY);
+    const int mapH = std::max (3, bodyRows * 11 / 20), listY = bodyY + mapH + 1, listRows = std::max (1, infoY - listY);
+    canvas.fill (x0, bodyY + mapH, cw, L'\x2500', colour::faint);
 
     // The map: half blocks, two square-ish pixels a cell (top and bottom), each in the colour
     // most of its samples have.
-    const int mapX = listW + 4, mapW = std::max (4, w - mapX - 1), mapH = bodyRows;
+    const int mapX = x0, mapW = cw;
     g.mapX = mapX, g.mapY = bodyY, g.mapW = mapW, g.mapH = mapH;
 
     std::vector<std::map<juce::String, int>> pixelKinds ((size_t) (mapW * mapH * 2));
@@ -1992,7 +1980,27 @@ void Ui::drawBrowser (App& app)
     if (shown.empty())
         canvas.text (mapX + 2, bodyY + mapH / 2, app.browserFilter.isNotEmpty() ? L"nothing matches \x00b7 backspace" : L"none of these", colour::dim);
 
-    // The chosen sample: a ring in its cell, its name beside it, its numbers on the last row.
+    // The list.
+    const int at = (int) (std::find (shown.begin(), shown.end(), app.browserSample) - shown.begin());
+    const int first = juce::jlimit (0, std::max (0, (int) shown.size() - listRows), at - listRows / 2);
+    g.listX = x0, g.listY = listY, g.listW = cw, g.listRows = listRows, g.listFirst = first;
+
+    for (int r = 0; r < listRows && first + r < (int) shown.size(); ++r)
+    {
+        const int i = shown[(size_t) (first + r)];
+        const auto& s = lib->samples()[(size_t) i];
+        const bool chosen = i == app.browserSample;
+        const int rowBg = chosen ? (active && app.browserFocus == App::BrowserFocus::list ? colour::selBg : colour::focusBg) : -1;
+        const auto kindName = s.kind().isEmpty() ? juce::String ("other") : s.kind();
+
+        canvas.fill (x0, listY + r, cw, L' ', -1, rowBg);
+        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', colour::kind (kindName), rowBg); // hollow: kind by sound
+        const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
+        canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), colour::text, rowBg, chosen, cw - 3 - len.length());
+        canvas.text (x0 + cw - len.length(), listY + r, len, colour::dim, rowBg);
+    }
+
+    // The chosen sample: a ring on the map with its name, its numbers under the list.
     if (at < (int) shown.size())
     {
         const auto& s = lib->samples()[(size_t) app.browserSample];
@@ -2006,19 +2014,41 @@ void Ui::drawBrowser (App& app)
         const int nameX = cx + 2 + name.length() < mapW ? mapX + cx + 2 : std::max (mapX, mapX + cx - 1 - name.length());
         canvas.text (nameX, bodyY + cy, name, colour::text, -1, false, std::min (name.length(), mapX + mapW - nameX));
 
-        juce::String info;
-        info << kindName << (s.nameKind.isEmpty() ? " (by its sound)" : "") << L" \x00b7 " << juce::String (s.seconds, 2) << " s"
-             << L" \x00b7 attack " << juce::String (s.attackMs, 1) << " ms" << L" \x00b7 decay " << juce::String (juce::roundToInt (s.decayMs)) << " ms";
+        juce::StringArray parts;
+        parts.add (kindName + (s.nameKind.isEmpty() ? " (by its sound)" : ""));
+        parts.add (juce::String (s.seconds, 2) + " s");
+        parts.add ("attack " + juce::String (s.attackMs, 1) + " ms");
+        parts.add ("decay " + juce::String (juce::roundToInt (s.decayMs)) + " ms");
 
         if (s.pitchConfidence >= 0.6 && s.pitchHz > 0.0)
         {
             const int note = juce::roundToInt (69.0 + 12.0 * std::log2 (s.pitchHz / 440.0));
-            info << L" \x00b7 pitch " << juce::String (juce::roundToInt (s.pitchHz)) << " Hz " << juce::MidiMessage::getMidiNoteName (note, true, true, 4);
+            parts.add ("pitch " + juce::String (juce::roundToInt (s.pitchHz)) + " Hz " + juce::MidiMessage::getMidiNoteName (note, true, true, 4));
         }
 
-        info << L" \x00b7 bright " << juce::String (juce::roundToInt (s.centroidHz)) << " Hz" << L" \x00b7 rms " << formatDb (s.rmsDb) << " dB"
-             << L" \x00b7 " << juce::File (s.path).getParentDirectory().getFileName();
-        canvas.text (1, top + rows - 1, info, colour::dim, -1, false, w - 2);
+        parts.add ("bright " + juce::String (juce::roundToInt (s.centroidHz)) + " Hz");
+        parts.add ("rms " + formatDb (s.rmsDb) + " dB");
+        parts.add (juce::File (s.path).getParentDirectory().getFileName());
+
+        // Two rows, broken between the pieces.
+        juce::String line;
+        int row = 0;
+
+        for (const auto& p : parts)
+        {
+            const auto next = line.isEmpty() ? p : line + L" \x00b7 " + p;
+
+            if (next.length() > cw && line.isNotEmpty() && row == 0)
+            {
+                canvas.text (x0, infoY, line, colour::dim, -1, false, cw);
+                line = p;
+                row = 1;
+            }
+            else
+                line = next;
+        }
+
+        canvas.text (x0, infoY + row, line, colour::dim, -1, false, cw);
     }
 }
 

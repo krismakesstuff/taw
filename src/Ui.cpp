@@ -1635,7 +1635,7 @@ void Ui::drawHelp (App&)
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
 #endif
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
-        { Pair, L"shift+B  ctrl+B", L"sample browser / show, hide", L"index f", L"add a sample folder to it" },
+        { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder to it" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };
@@ -1882,7 +1882,7 @@ void Ui::drawBrowser (App& app)
 
     const int hintY = top + rows - 1;
     canvas.text (x0, hintY, active ? L"\x2190\x2192 kinds \x00b7 tab map/list \x00b7 type filters \x00b7 enter uses \x00b7 esc tracks"
-                                   : L"shift+B browse \x00b7 ctrl+B hide", colour::faint, -1, false, cw);
+                                   : L"ctrl+B browse (again: hide)", colour::faint, -1, false, cw);
 
     if (lib == nullptr || total == 0)
     {

@@ -615,9 +615,8 @@ own thread; `taw --index <folder> ...` from a shell prints a report) adds folder
 **The browser** docks in a column right of the timeline and its meters (about three tenths of
 the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
 line, which stays full width; the session stays in view while you look. In the column the map
-sits on top, the list under it, the badges wrap. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
-keys into it, on the map (typing filters from anywhere), and `Esc` gives them back (clearing the
-filter first). Inside:
+sits on top, the list under it, the badges wrap. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
+filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too; remembered). Inside:
 
 - **Selectors** at the very top, `↑` from the badges, `←→` (or a click) to change:
   - **x** and **y**: what the map's axes show. `similar` (the default) is the sound-alike map

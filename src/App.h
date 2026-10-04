@@ -218,7 +218,7 @@ public:
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
 
-    // The sample browser (shift+B, browse): the library's kinds as badges, a map of the chosen
+    // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen
     // kind where samples that sound alike sit together, and a list; typing filters by name, and
     // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)
     // or makes a new one. index <folder> adds folders to the library. See Browser.cpp.
@@ -245,8 +245,8 @@ public:
     juce::String browserGroup (const SampleInfo&) const; // what its colour stands for: kind or folder
     void setBrowserAxis (bool y, int step);
     bool browserActive = false; // the keys go to the browser (else it's just showing)
-    Result focusBrowser();      // shift+B
-    Result showBrowser (bool show); // ctrl+B / browse: docked or hidden
+    Result focusBrowser();      // ctrl+B from the tracks
+    Result showBrowser (bool show); // browse, and ctrl+B from inside it: docked or hidden
     bool handleBrowserKey (const Key&);
     std::vector<juce::String> browserKinds() const;     // "all", then the kinds the library has
     std::vector<int> browserShown() const;              // the samples the badge and filter leave, list order

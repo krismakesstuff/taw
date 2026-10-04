@@ -1,5 +1,5 @@
-// The sample browser: docked right of the timeline (ctrl+B shows or hides it, shift+B takes the
-// keys into it, Esc gives them back). Selectors at the top choose the map's axes (the sound-alike
+// The sample browser: docked right of the timeline (ctrl+B takes the keys into it, showing it;
+// ctrl+B again hides it; Esc gives the keys back and leaves it showing). Selectors at the top choose the map's axes (the sound-alike
 // map, or two measurements) and what its colours group by; badges pick a kind; the map shows that
 // kind's samples, the list the same samples one by one, in the same colours; typing filters both
 // by name. Every move auditions, at the browser's own level. Enter gives the focused sample track
@@ -518,7 +518,7 @@ bool App::handleBrowserKey (const Key& k)
             {
                 browserActive = false;
                 engine.preview (nullptr);
-                message = L"back to the tracks \x00b7 shift+B the browser again \x00b7 ctrl+B hides it";
+                message = L"back to the tracks \x00b7 ctrl+B the browser again (and again hides it)";
                 messageIsError = false;
             }
             return true;
@@ -689,7 +689,7 @@ Result App::startIndexing (const juce::StringArray& paths)
 
         indexSummary = "indexed " + juce::String ((int) lib.samples().size()) + L" samples in "
                        + juce::String ((juce::Time::getMillisecondCounterHiRes() - started) / 1000.0, 1) + L" s \x00b7 the sound agrees with the names "
-                       + juce::String (juce::roundToInt (agree * 100.0)) + L"% of the time \x00b7 shift+B browses";
+                       + juce::String (juce::roundToInt (agree * 100.0)) + L"% of the time \x00b7 ctrl+B browses";
         indexFinished = true;
     });
 

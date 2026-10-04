@@ -707,7 +707,7 @@ Result App::execute (const juce::String& line)
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
 
-    // browse (shift+B): the sample browser; index <folder> adds a folder of samples to it.
+    // browse: show or hide the sample browser (ctrl+B goes into it); index <folder> adds a folder of samples to it.
     // browse vol -6: the audition's own level.
     if (v == "browse" && (p.args[0].equalsIgnoreCase ("vol") || p.args[0].equalsIgnoreCase ("v")))
         return p.args[1].isEmpty() ? Result::fail ("browse vol -6 sets the audition level") : setAuditionDb (p.args[1].getDoubleValue());

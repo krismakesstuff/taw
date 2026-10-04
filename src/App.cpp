@@ -2689,8 +2689,8 @@ void App::handleMainKey (const Key& k)
             say (execute ("close")); // saves, then back to the sessions
         else if (k.ch == '\\' && session != nullptr)
             say (execute ("ed close")); // every plugin window, from anywhere
-        else if (k.ch == 'b')
-            say (showBrowser (! browserVisible)); // the sample browser, shown or hidden
+        else if (k.ch == 'b') // into the sample browser (showing it); from inside it, hides it
+            say (browserVisible && browserActive ? showBrowser (false) : focusBrowser());
         else if (k.ch == 'z')
             say (undoEdit());
         else if (k.ch == 'y')
@@ -2826,9 +2826,6 @@ void App::handleMainKey (const Key& k)
             // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
                 say (toggleEditor());
-            // shift+B: into the sample browser (docked under the tracks).
-            else if (lineEmpty && k.ch == 'B')
-                say (focusBrowser());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

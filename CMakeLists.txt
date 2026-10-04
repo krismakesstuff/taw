@@ -30,6 +30,7 @@ target_sources(taw PRIVATE
     src/AudioEditor.cpp
     src/AudioEngine.cpp
     src/Bounce.cpp
+    src/Browser.cpp
     src/Import.cpp
     src/Library.cpp
     src/Safety.cpp

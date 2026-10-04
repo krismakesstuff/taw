@@ -109,6 +109,8 @@ private:
     void drawBusPicker (App&);
     void drawTrackMenu (App&);
     void drawMidiPanel (App&);
+    void drawBrowser (App&);
+    int dockRows = 0; // rows the docked browser takes under the tracks
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawOpening (App&);

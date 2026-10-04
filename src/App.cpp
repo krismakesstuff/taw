@@ -53,6 +53,9 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
 
 App::~App()
 {
+    if (indexThread.joinable())
+        indexThread.join(); // an index half written would be measured again anyway
+
     midiInputs.reset(); // its callbacks feed the engine's queues
     releaseSession();
     safety::setEmergencySave (nullptr, nullptr);
@@ -255,6 +258,7 @@ int App::run()
         pollPlugins();
         pollBounce();
         pollImport();
+        pollIndexing();
 
         if (opening != nullptr)
             stepOpening();
@@ -1031,6 +1035,7 @@ void App::pumpBackgroundWork()
     pollPlugins();
     pollBounce();
     pollImport();
+    pollIndexing();
 
     if (treeDirty && session != nullptr)
     {
@@ -2097,6 +2102,11 @@ void App::loadSettings()
     if (json.hasProperty ("io"))
         ioVisible = (bool) json["io"];
 
+    browserVisible = (bool) json.getProperty ("browser", false);
+
+    if (json.hasProperty ("auditionDb"))
+        auditionDb = juce::jlimit (-60.0, 6.0, (double) json["auditionDb"]);
+
     if (const auto* off = json["midiOff"].getArray())
         for (const auto& name : *off)
             midiOff.add (name.toString());
@@ -2107,6 +2117,8 @@ void App::saveSettings() const
     auto* o = new juce::DynamicObject();
     o->setProperty ("theme", theme);
     o->setProperty ("io", ioVisible);
+    o->setProperty ("auditionDb", auditionDb);
+    o->setProperty ("browser", browserVisible);
 
     juce::Array<juce::var> off;
 
@@ -2248,7 +2260,7 @@ void App::handleKey (const Key& k)
 
     if (k.code == Key::Mouse)
     {
-        if (mode == Mode::Main)
+        if (mode == Mode::Main && ! handleBrowserKey (k)) // the docked browser has its own clicks
             handleMouse (k);
 
         return;
@@ -2516,7 +2528,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
+    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
@@ -2668,6 +2680,8 @@ void App::handleMainKey (const Key& k)
             say (execute ("close")); // saves, then back to the sessions
         else if (k.ch == '\\' && session != nullptr)
             say (execute ("ed close")); // every plugin window, from anywhere
+        else if (k.ch == 'b')
+            say (showBrowser (! browserVisible)); // the sample browser, shown or hidden
         else if (k.ch == 'z')
             say (undoEdit());
         else if (k.ch == 'y')
@@ -2803,6 +2817,9 @@ void App::handleMainKey (const Key& k)
             // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
                 say (toggleEditor());
+            // shift+B: into the sample browser (docked under the tracks).
+            else if (lineEmpty && k.ch == 'B')
+                say (focusBrowser());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

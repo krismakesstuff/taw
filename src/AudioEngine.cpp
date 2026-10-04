@@ -26,6 +26,11 @@ AudioEngine::~AudioEngine()
     delete current;
     current = nullptr;
 
+    for (PreviewSound* p = nullptr; previewPending.pop (p) || previewRetired.pop (p);)
+        delete p;
+
+    delete previewNow;
+
     stopping.clear();
     diskThread.stopThread (2000);
 }
@@ -56,6 +61,42 @@ void AudioEngine::setGraph (std::unique_ptr<Graph> g)
 void AudioEngine::triggerPad (int trackIndex, float velocity)
 {
     padPresses.push ({ trackIndex, velocity }); // a full queue drops the press
+}
+
+void AudioEngine::preview (std::shared_ptr<const juce::AudioBuffer<float>> audio, float gain)
+{
+    for (PreviewSound* p = nullptr; previewRetired.pop (p);)
+        delete p;
+
+    auto* p = new PreviewSound { std::move (audio), gain };
+
+    if (! previewPending.push (p))
+        delete p; // the audio thread is behind; this one's skipped
+}
+
+// Added to the outputs after the mix (not metered, not bounced).
+void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
+{
+    for (PreviewSound* p = nullptr; previewPending.pop (p);)
+    {
+        if (previewNow != nullptr && ! previewRetired.push (previewNow))
+            jassertfalse; // leaked rather than freed here
+
+        previewNow = p;
+        previewPos = 0;
+    }
+
+    if (previewNow == nullptr || previewNow->audio == nullptr)
+        return;
+
+    const auto& a = *previewNow->audio;
+    const int count = juce::jmin (n, a.getNumSamples() - previewPos);
+
+    for (int ch = 0; ch < juce::jmin (numOut, 2) && count > 0; ++ch)
+        if (out[ch] != nullptr)
+            juce::FloatVectorOperations::addWithMultiply (out[ch], a.getReadPointer (juce::jmin (ch, a.getNumChannels() - 1), previewPos), previewNow->gain, count);
+
+    previewPos += juce::jmax (0, count);
 }
 
 // Live pad voices for one track, added into its bus. Like hits, they ring out over each other.
@@ -280,6 +321,8 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
         if (looping && playPos.load() >= current->loopEnd)
             playPos.store (current->loopStart);
     }
+
+    renderPreview (out, numOut, numSamples);
 }
 
 void AudioEngine::process (const float* const* in, int numIn, float* const* out, int numOut, int n)

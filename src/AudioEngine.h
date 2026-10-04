@@ -373,6 +373,10 @@ public:
     // Recording the hit is the caller's business; this is only what you hear.
     void triggerPad (int trackIndex, float velocity);
 
+    // The sample browser's audition: plays this (already at the device's rate) straight to the
+    // outputs, stopped or rolling, cutting off whatever it played before; null just stops it.
+    void preview (std::shared_ptr<const juce::AudioBuffer<float>>, float gain = 0.7f);
+
     // numChannels 2: a stereo track, recording inputChannel and the one after it.
     std::shared_ptr<Recorder> createRecorder (int trackIndex, int inputChannel, int numChannels, const juce::File&,
                                               double sampleRate, juce::String& error);
@@ -448,6 +452,12 @@ private:
     };
 
     SpscQueue<PadPress, 256> padPresses;
+
+    struct PreviewSound { std::shared_ptr<const juce::AudioBuffer<float>> audio; float gain = 0.7f; };
+    SpscQueue<PreviewSound*, 32> previewPending, previewRetired; // deleted on the message thread
+    PreviewSound* previewNow = nullptr; // audio thread only
+    int previewPos = 0;
+    void renderPreview (float* const* out, int numOut, int n) noexcept;
 
     std::array<MidiQueue, MidiInputs::maxPorts> midiIn;
     SpscQueue<TimedMidi, 4096> recordedMidi;

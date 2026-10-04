@@ -4,6 +4,7 @@
 #include "Bounce.h"
 #include "AudioEditor.h"
 #include "Import.h"
+#include "Library.h"
 #include "MidiEditor.h"
 #include "Plugins.h"
 #include "Console.h"
@@ -12,6 +13,7 @@
 
 #include <functional>
 #include <map>
+#include <thread>
 
 namespace taw
 {
@@ -214,6 +216,39 @@ public:
     bool midiPanelVisible = false;
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
+
+    // The sample browser (shift+B, browse): the library's kinds as badges, a map of the chosen
+    // kind where samples that sound alike sit together, and a list; typing filters by name, and
+    // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)
+    // or makes a new one. index <folder> adds folders to the library. See Browser.cpp.
+    enum class BrowserFocus { kinds, map, list };
+    // Where the Ui drew the browser, for the mouse and for moving on the map.
+    struct BrowserGeometry
+    {
+        int top = 0, rows = 0;                         // the pane
+        int listX = 0, listY = 0, listW = 0, listRows = 0, listFirst = 0;
+        int mapX = 0, mapY = 0, mapW = 0, mapH = 0;    // cells (each 2x4 braille dots)
+        std::vector<std::pair<int, int>> badges;       // each badge's first column and width, on row top + 1
+        bool valid = false;
+    } browserGeometry;
+    bool browserActive = false; // the keys go to the browser (else it's just showing)
+    Result focusBrowser();      // shift+B
+    Result showBrowser (bool show); // ctrl+B / browse: docked or hidden
+    bool handleBrowserKey (const Key&);
+    std::vector<juce::String> browserKinds() const;     // "all", then the kinds the library has
+    std::vector<int> browserShown() const;              // the samples the badge and filter leave, list order
+    std::pair<float, float> browserPosition (int sample) const; // on the map now showing, 0..1
+    Result startIndexing (const juce::StringArray& folders);
+    void pollIndexing();
+    bool browserVisible = false;
+    BrowserFocus browserFocus = BrowserFocus::kinds;
+    int browserKind = 0, browserSample = -1;
+    juce::String browserFilter;
+    double auditionDb = -6.0; // the browser's audition voice, its own level (settings.json)
+    Result setAuditionDb (double db);
+    std::unique_ptr<Library> library;
+    std::atomic<int> indexDone { 0 }, indexTotal { 0 };
+    bool isIndexing() const { return indexThread.joinable(); }
     // Routing (Routing.cpp): bus tracks, and each track's output and five sends (A to E).
     // Buses are named in commands by track number or name; a name nothing matches makes a new bus.
     Result addBus (const juce::String& name);                                         // "bus Verb"
@@ -584,5 +619,11 @@ private:
     ImportAs importAs = ImportAs::audio;
     juce::String pendingTemplate;
     bool treeDirty = false, quitRequested = false;
+
+    void browserPick (int sample); // select and audition
+    void loadLibrary();
+    std::thread indexThread;
+    std::atomic<bool> indexFinished { false };
+    juce::String indexSummary; // written by the thread before indexFinished
 };
 } // namespace taw

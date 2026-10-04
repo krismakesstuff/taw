@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <map>
+#include <numeric>
 #include <thread>
 
 namespace taw
@@ -419,8 +420,12 @@ juce::var toVar (const SampleInfo& s)
     o->setProperty ("mfcc", mfcc);
     o->setProperty ("mapX", s.mapX);
     o->setProperty ("mapY", s.mapY);
+    o->setProperty ("kindX", s.kindX);
+    o->setProperty ("kindY", s.kindY);
     o->setProperty ("kind", s.kind()); // for anything reading the index; taw works it out again
     o->setProperty ("byName", s.nameKind.isNotEmpty());
+    o->setProperty ("soundKind", s.soundKind);
+    o->setProperty ("soundKindScore", s.soundKindScore);
     return o;
 }
 
@@ -445,6 +450,8 @@ SampleInfo fromVar (const juce::var& v)
     s.rolloffHz = v["rolloffHz"];
     s.mapX = v["mapX"];
     s.mapY = v["mapY"];
+    s.kindX = v["kindX"];
+    s.kindY = v["kindY"];
 
     for (int i = 0; i < SampleInfo::numBands && i < v["bandsDb"].size(); ++i)
         s.bandsDb[(size_t) i] = v["bandsDb"][i];
@@ -453,6 +460,8 @@ SampleInfo fromVar (const juce::var& v)
         s.mfcc[(size_t) i] = v["mfcc"][i];
 
     s.nameKind = Library::kindFromName (juce::File (s.path)); // names are cheap; rules may improve
+    s.soundKind = v["soundKind"].toString();
+    s.soundKindScore = v["soundKindScore"];
     return s;
 }
 } // namespace
@@ -736,26 +745,34 @@ std::vector<int> Library::nearest (int i, int n) const
 // t-SNE, exact (fine to a few thousand samples; a bigger library wants Barnes-Hut): neighbours in
 // the measurements stay neighbours on the map. Perplexity 30, early exaggeration for the first
 // 250 steps, then the map is scaled to 0..1.
-void Library::layout (int iterations)
+namespace
 {
-    const int n = (int) items.size();
+// Positions (0..1) for the scaled measurements, one pair per row.
+std::vector<std::pair<float, float>> tsne (const std::vector<std::vector<float>>& scaled, int iterations)
+{
+    const int n = (int) scaled.size();
 
     if (n < 3)
-        return;
+        return std::vector<std::pair<float, float>> ((size_t) n, { 0.5f, 0.5f });
 
-    if (mean.empty())
-        computeScaling();
-
-    std::vector<std::vector<float>> scaled;
-
-    for (const auto& s : items)
+    // Too many for the exact form (n^2 memory): until Barnes-Hut, the first two measurements'
+    // ranks (the envelope) spread them out instead.
+    if (n > 3000)
     {
-        auto f = features (s);
+        std::vector<int> byX ((size_t) n), byY ((size_t) n);
+        std::iota (byX.begin(), byX.end(), 0);
+        byY = byX;
+        std::sort (byX.begin(), byX.end(), [&] (int a, int b) { return scaled[(size_t) a][4] < scaled[(size_t) b][4]; }); // brightness
+        std::sort (byY.begin(), byY.end(), [&] (int a, int b) { return scaled[(size_t) a][2] > scaled[(size_t) b][2]; }); // tail, longest at the top
+        std::vector<std::pair<float, float>> out ((size_t) n);
 
-        for (size_t d = 0; d < f.size(); ++d)
-            f[d] = (f[d] - mean[d]) / spread[d];
+        for (int r = 0; r < n; ++r)
+        {
+            out[(size_t) byX[(size_t) r]].first = (float) r / (float) (n - 1);
+            out[(size_t) byY[(size_t) r]].second = (float) r / (float) (n - 1);
+        }
 
-        scaled.push_back (std::move (f));
+        return out;
     }
 
     std::vector<double> dist ((size_t) n * (size_t) n), p ((size_t) n * (size_t) n, 0.0);
@@ -852,10 +869,58 @@ void Library::layout (int iterations)
         y0 = std::min (y0, y[(size_t) i * 2 + 1]); y1 = std::max (y1, y[(size_t) i * 2 + 1]);
     }
 
+    std::vector<std::pair<float, float>> out;
+
     for (int i = 0; i < n; ++i)
+        out.push_back ({ (float) ((y[(size_t) i * 2] - x0) / std::max (1.0e-9, x1 - x0)),
+                         (float) ((y[(size_t) i * 2 + 1] - y0) / std::max (1.0e-9, y1 - y0)) });
+
+    return out;
+}
+} // namespace
+
+void Library::layout (int iterations)
+{
+    if (items.empty())
+        return;
+
+    if (mean.empty())
+        computeScaling();
+
+    std::vector<std::vector<float>> scaled;
+
+    for (const auto& s : items)
     {
-        items[(size_t) i].mapX = (float) ((y[(size_t) i * 2] - x0) / std::max (1.0e-9, x1 - x0));
-        items[(size_t) i].mapY = (float) ((y[(size_t) i * 2 + 1] - y0) / std::max (1.0e-9, y1 - y0));
+        auto f = features (s);
+
+        for (size_t d = 0; d < f.size(); ++d)
+            f[d] = (f[d] - mean[d]) / spread[d];
+
+        scaled.push_back (std::move (f));
+    }
+
+    // The whole library, then each kind on its own, so a kind's map spreads its samples out.
+    const auto all = tsne (scaled, iterations);
+
+    for (size_t i = 0; i < items.size(); ++i)
+        std::tie (items[i].mapX, items[i].mapY) = all[i];
+
+    std::map<juce::String, std::vector<size_t>> byKind;
+
+    for (size_t i = 0; i < items.size(); ++i)
+        byKind[items[i].kind()].push_back (i);
+
+    for (const auto& [kind, members] : byKind)
+    {
+        std::vector<std::vector<float>> subset;
+
+        for (auto i : members)
+            subset.push_back (scaled[i]);
+
+        const auto placed = tsne (subset, iterations);
+
+        for (size_t m = 0; m < members.size(); ++m)
+            std::tie (items[members[m]].kindX, items[members[m]].kindY) = placed[m];
     }
 }
 

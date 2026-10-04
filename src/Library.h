@@ -38,7 +38,8 @@ struct SampleInfo
     juce::String soundKind; // from the sound alone: the nearest named samples
     double soundKindScore = 0.0; // how many of those neighbours agreed (0..1)
 
-    float mapX = 0.0f, mapY = 0.0f; // on the library map (0..1): samples that sound alike are close
+    float mapX = 0.0f, mapY = 0.0f;   // on the library map (0..1): samples that sound alike are close
+    float kindX = 0.0f, kindY = 0.0f; // on the map of its kind alone
 
     juce::String kind() const { return nameKind.isNotEmpty() ? nameKind : soundKind; }
 };

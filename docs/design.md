@@ -594,9 +594,31 @@ are read as UTF-16 for the same reason.
 ## The sample library
 
 For finding the right sample among thousands: taw measures each one once, sorts them by kind
-and lays them out on a map where samples that sound alike sit together. (Proof of concept so
-far: `taw --index <folder> ...` builds the index and prints what it found; the browser and map
-views come next.)
+and lays them out on a map where samples that sound alike sit together. `index <folder>` (on its
+own thread; `taw --index <folder> ...` from a shell prints a report) adds folders.
+
+**The browser** docks under the tracks (the timeline gives up about a third of the rows), so the
+session stays in view while you look. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
+keys into it and `Esc` gives them back (clearing the filter first). Inside:
+
+- **Badges** across the top, one per kind with its count, in the kind's colour: `←→` picks one,
+  and the map and list show only that kind. `↓` goes to the map; `↑` past the top of the map or
+  list comes back.
+- **The map**: each kind's samples on a map of their own (so 187 kicks spread over the whole
+  area, not their corner of the full one), drawn in half blocks, two near-square pixels a cell,
+  each in the colour most of its samples have. The arrows go to the nearest sample within 60° of
+  that direction; a click picks the nearest one. The chosen one is a ring with its name.
+- **The list**, `Tab` from the map: the same samples kind by kind, then by name, each with its
+  kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓`, page keys,
+  Home/End.
+- **Typing** filters both by file and folder name. The last row shows the chosen sample's
+  numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS, folder.
+- **Every move auditions**: the file, resampled to the device rate, straight to the outputs,
+  stopped or rolling (not metered, never bounced), at the browser's own level (`shift+↑↓`, `browse
+  vol -6`, saved). `Space` plays it again; `shift+Space` is the transport.
+- **Enter** puts it on a track: on a focused sample track it replaces the sample and keeps the
+  hits, so with the loop playing you hear each candidate in the pattern; anywhere else it makes a
+  new sample track. The browser stays open for the next.
 
 - **The index** is `library.json` in taw's config folder. Nothing is written beside the samples.
   A file is measured again only when its size or date changes; `._` files (Mac resource forks

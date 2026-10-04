@@ -604,7 +604,7 @@ std::vector<float> Library::features (const SampleInfo& s) const
     return f;
 }
 
-void Library::computeScaling()
+void Library::computeScaling() const
 {
     mean.clear();
     spread.clear();
@@ -715,6 +715,9 @@ double Library::classify (int k)
 
 std::vector<int> Library::nearest (int i, int n) const
 {
+    if (mean.empty())
+        computeScaling();
+
     std::vector<std::pair<float, int>> all;
     auto scale = [this] (const SampleInfo& s)
     {
@@ -924,4 +927,27 @@ void Library::layout (int iterations)
     }
 }
 
+const juce::StringArray& Library::measureNames()
+{
+    static const juce::StringArray names { "brightness", "attack", "decay", "tail", "length", "pitch", "loudness", "peak",
+                                           "punch", "noise", "lowend", "hits" };
+    return names;
+}
+
+double Library::measure (const SampleInfo& s, const juce::String& name)
+{
+    if (name == "brightness") return s.centroidHz;
+    if (name == "attack")     return s.attackMs;
+    if (name == "decay")      return s.decayMs;
+    if (name == "tail")       return s.tailMs;
+    if (name == "length")     return s.seconds * 1000.0;
+    if (name == "pitch")      return s.pitchConfidence >= 0.6 ? s.pitchHz : 0.0;
+    if (name == "loudness")   return s.rmsDb;
+    if (name == "peak")       return s.peakDb;
+    if (name == "punch")      return s.crestDb;
+    if (name == "noise")      return s.flatness;
+    if (name == "lowend")     return 10.0 * std::log10 (std::pow (10.0, s.bandsDb[0] / 10.0) + std::pow (10.0, s.bandsDb[1] / 10.0));
+    if (name == "hits")       return s.hits;
+    return 0.0;
+}
 } // namespace taw

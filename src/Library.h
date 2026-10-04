@@ -65,6 +65,12 @@ public:
     // The n samples that sound most like samples[i], nearest first.
     std::vector<int> nearest (int i, int n) const;
 
+    // A measurement by name, for queries (taw --library): brightness (Hz), attack, decay, tail,
+    // length (ms), pitch (Hz, 0 when there isn't a clear one), loudness (dB RMS), peak (dB),
+    // punch (crest dB), noise (flatness 0..1), lowend (dB of the energy under 120 Hz), hits.
+    static const juce::StringArray& measureNames();
+    static double measure (const SampleInfo&, const juce::String& name);
+
     bool save() const;
     const std::vector<SampleInfo>& samples() const { return items; }
 
@@ -73,10 +79,10 @@ public:
 
 private:
     std::vector<float> features (const SampleInfo&) const; // scaled for distance
-    void computeScaling();
+    void computeScaling() const;
 
     juce::File indexFile;
     std::vector<SampleInfo> items;
-    std::vector<float> mean, spread;
+    mutable std::vector<float> mean, spread; // worked out when first needed
 };
 } // namespace taw

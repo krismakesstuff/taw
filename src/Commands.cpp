@@ -470,7 +470,7 @@ Result App::convertTrack (int index, bool toSample)
 
 // "x...x...x...x..." over the selection (repeating), or from the cursor for a bar.
 // X = accent, x = normal, o = ghost, . or - = rest; spaces and | are ignored.
-Result App::writePattern (const std::vector<int>& tracks, const juce::String& stepsIn, double stepBeats)
+Result App::writePattern (const std::vector<int>& tracks, const juce::String& stepsIn, double stepBeats, double swing)
 {
     juce::Array<float> steps;
 
@@ -535,12 +535,14 @@ Result App::writePattern (const std::vector<int>& tracks, const juce::String& st
         for (int k = 0; from + k * stepBeats < to - halfSample; ++k)
             if (const auto vel = steps[k % steps.size()]; vel > 0.0f)
             {
-                track.appendChild (Session::makeHit (from + k * stepBeats, vel), um());
+                // Swing: the second of each pair of steps moves later, toward the next pair.
+                const auto late = (k % 2 == 1) ? stepBeats * (2.0 * swing / 100.0 - 1.0) : 0.0;
+                track.appendChild (Session::makeHit (from + k * stepBeats + late, vel), um());
                 ++written;
             }
     }
 
-    return Result::good (juce::String (written) + " hits on " + juce::String (tracks.size() == 1 ? "track " + juce::String (tracks.front() + 1) : juce::String ((int) tracks.size()) + " tracks")
+    return Result::good (juce::String (written) + " hits" + (swing > 50.0 ? " (swing " + juce::String (swing, 0) + ")" : juce::String()) + " on " + juce::String (tracks.size() == 1 ? "track " + juce::String (tracks.front() + 1) : juce::String ((int) tracks.size()) + " tracks")
                          + L" \x00b7 " + formatBars (std::llround (from * spb)) + L" \x2192 " + formatBars (std::llround (to * spb)));
 }
 
@@ -1049,7 +1051,19 @@ Result App::execute (const juce::String& line)
     if (v == "pat")
     {
         auto args = p.args;
-        double stepBeats = 0.25;
+        double stepBeats = 0.25, swing = 50.0;
+
+        // ~58 or swing58 anywhere: every second step lands late (50 straight, 66 a triplet feel).
+        for (int a = args.size(); --a >= 0;)
+            if (const auto t = args[a].toLowerCase(); t.startsWithChar ('~') || t.startsWith ("swing"))
+            {
+                swing = t.trimCharactersAtStart ("~swing").getDoubleValue();
+
+                if (swing < 50.0 || swing > 75.0)
+                    return Result::fail ("swing between 50 (straight) and 75, e.g. pat /16 ~58 x.x.x.x.");
+
+                args.remove (a);
+            }
 
         if (! args.isEmpty() && args[0].startsWithChar ('/'))
         {
@@ -1063,7 +1077,7 @@ Result App::execute (const juce::String& line)
             args.set (0, args[0].substring (1 + digits.length())); // "/8x.x." keeps its steps
         }
 
-        return writePattern (targets, args.joinIntoString (""), stepBeats);
+        return writePattern (targets, args.joinIntoString (""), stepBeats, swing);
     }
 
     if (v == "x")

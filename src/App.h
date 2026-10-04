@@ -139,7 +139,7 @@ public:
 
     // Sample tracks
     Result convertTrack (int track, bool toSample);
-    Result writePattern (const std::vector<int>& tracks, const juce::String& steps, double stepBeats);
+    Result writePattern (const std::vector<int>& tracks, const juce::String& steps, double stepBeats, double swing = 50.0);
     Result toggleHitAtCursor();
 
     // Instrument tracks: a VST3 instrument played from the MIDI controller while armed, and

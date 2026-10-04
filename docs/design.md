@@ -331,7 +331,9 @@ TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
 - Dropped files under 2 s become sample tracks automatically; longer ones stay audio.
 - `pat` writes steps over the time selection (repeating), or from the cursor for a bar:
   `X` accent, `x` normal, `o` ghost, `.`/`-` rest; spaces and `|` ignored. Steps are 16ths
-  unless `pat /8 …` etc. A pattern replaces the hits in its range.
+  unless `pat /8 …` etc. A pattern replaces the hits in its range. `~58` (or `swing58`)
+  anywhere in it swings: every second step lands late, 50 straight to 75 (66 is a triplet feel),
+  the MPC way, so `pat /16 ~58 …` swings the 16ths.
 - `grid 16` (or 4, 8, 32) sets the fine step: `Alt+←/→` move one step (`Ctrl+Alt` four) and the view zooms
   to one column per step. `Alt+/` toggles a hit at the cursor on a focused sample track (at the
   playhead while playing).
@@ -554,6 +556,19 @@ finish). `TAW_CONFIG=<folder>` uses another config folder (templates, device, pl
 the first way in for scripts and agents. Device-dependent commands (record, input checks)
 report what they can't do. For testing the screen, `:key o` (or `:key right`, `:key enter`,
 `:key ]`, …) presses a key and `:screen` prints the screen as plain text (160×44).
+
+`taw --new <folder>` makes an empty session for `--exec` to build in.
+
+`taw --library` lets an agent go through the sample library the way the browser lets a person:
+`kinds` (counts, and the measurement names), `find <terms>`, and `like <name> <terms>` (the
+samples that sound most like the first whose file name contains `<name>`, nearest first).
+Terms: `kind=kick`, `name=tape` (file or folder name contains), a measurement compared with a
+number (`decay<200`, `brightness>80`; brightness and pitch in Hz, attack, decay, tail and
+length in ms, loudness, peak, punch and lowend in dB, noise 0..1, hits), `sort=decay` (or
+`sort=-decay`, largest first), `limit=20`, `json` (paths, kinds and every measurement). The
+paths go straight into `sample "<path>"`. Asked for "a boom bap beat at 80", an agent can pick a
+knocking kick (`find kind=kick brightness>100 decay<150`), a crack snare, dusty hats, then
+`--new`, `--exec` with `bpm 80`, `sample`, `pat /16 ~58 …`, levels, and a bounce to check.
 
 ## Importing
 

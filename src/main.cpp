@@ -895,6 +895,175 @@ int main (int argc, char** argv)
     }
 #endif
 
+    // taw --new <dir>   an empty session there (48 kHz until a device says otherwise), for scripts
+    // and agents to build with --exec.
+    if (args[0] == "--new")
+    {
+        juce::String error;
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        auto s = args[1].isEmpty() ? nullptr : taw::Session::create (dir, {}, 48000.0, error);
+        std::printf ("%s\n", s != nullptr ? ("new session " + dir.getFullPathName()).toRawUTF8()
+                                         : (args[1].isEmpty() ? juce::String ("taw --new <folder>") : error).toRawUTF8());
+        return s != nullptr ? 0 : 1;
+    }
+
+    // taw --library [kinds | find <terms> | like <name> <terms>]   the sample library, for agents
+    // and scripts. Terms: kind=kick, name=tape (file or folder contains), a measurement with < > or
+    // = and a number (decay<200, brightness>80), sort=decay (sort=-decay: largest first),
+    // limit=20, json. like <name>: the samples that sound most like the first whose file name
+    // contains <name>, nearest first. Measurements: see Library::measureNames.
+    if (args[0] == "--library")
+    {
+        taw::Library library (taw::configFolder().getChildFile ("library.json"));
+        const auto& all = library.samples();
+        const auto what = args[1].isEmpty() ? juce::String ("kinds") : args[1];
+        auto kindOf = [] (const taw::SampleInfo& s) { return s.kind().isEmpty() ? juce::String ("other") : s.kind(); };
+
+        if (what == "kinds")
+        {
+            std::map<juce::String, int> counts;
+
+            for (const auto& s : all)
+                ++counts[kindOf (s)];
+
+            std::printf ("%d samples\n", (int) all.size());
+
+            for (const auto& [k, n] : counts)
+                std::printf ("  %-10s %d\n", k.toRawUTF8(), n);
+
+            std::printf ("measurements: %s\n", taw::Library::measureNames().joinIntoString (" ").toRawUTF8());
+            return 0;
+        }
+
+        if (what != "find" && what != "like")
+        {
+            std::printf ("taw --library kinds | find <terms> | like <name> <terms>\n");
+            return 1;
+        }
+
+        int first = 2, limit = 20;
+        std::vector<int> order;
+
+        if (what == "like")
+        {
+            const auto name = args[2];
+            first = 3;
+            int seed = -1;
+
+            for (int i = 0; i < (int) all.size() && seed < 0; ++i)
+                if (juce::File (all[(size_t) i].path).getFileName().containsIgnoreCase (name))
+                    seed = i;
+
+            if (seed < 0)
+            {
+                std::printf ("no sample's name contains %s\n", name.toRawUTF8());
+                return 1;
+            }
+
+            order.push_back (seed);
+
+            for (auto j : library.nearest (seed, (int) all.size()))
+                order.push_back (j);
+        }
+        else
+        {
+            for (int i = 0; i < (int) all.size(); ++i)
+                order.push_back (i);
+        }
+
+        bool json = false;
+        juce::String sortBy;
+        bool descending = false;
+        std::vector<std::function<bool (const taw::SampleInfo&)>> tests;
+
+        for (int a = first; a < args.size(); ++a)
+        {
+            const auto t = args[a].trim();
+
+            if (t == "json") { json = true; continue; }
+
+            const int op = t.indexOfAnyOf ("<>=");
+
+            if (op <= 0)
+            {
+                std::printf ("don't understand %s (kind=kick, name=tape, decay<200, sort=decay, limit=10, json)\n", t.toRawUTF8());
+                return 1;
+            }
+
+            const auto key = t.substring (0, op).toLowerCase(), value = t.substring (op + 1);
+            const auto c = t[op];
+
+            if (key == "limit")       limit = value.getIntValue();
+            else if (key == "sort")   { descending = value.startsWithChar ('-'); sortBy = value.trimCharactersAtStart ("-+").toLowerCase(); }
+            else if (key == "kind")   tests.push_back ([=] (const taw::SampleInfo& s) { return kindOf (s).equalsIgnoreCase (value); });
+            else if (key == "name")   tests.push_back ([=] (const taw::SampleInfo& s) { const juce::File f (s.path); return (f.getParentDirectory().getFileName() + "/" + f.getFileName()).containsIgnoreCase (value); });
+            else if (taw::Library::measureNames().contains (key))
+            {
+                const auto n = value.getDoubleValue();
+                tests.push_back ([=] (const taw::SampleInfo& s)
+                {
+                    const auto m = taw::Library::measure (s, key);
+                    return c == '<' ? m < n : c == '>' ? m > n : std::abs (m - n) < 1.0e-6 * std::max (1.0, std::abs (n));
+                });
+            }
+            else
+            {
+                std::printf ("no measurement called %s; there are: %s\n", key.toRawUTF8(), taw::Library::measureNames().joinIntoString (" ").toRawUTF8());
+                return 1;
+            }
+        }
+
+        std::vector<int> hits;
+
+        for (auto i : order)
+            if (std::all_of (tests.begin(), tests.end(), [&] (const auto& test) { return test (all[(size_t) i]); })
+                || (what == "like" && i == order.front()))
+                hits.push_back (i);
+
+        if (sortBy.isNotEmpty())
+            std::stable_sort (hits.begin() + (what == "like" ? 1 : 0), hits.end(), [&] (int a, int b)
+            {
+                const auto ma = taw::Library::measure (all[(size_t) a], sortBy), mb = taw::Library::measure (all[(size_t) b], sortBy);
+                return descending ? ma > mb : ma < mb;
+            });
+
+        if ((int) hits.size() > limit + (what == "like" ? 1 : 0))
+            hits.resize ((size_t) limit + (what == "like" ? 1 : 0));
+
+        if (json)
+        {
+            juce::Array<juce::var> list;
+
+            for (auto i : hits)
+            {
+                const auto& s = all[(size_t) i];
+                auto* o = new juce::DynamicObject();
+                o->setProperty ("path", s.path);
+                o->setProperty ("kind", kindOf (s));
+                o->setProperty ("kindBy", s.nameKind.isNotEmpty() ? "name" : "sound");
+
+                for (const auto& m : taw::Library::measureNames())
+                    o->setProperty (m, std::round (taw::Library::measure (s, m) * 100.0) / 100.0);
+
+                list.add (o);
+            }
+
+            std::printf ("%s\n", juce::JSON::toString (list).toRawUTF8());
+            return 0;
+        }
+
+        for (auto i : hits)
+        {
+            const auto& s = all[(size_t) i];
+            std::printf ("%-9s %6.0f ms len  att %5.1f  dec %5.0f  bright %6.0f Hz  pitch %5.0f Hz  rms %5.1f  punch %4.1f  noise %.2f  low %5.1f  %s\n",
+                         kindOf (s).toRawUTF8(), s.seconds * 1000.0, s.attackMs, s.decayMs, s.centroidHz, taw::Library::measure (s, "pitch"),
+                         s.rmsDb, s.crestDb, s.flatness, taw::Library::measure (s, "lowend"), s.path.toRawUTF8());
+        }
+
+        std::printf ("%d shown\n", (int) hits.size());
+        return 0;
+    }
+
     // taw --index <folder> [<folder> ...]   measure the samples there into the library index (only
     // new or changed files), sort them by kind, and print what it found: how far the sound alone
     // agrees with the names, the kinds, the samples the names don't explain, and a few neighbours.

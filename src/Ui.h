@@ -40,7 +40,7 @@ inline int laneWidth (int consoleWidth, bool io, bool twoRows)
 // transport row down to the input line. Narrow consoles don't have room for it.
 inline int browserDock (int consoleWidth, bool visible)
 {
-    return visible && consoleWidth >= 140 ? std::clamp (consoleWidth * 2 / 5, 56, 100) : 0;
+    return visible && consoleWidth >= 120 ? std::clamp (consoleWidth * 3 / 10, 44, 72) : 0;
 }
 } // namespace layout
 

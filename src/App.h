@@ -241,6 +241,7 @@ public:
     int browserAxisX = 0, browserAxisY = 0;
     bool browserColourByFolder = false;
     juce::String browserAxisRange (bool y) const; // "51 Hz → 12 kHz" over the kind shown
+    std::pair<juce::String, juce::String> browserAxisEnds (bool y) const; // low, high
     juce::String browserGroup (const SampleInfo&) const; // what its colour stands for: kind or folder
     void setBrowserAxis (bool y, int step);
     bool browserActive = false; // the keys go to the browser (else it's just showing)
@@ -641,7 +642,7 @@ private:
         size_t count = 0;
         int kind = -1, x = -1, y = -1;
         std::vector<float> rankX, rankY; // by sample index, 0..1
-        juce::String rangeX, rangeY;
+        juce::String lowX, highX, lowY, highY; // the values at the ends, written out
     };
     mutable AxisCache axisCache;
     const AxisCache& axes() const;

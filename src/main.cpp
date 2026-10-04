@@ -365,8 +365,19 @@ int main (int argc, char** argv)
 
             if (args[i].startsWith (":key "))
             {
-                const auto name = args[i].substring (5);
+                auto name = args[i].substring (5);
                 taw::Key k;
+
+                // ":key ctrl+right", ":key shift+up": modifiers first.
+                for (bool more = true; more;)
+                {
+                    more = false;
+
+                    if (name.startsWithIgnoreCase ("ctrl+") && name.length() > 5) { k.ctrl = more = true; name = name.substring (5); }
+                    if (name.startsWithIgnoreCase ("shift+") && name.length() > 6) { k.shift = more = true; name = name.substring (6); }
+                    if (name.startsWithIgnoreCase ("alt+") && name.length() > 4) { k.alt = more = true; name = name.substring (4); }
+                }
+
                 const std::pair<const char*, taw::Key::Code> named[] = { { "enter", taw::Key::Enter }, { "esc", taw::Key::Escape }, { "left", taw::Key::Left },
                                                                          { "right", taw::Key::Right }, { "up", taw::Key::Up }, { "down", taw::Key::Down },
                                                                          { "del", taw::Key::Delete }, { "tab", taw::Key::Tab }, { "backspace", taw::Key::Backspace } };

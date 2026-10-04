@@ -128,7 +128,7 @@ const App::AxisCache& App::axes() const
         if (kind == "all" || kindOf (all[(size_t) i]) == kind)
             members.push_back (i);
 
-    auto rank = [&] (const Axis& a, std::vector<float>& out, juce::String& range)
+    auto rank = [&] (const Axis& a, std::vector<float>& out, juce::String& low, juce::String& high)
     {
         std::vector<std::pair<double, int>> v;
 
@@ -152,11 +152,12 @@ const App::AxisCache& App::axes() const
             lo = hi + 1;
         }
 
-        range = v.empty() ? juce::String() : a.format (v.front().first) + L" \x2192 " + a.format (v.back().first);
+        low = v.empty() ? juce::String() : a.format (v.front().first);
+        high = v.empty() ? juce::String() : a.format (v.back().first);
     };
 
-    rank (axisTable[browserAxisX], c.rankX, c.rangeX);
-    rank (axisTable[browserAxisY], c.rankY, c.rangeY);
+    rank (axisTable[browserAxisX], c.rankX, c.lowX, c.highX);
+    rank (axisTable[browserAxisY], c.rankY, c.lowY, c.highY);
     return c;
 }
 
@@ -165,8 +166,17 @@ juce::String App::browserAxisRange (bool y) const
     if (browserAxisX == 0)
         return {};
 
+    const auto [low, high] = browserAxisEnds (y);
+    return low + L" \x2192 " + high;
+}
+
+std::pair<juce::String, juce::String> App::browserAxisEnds (bool y) const
+{
+    if (browserAxisX == 0)
+        return {};
+
     const auto& c = axes();
-    return y ? c.rangeY : c.rangeX;
+    return y ? std::pair { c.lowY, c.highY } : std::pair { c.lowX, c.highX };
 }
 
 void App::loadLibrary()
@@ -194,6 +204,7 @@ Result App::focusBrowser()
 {
     loadLibrary();
     browserVisible = browserActive = true;
+    browserFocus = BrowserFocus::map; // the map (and typing to filter) first
     saveSettings();
 
     if (library->samples().empty())
@@ -454,7 +465,8 @@ bool App::handleBrowserKey (const Key& k)
     };
 
     // The nearest sample on the map in an arrow's direction (within 60 degrees of it).
-    auto moveOnMap = [&] (float ux, float uy)
+    // ctrl: a fifth of the map that way, to the sample nearest that spot (still that way).
+    auto moveOnMap = [&] (float ux, float uy, bool far = false)
     {
         if (browserSample < 0)
         {
@@ -480,7 +492,11 @@ bool App::handleBrowserKey (const Key& k)
             if (along <= 0.0f || across > along * 1.7f)
                 continue;
 
-            if (const float score = std::sqrt (along * along + across * across) + across; score < bestScore)
+            const float jump = far ? 0.2f * (std::abs (ux) > 0.0f ? sx : sy) : 0.0f; // in pixels
+            const float score = far ? std::sqrt ((along - jump) * (along - jump) + across * across) + across
+                                    : std::sqrt (along * along + across * across) + across;
+
+            if (score < bestScore)
                 bestScore = score, best = i;
         }
 
@@ -531,7 +547,7 @@ bool App::handleBrowserKey (const Key& k)
                 keepSelection();
             }
             else if (browserFocus == BrowserFocus::map)
-                moveOnMap ((float) step, 0.0f);
+                moveOnMap ((float) step, 0.0f, k.ctrl);
             else
                 browserFocus = BrowserFocus::map;
 
@@ -564,11 +580,13 @@ bool App::handleBrowserKey (const Key& k)
             else if (browserFocus == BrowserFocus::map)
             {
                 // Up past the top of the map goes to the badges.
-                if (! moveOnMap (0.0f, (float) step) && step < 0)
+                if (! moveOnMap (0.0f, (float) step, k.ctrl) && step < 0)
                     browserFocus = BrowserFocus::kinds;
             }
             else if (at + step < 0)
                 browserFocus = BrowserFocus::kinds;
+            else if (k.ctrl && ! shown.empty()) // ten at a time
+                browserPick (shown[(size_t) juce::jlimit (0, (int) shown.size() - 1, at + step * 10)]);
             else if (at + step < (int) shown.size())
                 browserPick (shown[(size_t) (at + step)]);
 

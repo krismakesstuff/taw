@@ -612,19 +612,22 @@ For finding the right sample among thousands: taw measures each one once, sorts 
 and lays them out on a map where samples that sound alike sit together. `index <folder>` (on its
 own thread; `taw --index <folder> ...` from a shell prints a report) adds folders.
 
-**The browser** docks in a column right of the timeline and its meters (about two fifths of the
-width, 56 to 100 columns; not on consoles under 140), from the transport row down to the input
+**The browser** docks in a column right of the timeline and its meters (about three tenths of
+the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
 line, which stays full width; the session stays in view while you look. In the column the map
 sits on top, the list under it, the badges wrap. `ctrl+B` shows or hides it (remembered); `shift+B` takes the
-keys into it and `Esc` gives them back (clearing the filter first). Inside:
+keys into it, on the map (typing filters from anywhere), and `Esc` gives them back (clearing the
+filter first). Inside:
 
 - **Selectors** at the very top, `↑` from the badges, `←→` (or a click) to change:
   - **x** and **y**: what the map's axes show. `similar` (the default) is the sound-alike map
     below, both axes at once, where only nearness means anything. Otherwise two measurements:
     brightness, attack, decay, tail, length, pitch (unpitched at the bottom), loudness (RMS),
     punch (crest), noise (flatness), low end (energy under 120 Hz). Each is spread by rank within
-    the kind shown, so the map fills evenly; the row shows the real range ("49 Hz → 335 Hz"), the
-    rule under the map names the axes. The two are never the same; `y` is skipped on the
+    the kind shown, so the map fills evenly; the row shows the real range ("49 Hz → 335 Hz"). On
+    the map itself the y axis is named with its high end in the top-left corner and its low end
+    in the bottom-left (on a plate over the dots), the x axis on the rule under it: low end, name,
+    high end. The two are never the same; `y` is skipped on the
     sound-alike map.
   - **colours**: by kind, or by folder (each folder one of a dozen colours from its name), on
     the map and the list's dots alike, to see which pack a sound comes from.
@@ -635,10 +638,13 @@ keys into it and `Esc` gives them back (clearing the filter first). Inside:
 - **The map**: each kind's samples on a map of their own (so 187 kicks spread over the whole
   area, not their corner of the full one), drawn in half blocks, two near-square pixels a cell,
   each in the colour most of its samples have. The arrows go to the nearest sample within 60° of
-  that direction; a click picks the nearest one. The chosen one is a ring with its name.
+  that direction; `ctrl+arrow` jumps a fifth of the map that way (to the sample nearest that
+  spot), to cross it quickly and then home in with the plain arrows. A click picks the nearest
+  one. The chosen one is a ring with its name.
 - **The list** (under the map), `Tab` from the map: the same samples kind by kind, then by name, each with its
-  kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓`, page keys,
-  Home/End.
+  kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓` (`ctrl` ten
+  at a time), page keys, Home/End. Greyed out unless it has the keys, so it's plain which of map
+  and list does.
 - **Typing** filters both by file and folder name. The last row shows the chosen sample's
   numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS, folder.
 - **Every move auditions**: the file, resampled to the device rate, straight to the outputs,

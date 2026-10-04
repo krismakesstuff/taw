@@ -1976,10 +1976,15 @@ void Ui::drawBrowser (App& app)
     const int mapH = std::max (3, bodyRows * 11 / 20), listY = bodyY + mapH + 1, listRows = std::max (1, infoY - listY);
     canvas.fill (x0, bodyY + mapH, cw, L'\x2500', colour::faint);
 
-    // Under the map, what its axes are.
+    // The x axis on the rule under the map: its low end, its name, its high end.
     if (! similar)
-        canvas.text (x0 + 1, bodyY + mapH, " " + axisNames[app.browserAxisX] + L" \x2192  \x00b7  " + axisNames[app.browserAxisY] + L" \x2191 ",
-                     colour::dim, -1, false, cw - 2);
+    {
+        const auto [low, high] = app.browserAxisEnds (false);
+        const auto name = " " + axisNames[app.browserAxisX] + L" \x2192 ";
+        canvas.text (x0, bodyY + mapH, low + " ", colour::text);
+        canvas.text (x0 + (cw - name.length()) / 2, bodyY + mapH, name, colour::accent, -1, true);
+        canvas.text (x0 + cw - high.length() - 1, bodyY + mapH, " " + high, colour::text);
+    }
 
     // The map: half blocks, two square-ish pixels a cell (top and bottom), each in the colour
     // most of its samples have.
@@ -2022,6 +2027,16 @@ void Ui::drawBrowser (App& app)
                 canvas.put (mapX + cx, bodyY + cy, L'\x2584', lower);
         }
 
+    // The y axis in the map's left corners, on a plate so the dots don't hide it: its name and
+    // high end at the top, its low end at the bottom.
+    if (! similar)
+    {
+        const auto [low, high] = app.browserAxisEnds (true);
+        int lx = canvas.text (mapX, bodyY, L"\x2191 " + axisNames[app.browserAxisY] + " ", colour::accent, colour::headerBg, true);
+        canvas.text (lx, bodyY, high + " ", colour::text, colour::headerBg);
+        canvas.text (mapX, bodyY + mapH - 1, "  " + low + " ", colour::text, colour::headerBg);
+    }
+
     if (shown.empty())
         canvas.text (mapX + 2, bodyY + mapH / 2, app.browserFilter.isNotEmpty() ? L"nothing matches \x00b7 backspace" : L"none of these", colour::dim);
 
@@ -2035,12 +2050,15 @@ void Ui::drawBrowser (App& app)
         const int i = shown[(size_t) (first + r)];
         const auto& s = lib->samples()[(size_t) i];
         const bool chosen = i == app.browserSample;
-        const int rowBg = chosen ? (active && app.browserFocus == App::BrowserFocus::list ? colour::selBg : colour::focusBg) : -1;
+        // Greyed out unless the keys are in the list, so it's clear which of the two has them.
+        const bool listFocus = active && app.browserFocus == App::BrowserFocus::list;
+        const int rowBg = chosen ? (listFocus ? colour::selBg : colour::focusBg) : -1;
         canvas.fill (x0, listY + r, cw, L' ', -1, rowBg);
-        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', groupColour (app.browserGroup (s)), rowBg); // hollow: kind by sound
+        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', listFocus || chosen ? groupColour (app.browserGroup (s)) : colour::faint, rowBg); // hollow: kind by sound
         const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
-        canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), colour::text, rowBg, chosen, cw - 3 - len.length());
-        canvas.text (x0 + cw - len.length(), listY + r, len, colour::dim, rowBg);
+        canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), listFocus ? colour::text : chosen ? colour::dim : colour::faint, rowBg, chosen && listFocus,
+                     cw - 3 - len.length());
+        canvas.text (x0 + cw - len.length(), listY + r, len, listFocus ? colour::dim : colour::faint, rowBg);
     }
 
     // The chosen sample: a ring on the map with its name, its numbers under the list.

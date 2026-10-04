@@ -2046,6 +2046,11 @@ void Ui::drawBrowser (App& app)
     const int infoY = axesY - 3, ruleY = infoY - 1, bodyY = top + 1;
     const int mapH = std::max (3, ruleY - bodyY);
 
+    // A border between the map (and the chosen sample) and the settings and input line under it,
+    // joined to the column's own border.
+    canvas.put (left, axesY - 1, L'\x251c', active ? colour::dim : colour::faint);
+    canvas.fill (left + 1, axesY - 1, canvas.width() - left - 1, L'\x2500', active ? colour::dim : colour::faint);
+
     for (int b = 0; b < (int) badgeAt.size(); ++b)
     {
         const auto& [bx, row, label] = badgeAt[(size_t) b];

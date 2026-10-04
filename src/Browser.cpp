@@ -582,8 +582,7 @@ bool App::handleBrowserKey (const Key& k)
             return true;
 
         case Key::Tab:
-            browserFocus = browserFocus == BrowserFocus::map ? BrowserFocus::list : BrowserFocus::map;
-            return true;
+            return true; // (there's no list to go to)
 
         case Key::Left:
         case Key::Right:
@@ -650,10 +649,10 @@ bool App::handleBrowserKey (const Key& k)
         case Key::End:
             if (! shown.empty())
             {
-                const int page = std::max (1, g.listRows - 1);
+                const int page = 10;
                 const int to = k.code == Key::Home ? 0 : k.code == Key::End ? (int) shown.size() - 1
                              : at + (k.code == Key::PageUp ? -page : page);
-                browserFocus = BrowserFocus::list;
+                browserFocus = BrowserFocus::map;
                 browserPick (shown[(size_t) juce::jlimit (0, (int) shown.size() - 1, to)]);
             }
             return true;

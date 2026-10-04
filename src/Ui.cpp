@@ -1842,8 +1842,9 @@ void Ui::drawTrackMenu (App& app)
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).
 // The docked sample browser, a column right of the timeline from the transport row down to the
-// input line: a header, the kinds as badges (wrapping), the filter, the map, the list (in the
-// kinds' colours), and the chosen sample's numbers.
+// input line. Top to bottom: a header, the axes, the kinds as badges (wrapping), the map, the
+// chosen sample, the qualities the filter can use (with their range in what's shown), the
+// hints, and the filter's own input line at the bottom, like taw's.
 void Ui::drawBrowser (App& app)
 {
     auto& g = app.browserGeometry;
@@ -1871,8 +1872,9 @@ void Ui::drawBrowser (App& app)
     if (app.isIndexing())
         canvas.text (x, top, L" \x00b7 indexing " + juce::String (app.indexDone.load()) + " / " + juce::String (app.indexTotal.load()), colour::meterYellow);
 
-    const int hintY = top + rows - 1;
-    canvas.text (x0, hintY, active ? L"alt+arrows axes \x00b7 ctrl jumps \x00b7 tab list \x00b7 enter uses \x00b7 esc tracks"
+    // The bottom two rows: the hints, then the filter's input line.
+    const int inputY = top + rows - 1, hintY = inputY - 1;
+    canvas.text (x0, hintY, active ? L"alt+arrows axes \x00b7 ctrl+arrows jump \x00b7 enter uses \x00b7 esc tracks"
                                    : L"ctrl+B browse (again: hide)", colour::faint, -1, false, cw);
 
     if (lib == nullptr || total == 0)
@@ -1887,7 +1889,25 @@ void Ui::drawBrowser (App& app)
         return;
     }
 
-    // The selectors: what the axes show and what the colours group by. ←→ steps the focused one.
+    const auto shown = app.browserShown();
+
+    // The filter's input line.
+    x = canvas.text (x0, inputY, L"\x203a ", colour::accent);
+
+    if (app.browserFilter.isEmpty())
+        x = canvas.text (x, inputY, active ? L"\x2581 type a name or dec<200 bright>1k \x2026" : L"type a name or dec<200 bright>1k \x2026", colour::faint);
+    else
+    {
+        x = canvas.text (x, inputY, app.browserFilter, colour::text, -1, true);
+
+        if (active)
+            x = canvas.text (x, inputY, L"\x2581", colour::accent);
+    }
+
+    const auto count = juce::String ((int) shown.size()) + " of " + juce::String (total);
+    canvas.text (std::max (x + 2, x0 + cw - count.length()), inputY, count, colour::dim);
+
+    // The selectors: what the axes show (alt+arrows step them).
     auto selector = [&] (int row, const juce::String& label, const juce::String& value, App::BrowserFocus which, const juce::String& note, bool off)
     {
         const bool focus = active && app.browserFocus == which;
@@ -1922,8 +1942,6 @@ void Ui::drawBrowser (App& app)
     for (const auto& s : lib->samples())
         ++counts[s.kind().isEmpty() ? juce::String ("other") : s.kind()];
 
-    // What a sample's colour stands for, and the colour.
-    auto groupColour = [] (const juce::String& kind) { return colour::kind (kind); };
     auto kindName = [] (const SampleInfo& s) { return s.kind().isEmpty() ? juce::String ("other") : s.kind(); };
 
     int y = top + 3;
@@ -1947,35 +1965,101 @@ void Ui::drawBrowser (App& app)
         x += label.length() + 1;
     }
 
-    // The filter.
-    const auto shown = app.browserShown();
-    const int filterY = y + 1;
-    x = canvas.text (x0, filterY, L"\x203a ", colour::accent);
+    // The qualities the filter can use, each with its range over what's shown; the ones in the
+    // filter now are lit. They wrap above the hints.
+    struct Quality { const char* typed; const char* measure; int unit; }; // 0 Hz, 1 time, 2 dB, 3 plain, 4 count
+    static const Quality qualities[] = { { "bright", "brightness", 0 }, { "att", "attack", 1 }, { "dec", "decay", 1 }, { "tail", "tail", 1 },
+                                         { "len", "length", 1 }, { "pitch", "pitch", 0 }, { "loud", "loudness", 2 }, { "punch", "punch", 2 },
+                                         { "noise", "noise", 3 }, { "low", "lowend", 2 }, { "hits", "hits", 4 } };
+    auto compact = [] (double v, int unit) -> juce::String
+    {
+        switch (unit)
+        {
+            case 0:  return v >= 1000.0 ? juce::String (v / 1000.0, 1) + "k" : juce::String (juce::roundToInt (v));
+            case 1:  return v >= 1000.0 ? juce::String (v / 1000.0, 1) + "s" : juce::String (juce::roundToInt (v)) + "ms";
+            case 2:  return juce::String (juce::roundToInt (v));
+            case 3:  return juce::String (v, 2);
+            default: return juce::String (juce::roundToInt (v));
+        }
+    };
 
-    if (app.browserFilter.isEmpty() && ! active)
-        x = canvas.text (x, filterY, "type: names, decay<200 bright>1k", colour::faint);
-    else
-        x = canvas.text (x, filterY, app.browserFilter, colour::text, -1, true);
+    const auto filterLower = app.browserFilter.toLowerCase();
+    auto inFilter = [&] (const Quality& q)
+    {
+        for (const auto& t : juce::StringArray::fromTokens (filterLower, " ", ""))
+        {
+            const auto key = t.upToFirstOccurrenceOf ("<", false, false).upToFirstOccurrenceOf (">", false, false).upToFirstOccurrenceOf ("=", false, false);
 
-    if (active)
-        x = canvas.text (x, filterY, L"\x2581", colour::accent);
+            if (key != t && (key == q.typed || key == q.measure))
+                return true;
+        }
 
-    canvas.text (x + 2, filterY, juce::String ((int) shown.size()) + " shown", colour::dim);
+        return false;
+    };
 
-    // The rest: the map on top, the list under it, two rows of numbers, the hint row.
-    const int bodyY = filterY + 1, infoY = hintY - 2, bodyRows = std::max (4, infoY - bodyY);
-    // The list is a few rows (the map is where you look); filter to get to fewer samples.
-    const int listRows = juce::jlimit (2, 4, bodyRows / 6), mapH = std::max (3, bodyRows - listRows - 1), listY = bodyY + mapH + 1;
-    canvas.fill (x0, bodyY + mapH, cw, L'\x2500', colour::faint);
+    struct Piece { juce::String text; bool lit; };
+    std::vector<Piece> pieces;
 
-    // The x axis on the rule under the map: its low end, its name, its high end.
+    for (const auto& q : qualities)
+    {
+        double lo = 1.0e300, hi = -1.0e300;
+
+        for (auto i : shown)
+        {
+            const auto v = Library::measure (lib->samples()[(size_t) i], q.measure);
+
+            if (juce::String (q.measure) == "pitch" && v <= 0.0)
+                continue; // unpitched
+
+            lo = std::min (lo, v);
+            hi = std::max (hi, v);
+        }
+
+        const auto units = q.unit == 0 ? juce::String ("Hz") : q.unit == 2 ? juce::String ("dB") : juce::String();
+        pieces.push_back ({ juce::String (q.typed) + " " + (lo > hi ? juce::String (L"\x2014") : compact (lo, q.unit) + L"\x2026" + compact (hi, q.unit) + units),
+                            inFilter (q) });
+    }
+
+    std::vector<std::vector<const Piece*>> qualityRows (1);
+    int rowLength = 0;
+
+    for (const auto& p : pieces)
+    {
+        if (rowLength > 0 && rowLength + 3 + p.text.length() > cw)
+            qualityRows.push_back ({}), rowLength = 0;
+
+        qualityRows.back().push_back (&p);
+        rowLength += (rowLength > 0 ? 3 : 0) + p.text.length();
+    }
+
+    const int qualityY = hintY - (int) qualityRows.size();
+
+    for (size_t r = 0; r < qualityRows.size(); ++r)
+    {
+        int qx = x0;
+
+        for (size_t k = 0; k < qualityRows[r].size(); ++k)
+        {
+            if (k > 0)
+                qx = canvas.text (qx, qualityY + (int) r, L" \x00b7 ", colour::faint);
+
+            const auto* p = qualityRows[r][k];
+            qx = canvas.text (qx, qualityY + (int) r, p->text, p->lit ? colour::accent : colour::dim, -1, p->lit);
+        }
+    }
+
+    // Between the badges and the qualities: the map, its x-axis rule, the chosen sample (2 rows).
+    const int bodyY = y + 1, infoY = qualityY - 3, ruleY = infoY - 1;
+    const int mapH = std::max (3, ruleY - bodyY);
+    canvas.fill (x0, ruleY, cw, L'\x2500', colour::faint);
+
     if (! similar)
     {
         const auto [low, high] = app.browserAxisEnds (false);
         const auto name = " " + axisNames[app.browserAxisX] + L" \x2192 ";
-        canvas.text (x0, bodyY + mapH, low + " ", colour::text);
-        canvas.text (x0 + (cw - name.length()) / 2, bodyY + mapH, name, colour::accent, -1, true);
-        canvas.text (x0 + cw - high.length() - 1, bodyY + mapH, " " + high, colour::text);
+        canvas.text (x0, ruleY, low + " ", colour::text);
+        canvas.text (x0 + (cw - name.length()) / 2, ruleY, name, colour::accent, -1, true);
+        canvas.text (x0 + cw - high.length() - 1, ruleY, " " + high, colour::text);
     }
 
     // The map: half blocks, two square-ish pixels a cell (top and bottom), each in the colour
@@ -1994,8 +2078,7 @@ void Ui::drawBrowser (App& app)
     for (auto i : shown)
     {
         const auto [dx, dy] = dotOf (i);
-        const auto& s = lib->samples()[(size_t) i];
-        ++pixelKinds[(size_t) (dy * mapW + dx)][kindName (s)];
+        ++pixelKinds[(size_t) (dy * mapW + dx)][kindName (lib->samples()[(size_t) i])];
     }
 
     auto pixelColour = [&] (int px, int py)
@@ -2005,7 +2088,7 @@ void Ui::drawBrowser (App& app)
         if (k.empty())
             return -1;
 
-        return groupColour (std::max_element (k.begin(), k.end(), [] (const auto& a, const auto& b) { return a.second < b.second; })->first);
+        return colour::kind (std::max_element (k.begin(), k.end(), [] (const auto& a, const auto& b) { return a.second < b.second; })->first);
     };
 
     for (int cy = 0; cy < mapH; ++cy)
@@ -2032,28 +2115,10 @@ void Ui::drawBrowser (App& app)
     if (shown.empty())
         canvas.text (mapX + 2, bodyY + mapH / 2, app.browserFilter.isNotEmpty() ? L"nothing matches \x00b7 backspace" : L"none of these", colour::dim);
 
-    // The list.
+    // The chosen sample: a ring on the map with its name beside it; under the map, its file and
+    // kind, then its numbers.
     const int at = (int) (std::find (shown.begin(), shown.end(), app.browserSample) - shown.begin());
-    const int first = juce::jlimit (0, std::max (0, (int) shown.size() - listRows), at - listRows / 2);
-    g.listX = x0, g.listY = listY, g.listW = cw, g.listRows = listRows, g.listFirst = first;
 
-    for (int r = 0; r < listRows && first + r < (int) shown.size(); ++r)
-    {
-        const int i = shown[(size_t) (first + r)];
-        const auto& s = lib->samples()[(size_t) i];
-        const bool chosen = i == app.browserSample;
-        // Greyed out unless the keys are in the list, so it's clear which of the two has them.
-        const bool listFocus = active && app.browserFocus == App::BrowserFocus::list;
-        const int rowBg = chosen ? (listFocus ? colour::selBg : colour::focusBg) : -1;
-        canvas.fill (x0, listY + r, cw, L' ', -1, rowBg);
-        canvas.put (x0, listY + r, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', listFocus || chosen ? groupColour (kindName (s)) : colour::faint, rowBg); // hollow: kind by sound
-        const auto len = juce::String (s.seconds, s.seconds < 10.0 ? 2 : 1) + "s";
-        canvas.text (x0 + 2, listY + r, juce::File (s.path).getFileName(), listFocus ? colour::text : chosen ? colour::dim : colour::faint, rowBg, chosen && listFocus,
-                     cw - 3 - len.length());
-        canvas.text (x0 + cw - len.length(), listY + r, len, listFocus ? colour::dim : colour::faint, rowBg);
-    }
-
-    // The chosen sample: a ring on the map with its name, its numbers under the list.
     if (at < (int) shown.size())
     {
         const auto& s = lib->samples()[(size_t) app.browserSample];
@@ -2061,17 +2126,21 @@ void Ui::drawBrowser (App& app)
         const auto [dx, dy] = dotOf (app.browserSample);
         const int cx = dx, cy = dy / 2;
         const bool mapFocus = active && app.browserFocus == App::BrowserFocus::map;
-        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : groupColour (kind), mapFocus ? colour::accent : colour::selBg, true);
+        canvas.put (mapX + cx, bodyY + cy, L'\x25c9', mapFocus ? 16 : colour::kind (kind), mapFocus ? colour::accent : colour::selBg, true);
 
         const auto name = juce::File (s.path).getFileNameWithoutExtension();
         const int nameX = cx + 2 + name.length() < mapW ? mapX + cx + 2 : std::max (mapX, mapX + cx - 1 - name.length());
         canvas.text (nameX, bodyY + cy, name, colour::text, -1, false, std::min (name.length(), mapX + mapW - nameX));
 
+        canvas.put (x0, infoY, s.nameKind.isEmpty() ? L'\x25cb' : L'\x25cf', colour::kind (kind)); // hollow: kind by sound
+        const int ix = canvas.text (x0 + 2, infoY, juce::File (s.path).getFileName(), colour::text, -1, true, cw - 2);
+        canvas.text (ix, infoY, L" \x00b7 " + kind + (s.nameKind.isEmpty() ? " (by its sound)" : "") + L" \x00b7 "
+                                    + juce::File (s.path).getParentDirectory().getFileName(), colour::dim, -1, false, x0 + cw - ix);
+
         juce::StringArray parts;
-        parts.add (kind + (s.nameKind.isEmpty() ? " (by its sound)" : ""));
         parts.add (juce::String (s.seconds, 2) + " s");
-        parts.add ("attack " + juce::String (s.attackMs, 1) + " ms");
-        parts.add ("decay " + juce::String (juce::roundToInt (s.decayMs)) + " ms");
+        parts.add ("att " + juce::String (s.attackMs, 1) + " ms");
+        parts.add ("dec " + juce::String (juce::roundToInt (s.decayMs)) + " ms");
 
         if (s.pitchConfidence >= 0.6 && s.pitchHz > 0.0)
         {
@@ -2080,28 +2149,8 @@ void Ui::drawBrowser (App& app)
         }
 
         parts.add ("bright " + juce::String (juce::roundToInt (s.centroidHz)) + " Hz");
-        parts.add ("rms " + formatDb (s.rmsDb) + " dB");
-        parts.add (juce::File (s.path).getParentDirectory().getFileName());
-
-        // Two rows, broken between the pieces.
-        juce::String line;
-        int row = 0;
-
-        for (const auto& p : parts)
-        {
-            const auto next = line.isEmpty() ? p : line + L" \x00b7 " + p;
-
-            if (next.length() > cw && line.isNotEmpty() && row == 0)
-            {
-                canvas.text (x0, infoY, line, colour::dim, -1, false, cw);
-                line = p;
-                row = 1;
-            }
-            else
-                line = next;
-        }
-
-        canvas.text (x0, infoY + row, line, colour::dim, -1, false, cw);
+        parts.add ("loud " + formatDb (s.rmsDb) + " dB");
+        canvas.text (x0 + 2, infoY + 1, parts.joinIntoString (juce::String (L" \x00b7 ")), colour::dim, -1, false, cw - 2);
     }
 }
 

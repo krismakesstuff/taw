@@ -614,8 +614,11 @@ own thread; `taw --index <folder> ...` from a shell prints a report) adds folder
 
 **The browser** docks in a column right of the timeline and its meters (about three tenths of
 the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
-line, which stays full width; the session stays in view while you look. In the column the map
-sits on top, the list under it, the badges wrap. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
+line, which stays full width; the session stays in view while you look. In the column, top to
+bottom: the axes, the badges (wrapping), the map with its x-axis rule, the chosen sample (file,
+kind, folder; its numbers), the qualities the filter can use, the hints, and the filter's own
+input line at the bottom, like taw's. There's no file list: the map is where you look, and the
+filter is how you get to fewer samples. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
 filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too; remembered). Inside:
 
 - **Selectors** at the very top show what the map's axes are; `alt+←→` steps x and `alt+↑↓`
@@ -639,14 +642,13 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
   that direction; `ctrl+arrow` jumps a fifth of the map that way (to the sample nearest that
   spot), to cross it quickly and then home in with the plain arrows. A click picks the nearest
   one. The chosen one is a ring with its name.
-- **The list** (under the map, two to four rows: the map is where you look), `Tab` from the map: the same samples kind by kind, then by name, each with its
-  kind's dot (hollow when the sound, not the name, gave the kind) and length. `↑↓` (`ctrl` ten
-  at a time), page keys, Home/End. Greyed out unless it has the keys, so it's plain which of map
-  and list does.
-- **Typing** filters both: words match file and folder names, and measurement terms the sounds,
+- **Typing** filters, on the input line at the bottom: words match file and folder names, and measurement terms the sounds,
   `decay<200 bright>1k pitch>60 len<0.5s` (the `--library` names or short ones: bright, att, dec,
   len, loud, low; numbers take k and s). `Space` between terms (with the filter empty it plays
-  the sample again). The idea: filter to the qualities you want, then move on a smaller map. The last row shows the chosen sample's
+  the sample again). The idea: filter to the qualities you want, then move on a smaller map.
+  Above the input line every quality is listed as you'd type it (bright, att, dec, tail, len,
+  pitch, loud, punch, noise, low, hits) with its range over what's shown ("dec 0ms…148ms"), the
+  ones in the filter lit. Page keys and Home/End step through what's shown in order. The last row shows the chosen sample's
   numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS, folder.
 - **Every move auditions**: the file, resampled to the device rate, straight to the outputs,
   stopped or rolling (not metered, never bounced), at the browser's own level (`shift+↑↓`, `browse

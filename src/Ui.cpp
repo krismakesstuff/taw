@@ -1842,9 +1842,10 @@ void Ui::drawTrackMenu (App& app)
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).
 // The docked sample browser, a column right of the timeline from the transport row down to the
-// input line. Top to bottom: a header, the axes, the kinds as badges (wrapping), the map, the
-// chosen sample, the qualities the filter can use (with their range in what's shown), the
-// hints, and the filter's own input line at the bottom, like taw's.
+// input line. The map on top; everything you set at the bottom, like taw's own input line: the
+// chosen sample, the axes, the kinds as badges (wrapping), the qualities the filter can use (with
+// their range over what's shown), the hints, and the filter's input line last. Laid out from the
+// bottom up.
 void Ui::drawBrowser (App& app)
 {
     auto& g = app.browserGeometry;
@@ -1908,10 +1909,11 @@ void Ui::drawBrowser (App& app)
     canvas.text (std::max (x + 2, x0 + cw - count.length()), inputY, count, colour::dim);
 
     // The selectors: what the axes show (alt+arrows step them).
+    int axesY = 0; // set below, once the rows under the axes are counted
     auto selector = [&] (int row, const juce::String& label, const juce::String& value, App::BrowserFocus which, const juce::String& note, bool off)
     {
         const bool focus = active && app.browserFocus == which;
-        const int y0 = top + 1 + row;
+        const int y0 = axesY + row;
         g.axisRow[row] = y0;
         int sx = canvas.text (x0, y0, label.paddedRight (' ', 8), focus ? colour::accent : colour::dim, -1, focus);
 
@@ -1927,13 +1929,6 @@ void Ui::drawBrowser (App& app)
         canvas.text (sx + 2, y0, note, colour::faint, -1, false, x0 + cw - sx - 2);
     };
 
-    const auto& axisNames = App::browserAxisNames();
-    const bool similar = app.browserAxisX == 0;
-    selector (0, similar ? juce::String ("map") : juce::String (L"x \x2192"), axisNames[app.browserAxisX], App::BrowserFocus::xAxis,
-              similar ? juce::String ("close together = sounds alike") : app.browserAxisRange (false), false);
-    selector (1, L"y \x2191", similar ? juce::String (L"\x2014") : axisNames[app.browserAxisY], App::BrowserFocus::yAxis,
-              similar ? juce::String() : app.browserAxisRange (true), similar);
-
     // Badges, wrapping: the chosen one filled in its colour.
     const auto kinds = app.browserKinds();
     const int chosenKind = juce::jlimit (0, (int) kinds.size() - 1, app.browserKind);
@@ -1944,24 +1939,20 @@ void Ui::drawBrowser (App& app)
 
     auto kindName = [] (const SampleInfo& s) { return s.kind().isEmpty() ? juce::String ("other") : s.kind(); };
 
-    int y = top + 3;
+    // Where each badge goes (its row counted from the first), to know how many rows they need.
+    struct BadgeAt { int x, row; juce::String label; };
+    std::vector<BadgeAt> badgeAt;
+    int badgeRows = 1;
     x = x0;
 
-    for (int b = 0; b < (int) kinds.size(); ++b)
+    for (const auto& k : kinds)
     {
-        const auto& k = kinds[(size_t) b];
         const auto label = " " + k + " " + juce::String (k == "all" ? total : counts[k]) + " ";
-        const int c = k == "all" ? colour::text : colour::kind (k);
-        const bool chosen = b == chosenKind;
 
         if (x > x0 && x + label.length() > x0 + cw)
-            x = x0, ++y;
+            x = x0, ++badgeRows;
 
-        if (chosen && active && app.browserFocus == App::BrowserFocus::kinds)
-            canvas.put (x - 1, y, L'\x25b8', colour::accent);
-
-        g.badges.push_back ({ x, y, label.length() });
-        canvas.text (x, y, label, chosen ? 16 : c, chosen ? c : -1, chosen, x0 + cw - x);
+        badgeAt.push_back ({ x, badgeRows - 1, label });
         x += label.length() + 1;
     }
 
@@ -2048,9 +2039,35 @@ void Ui::drawBrowser (App& app)
         }
     }
 
-    // Between the badges and the qualities: the map, its x-axis rule, the chosen sample (2 rows).
-    const int bodyY = y + 1, infoY = qualityY - 3, ruleY = infoY - 1;
+    // Above the qualities: the badges, then the axes, then the chosen sample (2 rows) under the
+    // map's x-axis rule; the map takes the rest, up to the header.
+    const int badgesY = qualityY - badgeRows;
+    axesY = badgesY - 2;
+    const int infoY = axesY - 3, ruleY = infoY - 1, bodyY = top + 1;
     const int mapH = std::max (3, ruleY - bodyY);
+
+    for (int b = 0; b < (int) badgeAt.size(); ++b)
+    {
+        const auto& [bx, row, label] = badgeAt[(size_t) b];
+        const auto& k = kinds[(size_t) b];
+        const int c = k == "all" ? colour::text : colour::kind (k), by = badgesY + row;
+        const bool chosen = b == chosenKind;
+
+        if (chosen && active && app.browserFocus == App::BrowserFocus::kinds)
+            canvas.put (bx - 1, by, L'\x25b8', colour::accent);
+
+        g.badges.push_back ({ bx, by, label.length() });
+        canvas.text (bx, by, label, chosen ? 16 : c, chosen ? c : -1, chosen, x0 + cw - bx);
+    }
+
+    const auto& axisNames = App::browserAxisNames();
+    const bool similar = app.browserAxisX == 0;
+    selector (0, similar ? juce::String ("map") : juce::String (L"x \x2192"), axisNames[app.browserAxisX], App::BrowserFocus::xAxis,
+              similar ? juce::String ("close together = sounds alike") : app.browserAxisRange (false), false);
+    selector (1, L"y \x2191", similar ? juce::String (L"\x2014") : axisNames[app.browserAxisY], App::BrowserFocus::yAxis,
+              similar ? juce::String() : app.browserAxisRange (true), similar);
+
+
     canvas.fill (x0, ruleY, cw, L'\x2500', colour::faint);
 
     if (! similar)

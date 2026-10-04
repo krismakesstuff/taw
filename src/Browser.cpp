@@ -615,7 +615,7 @@ bool App::handleBrowserKey (const Key& k)
                 return true;
             }
 
-            // The selectors and the badges, top to bottom: x, y, kinds, then the map.
+            // Under the map, top to bottom: x, y, the badges.
             if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis
                 || browserFocus == BrowserFocus::kinds)
             {
@@ -625,13 +625,13 @@ bool App::handleBrowserKey (const Key& k)
                 if (next == (int) BrowserFocus::yAxis && browserAxisX == 0)
                     next += step;
 
-                browserFocus = (BrowserFocus) juce::jlimit ((int) BrowserFocus::xAxis, (int) BrowserFocus::map, next);
+                browserFocus = (BrowserFocus) juce::jlimit ((int) BrowserFocus::map, (int) BrowserFocus::kinds, next);
             }
             else if (browserFocus == BrowserFocus::map)
             {
-                // Up past the top of the map goes to the badges.
-                if (! moveOnMap (0.0f, (float) step, k.ctrl) && step < 0)
-                    browserFocus = BrowserFocus::kinds;
+                // Down past the bottom of the map goes to the settings under it.
+                if (! moveOnMap (0.0f, (float) step, k.ctrl) && step > 0)
+                    browserFocus = BrowserFocus::xAxis;
             }
             else if (at + step < 0)
                 browserFocus = BrowserFocus::kinds;

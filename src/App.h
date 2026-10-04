@@ -222,7 +222,7 @@ public:
     // kind where samples that sound alike sit together, and a list; typing filters by name, and
     // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)
     // or makes a new one. index <folder> adds folders to the library. See Browser.cpp.
-    enum class BrowserFocus { xAxis, yAxis, kinds, map, list }; // top to bottom
+    enum class BrowserFocus { map, xAxis, yAxis, kinds, list }; // top to bottom (no list now)
     // Where the Ui drew the browser, for the mouse and for moving on the map.
     struct BrowserGeometry
     {

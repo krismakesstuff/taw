@@ -614,15 +614,16 @@ own thread; `taw --index <folder> ...` from a shell prints a report) adds folder
 
 **The browser** docks in a column right of the timeline and its meters (about three tenths of
 the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
-line, which stays full width; the session stays in view while you look. In the column, top to
-bottom: the axes, the badges (wrapping), the map with its x-axis rule, the chosen sample (file,
-kind, folder; its numbers), the qualities the filter can use, the hints, and the filter's own
-input line at the bottom, like taw's. There's no file list: the map is where you look, and the
+line, which stays full width; the session stays in view while you look. In the column the map
+fills the top; everything you set is at the bottom, like taw's own input line: the chosen sample
+(file, kind, folder; its numbers), the axes, the badges (wrapping), the qualities the filter can
+use, the hints, and the filter's input line last. `↓` past the bottom of the map goes to the
+axes, then the badges; `↑` back. There's no file list: the map is where you look, and the
 filter is how you get to fewer samples. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
 filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too; remembered). Inside:
 
-- **Selectors** at the very top show what the map's axes are; `alt+←→` steps x and `alt+↑↓`
-  steps y from anywhere in the browser (or `↑` up to a row and `←→`, or a click):
+- **Selectors** under the map show what its axes are; `alt+←→` steps x and `alt+↑↓`
+  steps y from anywhere in the browser (or `↓` down to a row and `←→`, or a click):
   - `similar` (the default) is the sound-alike map below, both axes at once, where only nearness
     means anything. Otherwise two measurements: brightness, attack, decay, tail, length, pitch
     (unpitched at the bottom), loudness (RMS), punch (crest), noise (flatness), low end (energy
@@ -634,8 +635,7 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
     the sound-alike map. Kept in settings.json.
   - Colours are always by kind, like the badges.
 - **Badges**, one per kind with its count, in the kind's colour: `←→` picks one,
-  and the map and list show only that kind. `↓` goes to the map; `↑` past the top of the map or
-  list comes back.
+  and the map shows only that kind.
 - **The map**: each kind's samples on a map of their own (so 187 kicks spread over the whole
   area, not their corner of the full one), drawn in half blocks, two near-square pixels a cell,
   each in the colour most of its samples have. The arrows go to the nearest sample within 60° of

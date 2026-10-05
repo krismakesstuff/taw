@@ -384,12 +384,33 @@ int App::defaultTemplateRow() const
     return (int) recent.size();
 }
 
+juce::String App::datedName (const juce::String& name)
+{
+    const auto last = name.fromLastOccurrenceOf (" ", false, false);
+    const bool dated = last.length() == 8 && last[2] == '.' && last[5] == '.'
+                       && last.removeCharacters (".").containsOnly ("0123456789");
+
+    return dated ? name : name + juce::Time::getCurrentTime().formatted (" %m.%d.%y");
+}
+
 Result App::createSession (const Template& t)
 {
-    if (newSessionName.trim().isEmpty())
-        newSessionName = "session-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M");
+    const auto folderFor = [this] (const juce::String& name) { return newSessionParent.getChildFile (juce::File::createLegalFileName (name.trim())); };
 
-    const auto dir = newSessionParent.getChildFile (juce::File::createLegalFileName (newSessionName.trim()));
+    if (newSessionName.trim().isEmpty())
+        newSessionName = dateSessionNames ? juce::String ("session") : "session-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M");
+
+    // A name you typed that's already a session opens it; a new one gets today's date (setting).
+    if (dateSessionNames && ! Session::existsIn (folderFor (newSessionName)))
+    {
+        const auto base = datedName (newSessionName.trim());
+        newSessionName = base;
+
+        for (int n = 2; folderFor (newSessionName).exists(); ++n) // a second "session" today: never open or reuse it
+            newSessionName = base + " " + juce::String (n);
+    }
+
+    const auto dir = folderFor (newSessionName);
     juce::String error;
     std::unique_ptr<Session> s;
 
@@ -2127,6 +2148,8 @@ void App::loadSettings()
     if ((browserAxisX == 0) != (browserAxisY == 0) || (browserAxisX != 0 && browserAxisX == browserAxisY))
         browserAxisX = browserAxisY = 0; // a half-saved pair: the sound-alike map
 
+    dateSessionNames = (bool) json.getProperty ("dateNames", true);
+
     if (json.hasProperty ("auditionDb"))
         auditionDb = juce::jlimit (-60.0, 6.0, (double) json["auditionDb"]);
 
@@ -2141,6 +2164,7 @@ void App::saveSettings() const
     o->setProperty ("theme", theme);
     o->setProperty ("io", ioVisible);
     o->setProperty ("auditionDb", auditionDb);
+    o->setProperty ("dateNames", dateSessionNames);
     o->setProperty ("browser", browserVisible);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
     o->setProperty ("browserY", browserAxisNames()[browserAxisY]);

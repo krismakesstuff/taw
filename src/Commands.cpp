@@ -1,4 +1,4 @@
-﻿// The command language: [selector] verb [args]
+// The command language: [selector] verb [args]
 //
 //   selector   1 | 1-3 | 1,4 | * (tracks are 1-based on the surface, 0-based inside)
 //   @pos       @17  @17.3  @1:30  @0
@@ -336,6 +336,7 @@ std::vector<App::Setting> App::projectSettings() const
         { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
         { "Sample rate", juce::String (sampleRate() / 1000.0, 1) + L" kHz  (set when the session was made)", {}, false },
         { "Theme (all sessions)", theme, {} },
+        { "Dated new sessions", dateSessionNames ? "on  (" + datedName ("name") + ", all sessions)" : juce::String ("off"), {} },
     };
 }
 
@@ -371,6 +372,13 @@ Result App::stepSetting (int index, int direction)
     if (name == "Low latency limit") return execute ("lowlat " + juce::String (juce::jlimit (0, 8192, (int) s[ids::lowLatencyMax] + direction * 64)));
     if (name == "Track height")   return execute ("height " + juce::String (juce::jlimit (1, 4, session->trackHeight() + direction)));
     if (name.startsWith ("Theme")) return execute (cycle ({ "dark", "light", "grey" }, theme));
+
+    if (name == "Dated new sessions")
+    {
+        dateSessionNames = ! dateSessionNames;
+        saveSettings();
+        return Result::good (dateSessionNames ? "new sessions are named " + datedName ("name") : juce::String ("new sessions keep the name you type"));
+    }
 
     if (name == "Bounce format")
     {
@@ -566,6 +574,11 @@ Result App::toggleHitAtCursor()
 
     if (session->gridOn())
         beat = std::round (beat / step) * step;
+
+    // You hear it as you place it, like a note played in. Snapped ahead of the playhead while
+    // rolling, the timeline plays it on time instead.
+    if (! engine.isRolling() || beat * session->samplesPerBeat() <= (double) engine.playhead())
+        engine.triggerPad (focused, 0.8f);
 
     beginEdit ("add hit");
     track.appendChild (Session::makeHit (beat, 0.8f), um());

@@ -435,6 +435,8 @@ public:
     int pickIndex = 0;
     juce::String newSessionName;
     juce::File newSessionParent;
+    bool dateSessionNames = true; // a new session's folder is "{name} mm.dd.yy" (settings.json)
+    static juce::String datedName (const juce::String& name); // name plus today's date, unless it ends in one
 
     juce::int64 cursor = 0, playStart = 0, viewStart = 0;
     int focused = 0, trackScroll = 0, zoomLevel = 0;

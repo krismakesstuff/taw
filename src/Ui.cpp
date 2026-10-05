@@ -2390,6 +2390,8 @@ void Ui::drawTemplatePicker (App& app)
 
     if (app.newSessionName.isEmpty())
         canvas.text (x + 2, y, "(type a name, or enter for a dated one)", colour::faint);
+    else if (app.dateSessionNames && App::datedName (app.newSessionName) != app.newSessionName)
+        canvas.text (x + 1, y, App::datedName ("").trim(), colour::faint); // the date it will get
 
     canvas.text (3, ++y, "in", colour::dim);
     canvas.text (9, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 11);

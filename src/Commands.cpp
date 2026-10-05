@@ -560,24 +560,40 @@ Result App::toggleHitAtCursor()
         return Result::fail (L"alt+/ places hits on sample tracks \x2014 focus one with \x2191\x2193");
 
     auto track = session->track (focused);
-    const auto step = hitStepBeats();
-    const auto at = engine.isRolling() ? heardPlayhead() : cursor;
+    const bool rolling = engine.isRolling();
+    const auto at = rolling ? heardPlayhead() : cursor;
     auto beat = (double) at / session->samplesPerBeat();
 
-    for (const auto& h : Session::hits (track))
-        if (std::abs ((double) h[ids::beat] - beat) < step * 0.5)
+    if (rolling)
+    {
+        // Played in: it lands where you heard the music, like the pad key. Only input quantize
+        // snaps it, never the grid, and it never removes a hit already there.
+        if ((bool) session->tree()[ids::inputQuantize])
         {
-            beginEdit ("remove hit");
-            track.removeChild (h, um());
-            return Result::good ("removed hit at " + formatBars (at));
+            const auto step = session->fineStepBeats();
+            beat = std::round (beat / step) * step;
         }
+    }
+    else
+    {
+        // Stopped: step entry at the cursor, toggling the hit on the grid step.
+        const auto step = hitStepBeats();
 
-    if (session->gridOn())
-        beat = std::round (beat / step) * step;
+        for (const auto& h : Session::hits (track))
+            if (std::abs ((double) h[ids::beat] - beat) < step * 0.5)
+            {
+                beginEdit ("remove hit");
+                track.removeChild (h, um());
+                return Result::good ("removed hit at " + formatBars (at));
+            }
+
+        if (session->gridOn())
+            beat = std::round (beat / step) * step;
+    }
 
     // You hear it as you place it, like a note played in. Snapped ahead of the playhead while
     // rolling, the timeline plays it on time instead.
-    if (! engine.isRolling() || beat * session->samplesPerBeat() <= (double) engine.playhead())
+    if (! rolling || beat * session->samplesPerBeat() <= (double) engine.playhead())
         engine.triggerPad (focused, 0.8f);
 
     beginEdit ("add hit");

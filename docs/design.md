@@ -733,8 +733,9 @@ again when the driver asks to be restarted; its MIDI ports wait the whole time. 
 `OPENING <device>` or `SWITCHING <device> to 48 kHz` while it happens and stays up until the
 driver has settled; MIDI inputs open on a thread of their own (the MIDI panel says so while
 they're coming in); the device's state is saved at the new rate, so the next start opens the
-hardware as it was left instead of switching it back; and `taw --new` makes sessions at the
-device's last rate, not always 48 kHz. Plugins wait for the first frame.
+hardware as it was left instead of switching it back. New sessions (the menu and `taw --new`)
+are made at 44.1 kHz, or the rate set in `settings` ("New session rate": 44.1, 48, 88.2 or
+96 kHz, for all sessions; `newRate` in settings.json); the device follows each session's rate. Plugins wait for the first frame.
 
 `timing.log` in the config folder lists each step of the last start and open with how long it
 took (and anything later that held a frame for over 150 ms), to find what made one slow.

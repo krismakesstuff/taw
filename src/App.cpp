@@ -5,14 +5,14 @@
 namespace taw
 {
 static juce::File deviceStateFile() { return configFolder().getChildFile ("audio-device.xml"); }
+static juce::File settingsFile() { return configFolder().getChildFile ("settings.json"); }
 
-double savedDeviceRate()
+static const double sessionRates[] = { 44100.0, 48000.0, 88200.0, 96000.0 };
+
+double newSessionRate()
 {
-    if (const auto xml = juce::parseXML (deviceStateFile()))
-        if (const auto rate = xml->getDoubleAttribute ("audioDeviceRate"); rate > 0.0)
-            return rate;
-
-    return 48000.0;
+    const auto rate = (double) juce::JSON::parse (settingsFile()).getProperty ("newRate", 44100.0);
+    return std::find (std::begin (sessionRates), std::end (sessionRates), rate) != std::end (sessionRates) ? rate : 44100.0;
 }
 
 void App::showWaiting (const juce::String& title, const juce::String& what, const juce::String& why)
@@ -26,7 +26,6 @@ void App::showWaiting (const juce::String& title, const juce::String& what, cons
 }
 
 static juce::String kHz (double rate) { return juce::String (rate / 1000.0, rate == std::floor (rate / 1000.0) * 1000.0 ? 0 : 1) + " kHz"; }
-static juce::File settingsFile() { return configFolder().getChildFile ("settings.json"); }
 
 //==============================================================================
 void MeterState::update (float peak, double now, double dt)
@@ -484,7 +483,7 @@ Result App::createSession (const Template& t)
     if (Session::existsIn (dir))
         s = Session::load (dir, error);
     else
-        s = Session::create (dir, t.tree, sampleRate() > 0 ? sampleRate() : savedDeviceRate(), error);
+        s = Session::create (dir, t.tree, newRate, error); // the device follows when it opens
 
     if (s == nullptr)
         return Result::fail (error);
@@ -1797,7 +1796,7 @@ double App::sampleRate() const
     if (auto* d = const_cast<App*> (this)->engine.devices().getCurrentAudioDevice())
         return d->getCurrentSampleRate();
 
-    return 48000.0;
+    return 44100.0;
 }
 
 double App::samplesPerColumn() const
@@ -2231,6 +2230,7 @@ void App::loadSettings()
         browserAxisX = browserAxisY = 0; // a half-saved pair: the sound-alike map
 
     dateSessionNames = (bool) json.getProperty ("dateNames", true);
+    newRate = newSessionRate();
 
     if (json.hasProperty ("auditionDb"))
         auditionDb = juce::jlimit (-60.0, 6.0, (double) json["auditionDb"]);
@@ -2247,6 +2247,7 @@ void App::saveSettings() const
     o->setProperty ("io", ioVisible);
     o->setProperty ("auditionDb", auditionDb);
     o->setProperty ("dateNames", dateSessionNames);
+    o->setProperty ("newRate", newRate);
     o->setProperty ("browser", browserVisible);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
     o->setProperty ("browserY", browserAxisNames()[browserAxisY]);

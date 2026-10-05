@@ -336,6 +336,7 @@ std::vector<App::Setting> App::projectSettings() const
         { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
         { "Sample rate", juce::String (sampleRate() / 1000.0, 1) + L" kHz  (set when the session was made)", {}, false },
         { "Theme (all sessions)", theme, {} },
+        { "New session rate", juce::String (newRate / 1000.0, newRate == 44100.0 || newRate == 88200.0 ? 1 : 0) + L" kHz  (all sessions)", {} },
         { "Dated new sessions", dateSessionNames ? "on  (" + datedName ("name") + ", all sessions)" : juce::String ("off"), {} },
     };
 }
@@ -372,6 +373,14 @@ Result App::stepSetting (int index, int direction)
     if (name == "Low latency limit") return execute ("lowlat " + juce::String (juce::jlimit (0, 8192, (int) s[ids::lowLatencyMax] + direction * 64)));
     if (name == "Track height")   return execute ("height " + juce::String (juce::jlimit (1, 4, session->trackHeight() + direction)));
     if (name.startsWith ("Theme")) return execute (cycle ({ "dark", "light", "grey" }, theme));
+
+    if (name == "New session rate")
+    {
+        const juce::StringArray rates { "44100", "48000", "88200", "96000" };
+        newRate = cycle (rates, juce::String ((int) newRate)).getDoubleValue();
+        saveSettings();
+        return Result::good ("new sessions are made at " + juce::String (newRate / 1000.0, 1) + " kHz");
+    }
 
     if (name == "Dated new sessions")
     {

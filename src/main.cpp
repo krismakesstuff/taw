@@ -941,14 +941,14 @@ int main (int argc, char** argv)
     }
 #endif
 
-    // taw --new <dir>   an empty session there (48 kHz until a device says otherwise), for scripts
+    // taw --new <dir>   an empty session there (at the new-session rate, 44.1 kHz by default), for scripts
     // and agents to build with --exec.
     if (args[0] == "--new")
     {
         juce::String error;
         const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
-        // At the rate the audio device was last used at, so opening it needn't switch the hardware.
-        auto s = args[1].isEmpty() ? nullptr : taw::Session::create (dir, {}, taw::savedDeviceRate(), error);
+        // At the new-session rate setting (44.1 kHz unless changed), as the menu makes them.
+        auto s = args[1].isEmpty() ? nullptr : taw::Session::create (dir, {}, taw::newSessionRate(), error);
         std::printf ("%s\n", s != nullptr ? ("new session " + dir.getFullPathName()).toRawUTF8()
                                          : (args[1].isEmpty() ? juce::String ("taw --new <folder>") : error).toRawUTF8());
         return s != nullptr ? 0 : 1;

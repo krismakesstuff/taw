@@ -59,7 +59,9 @@ struct DeviceChoice
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
 juce::String trackList (const std::vector<int>& tracks); // "track 2", "tracks 1,3"
-double savedDeviceRate(); // the audio device's rate when last used (audio-device.xml), else 48 kHz
+// The rate new sessions are made at (settings.json "newRate", all sessions): 44.1 kHz unless
+// changed. The device switches to a session's rate when it opens.
+double newSessionRate();
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
 // What ctrl+c holds: per track, its clips (audio, MIDI or hits), trimmed to the copied range
@@ -445,6 +447,7 @@ public:
     juce::String newSessionName;
     juce::File newSessionParent;
     bool dateSessionNames = true; // a new session's folder is "{name} mm.dd.yy" (settings.json)
+    double newRate = 44100.0;     // new sessions' sample rate (settings.json)
     static juce::String datedName (const juce::String& name); // name plus today's date, unless it ends in one
 
     juce::int64 cursor = 0, playStart = 0, viewStart = 0;

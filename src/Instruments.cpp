@@ -171,7 +171,10 @@ bool App::loadNextPlugin()
                                         [&] (const auto& a, const auto& b) { return rank (a) < rank (b); });
     const auto node = *next;
     pluginQueue.erase (next);
-    hostedEntry (node);
+    {
+        timing::Scope t ("plugin loaded: " + node[ids::pluginName].toString());
+        hostedEntry (node);
+    }
 
     if (pluginQueue.empty() && console.isOpen())
         say (Result::good ("plugins loaded"));
@@ -357,8 +360,9 @@ Result App::toggleMidiPanel()
     midiInputs->refresh(); // tries busy ones again
     midiPanelIndex = 0;
     helpVisible = settingsVisible = pluginPickerVisible = false;
-    return Result::good (midiInputs->devices().empty() ? juce::String (L"no MIDI inputs \x2014 plug a controller in (taw picks it up)")
-                                                       : juce::String (L"play your controller: its row lights up"));
+    return Result::good (midiInputs->opening()           ? juce::String (L"opening the MIDI inputs\x2026 rows show open as they come in")
+                         : midiInputs->devices().empty() ? juce::String (L"no MIDI inputs \x2014 plug a controller in (taw picks it up)")
+                                                         : juce::String (L"play your controller: its row lights up"));
 }
 
 bool App::handleMidiPanelKey (const Key& k)
@@ -383,15 +387,11 @@ bool App::handleMidiPanelKey (const Key& k)
                 // On / off, remembered for every session.
                 const auto& d = devices[(size_t) midiPanelIndex];
                 const bool on = k.code == Key::Left ? false : k.code == Key::Right ? true : ! d.on;
-                midiInputs->setOn (d.name, on);
+                midiInputs->setOn (d.name, on); // opens or closes it in the background
                 midiOff = midiInputs->switchedOff();
                 saveSettings();
-
-                const auto now = midiInputs->devices();
-                const bool opened = std::any_of (now.begin(), now.end(), [&] (const auto& x) { return x.name == d.name && x.open; });
-                say (! on ? Result::good (d.name + " off")
-                          : opened ? Result::good (d.name + " on")
-                                   : Result::fail (d.name + L" is on but won't open \x2014 another app has it (close it, then midi again)"));
+                say (Result::good (! on ? d.name + " off"
+                                        : d.name + L" on \x00b7 its row says open once it's in (if not, another app has it: close it, then midi again)"));
             }
             return true;
         case Key::Char:
@@ -566,7 +566,7 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     auto msg = "track " + juce::String (index + 1) + " plays " + desc.name;
     const bool armed = track[ids::armed];
 
-    if (midiInputs != nullptr && midiInputs->names().isEmpty())
+    if (midiInputs != nullptr && ! midiInputs->opening() && midiInputs->names().isEmpty())
         return Result::good (msg + L" \x00b7 no MIDI input found yet (plug one in) \x00b7 ed opens its window");
 
     return Result::good (msg + (armed ? L" \x00b7 armed: play your controller" : L" \x00b7 shift+R arms it for your controller")

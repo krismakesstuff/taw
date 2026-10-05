@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "AudioEngine.h"
 #include "Bounce.h"
@@ -9,6 +9,7 @@
 #include "Plugins.h"
 #include "Console.h"
 #include "Session.h"
+#include "Timing.h"
 #include "Ui.h"
 
 #include <functional>
@@ -58,6 +59,7 @@ struct DeviceChoice
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
 juce::String trackList (const std::vector<int>& tracks); // "track 2", "tracks 1,3"
+double savedDeviceRate(); // the audio device's rate when last used (audio-device.xml), else 48 kHz
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
 // What ctrl+c holds: per track, its clips (audio, MIDI or hits), trimmed to the copied range
@@ -565,8 +567,15 @@ private:
     std::shared_ptr<PluginSlot> createPlugin (const juce::ValueTree& node, double rate, int block, juce::String& problem);
 
 public:
-    // The plugin being loaded right now (the screen shows it; it's blocked until it's in).
-    juce::String loadingPlugin, loadingWhy;
+    // The plugin being loaded right now (the screen shows it; it's blocked until it's in). Also
+    // anything else that blocks the screen for a while (the audio device opening or changing
+    // rate), titled loadingTitle when it isn't "LOADING".
+    juce::String loadingPlugin, loadingWhy, loadingTitle;
+    void showWaiting (const juce::String& title, const juce::String& what, const juce::String& why); // and draws it now
+    void doneWaiting() { loadingPlugin.clear(); loadingWhy.clear(); loadingTitle.clear(); }
+    // After the device changes rate its driver can ask to be restarted, which blocks for seconds
+    // more: the box stays up until that has happened (or this time has passed).
+    double deviceSettleUntil = 0.0;
 
 private:
     void savePluginStates();

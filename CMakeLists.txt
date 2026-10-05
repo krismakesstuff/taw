@@ -33,6 +33,7 @@ target_sources(taw PRIVATE
     src/Browser.cpp
     src/Import.cpp
     src/Library.cpp
+    src/Timing.cpp
     src/Safety.cpp
     src/Editing.cpp
     src/Instruments.cpp

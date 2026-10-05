@@ -1,9 +1,31 @@
 ﻿#include "App.h"
 #include "Safety.h"
+#include "Timing.h"
 
 namespace taw
 {
 static juce::File deviceStateFile() { return configFolder().getChildFile ("audio-device.xml"); }
+
+double savedDeviceRate()
+{
+    if (const auto xml = juce::parseXML (deviceStateFile()))
+        if (const auto rate = xml->getDoubleAttribute ("audioDeviceRate"); rate > 0.0)
+            return rate;
+
+    return 48000.0;
+}
+
+void App::showWaiting (const juce::String& title, const juce::String& what, const juce::String& why)
+{
+    loadingTitle = title;
+    loadingPlugin = what;
+    loadingWhy = why;
+
+    if (console.isOpen())
+        ui.render (*this);
+}
+
+static juce::String kHz (double rate) { return juce::String (rate / 1000.0, rate == std::floor (rate / 1000.0) * 1000.0 ? 0 : 1) + " kHz"; }
 static juce::File settingsFile() { return configFolder().getChildFile ("settings.json"); }
 
 //==============================================================================
@@ -30,7 +52,9 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
       pendingTemplate (std::move (templateName))
 {
     configFolder().createDirectory();
+    timing::mark ("taw starting");
     loadSettings();
+    timing::mark ("settings read");
 
     // If taw crashes, save what's open on the way down.
     safety::setEmergencySave ([] (void* app)
@@ -43,6 +67,8 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
     if (openDir != juce::File())
     {
         juce::String error;
+
+        timing::Scope t ("session read: " + openDir.getFileName());
 
         if (auto s = Session::load (openDir, error))
             attachSession (std::move (s));
@@ -212,13 +238,19 @@ int App::run()
         return 1;
     }
 
+    timing::mark ("console open");
     startupDevice();
 
     // MIDI controllers, all of them, for armed instrument tracks. Only the interactive app opens
     // them (Windows MIDI inputs can't be shared).
-    midiInputs = std::make_unique<MidiInputs> (engine.midiInputQueues(), midiOff);
+    {
+        timing::Scope t ("MIDI inputs opened");
+        midiInputs = std::make_unique<MidiInputs> (engine.midiInputQueues(), midiOff);
+    }
 
     auto last = juce::Time::getMillisecondCounterHiRes();
+    bool firstFrame = true;
+    bool openingShown = false; // the first frame of the session once an open finishes
 
     // Closing the window (or Ctrl+Break) quits like q does: recording stops and takes are kept.
     while (! quitRequested && ! safety::closeRequested())
@@ -255,15 +287,18 @@ int App::run()
         collectFinishedTakes();
         drainLiveOverviews();
         drainRecordedMidi();
-        pollPlugins();
+        { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
         pollImport();
-        pollIndexing();
+        { timing::Scope t ("slow: library", 150.0); pollIndexing(); }
 
         if (opening != nullptr)
+        {
             stepOpening();
+            openingShown = opening == nullptr;
+        }
 
-        if (opening == nullptr && closing == nullptr)
+        if (opening == nullptr && closing == nullptr && ! firstFrame) // the screen first, then plugins
             loadNextPlugin();
 
         if (closing != nullptr)
@@ -283,6 +318,7 @@ int App::run()
             if (trackAnchor >= session->numTracks())
                 trackAnchor = -1;
 
+            timing::Scope t ("slow: rebuild and save", 150.0);
             rebuildGraph();
             session->save();
         }
@@ -297,10 +333,31 @@ int App::run()
         updateMeters ((now - last) / 1000.0);
         last = now;
 
-        ui.render (*this);
+        {
+            timing::Scope t ("slow: drawing", 150.0);
+            ui.render (*this);
+        }
+
+        if (std::exchange (firstFrame, false))
+            timing::mark ("first screen drawn");
+
+        if (std::exchange (openingShown, false))
+            timing::mark ("session on screen");
 
         // Pumps JUCE's message queue (device notifications, driver panels) between frames.
-        juce::MessageManager::getInstance()->runDispatchLoopUntil (15);
+        {
+            const auto before = juce::Time::getMillisecondCounterHiRes();
+            timing::Scope t ("slow: device messages", 150.0);
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (15);
+            const auto after = juce::Time::getMillisecondCounterHiRes();
+
+            // The driver's restart after a rate change came and went (or never came): done.
+            if (deviceSettleUntil > 0.0 && (after - before > 1000.0 || after > deviceSettleUntil))
+            {
+                deviceSettleUntil = 0.0;
+                doneWaiting();
+            }
+        }
     }
 
     return 0;
@@ -317,7 +374,16 @@ void App::startupDevice()
     if (deviceStateFile().existsAsFile())
         saved = juce::parseXML (deviceStateFile());
 
+    timing::mark ("audio device opening");
+
+    // Drivers can take seconds to open (more if the hardware has to change rate): say so first.
+    if (saved != nullptr)
+        showWaiting ("OPENING", saved->getStringAttribute ("audioOutputDeviceName", "the audio device"),
+                     L"the audio device \x00b7 some drivers take a few seconds");
+
     const auto error = dm.initialise (AudioEngine::maxInputs, 2, saved.get(), false);
+    doneWaiting();
+    timing::mark ("audio device open: " + (dm.getCurrentAudioDevice() != nullptr ? dm.getCurrentAudioDevice()->getName() : juce::String ("none")));
 
     if (saved == nullptr || error.isNotEmpty() || dm.getCurrentAudioDevice() == nullptr)
     {
@@ -337,11 +403,12 @@ void App::proceedToSession()
 
     if (session != nullptr)
     {
-        matchDeviceSampleRate();
-        rebuildGraph();
+        { timing::Scope t ("sample rate matched"); matchDeviceSampleRate(); }
+        { timing::Scope t ("playback graph built"); rebuildGraph(); }
         return;
     }
 
+    timing::Scope t ("session list read");
     templates = loadTemplates();
 
     if (pendingTemplate.isNotEmpty())
@@ -417,7 +484,7 @@ Result App::createSession (const Template& t)
     if (Session::existsIn (dir))
         s = Session::load (dir, error);
     else
-        s = Session::create (dir, t.tree, sampleRate() > 0 ? sampleRate() : 48000.0, error);
+        s = Session::create (dir, t.tree, sampleRate() > 0 ? sampleRate() : savedDeviceRate(), error);
 
     if (s == nullptr)
         return Result::fail (error);
@@ -454,9 +521,21 @@ void App::matchDeviceSampleRate()
     if (device == nullptr || session == nullptr || device->getCurrentSampleRate() == session->sampleRate())
         return;
 
+    // Changing rate can take the driver several seconds (and the interface's MIDI ports wait
+    // with it): a box says what's going on, and stays up while the driver settles.
+    const auto from = device->getCurrentSampleRate();
+    showWaiting ("SWITCHING", device->getName() + " to " + kHz (session->sampleRate()),
+                 "this session is " + kHz (session->sampleRate()) + ", the device was at " + kHz (from)
+                     + L" \x00b7 the driver takes a few seconds");
+
     auto setup = engine.devices().getAudioDeviceSetup();
     setup.sampleRate = session->sampleRate();
     engine.devices().setAudioDeviceSetup (setup, true);
+    deviceSettleUntil = juce::Time::getMillisecondCounterHiRes() + 4000.0;
+
+    // Remembered at the new rate: the next start opens the hardware as it is, without a change.
+    if (auto xml = engine.devices().createStateXml())
+        xml->writeTo (deviceStateFile());
 
     if (device = engine.devices().getCurrentAudioDevice(); device != nullptr && device->getCurrentSampleRate() != session->sampleRate())
         say (Result::fail ("device runs at " + juce::String (device->getCurrentSampleRate()) + " Hz but the session is "
@@ -2934,7 +3013,9 @@ void App::handleDevicePickerKey (const Key& k)
 void App::startOpening (const juce::File& dir)
 {
     juce::String error;
+    timing::mark ("opening " + dir.getFullPathName());
     auto s = Session::load (dir, error);
+    timing::mark ("session.json read");
 
     if (s == nullptr)
     {
@@ -2943,6 +3024,7 @@ void App::startOpening (const juce::File& dir)
     }
 
     attachSession (std::move (s));
+    timing::mark ("session attached");
     opening = std::make_unique<Opening>();
 
     for (int i = 0; i < session->numTracks(); ++i)
@@ -2966,7 +3048,11 @@ void App::stepOpening()
     const auto until = juce::Time::getMillisecondCounterHiRes() + 40.0;
 
     while (opening->done < opening->steps.size() && juce::Time::getMillisecondCounterHiRes() < until)
-        opening->steps[opening->done++].run();
+{
+        const auto& step = opening->steps[opening->done++];
+        timing::Scope t ("slow: " + step.kind + " " + step.name, 100.0);
+        step.run();
+    }
 
     if (opening->done < opening->steps.size())
         return;

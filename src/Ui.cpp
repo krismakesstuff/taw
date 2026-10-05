@@ -2336,7 +2336,7 @@ void Ui::drawPluginLoading (App& app)
     for (int y = 0; y < 5; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
-    const auto title = juce::String ("LOADING");
+    const auto title = app.loadingTitle.isNotEmpty() ? app.loadingTitle : juce::String ("LOADING");
     canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
     canvas.text (x0 + 3 + title.length(), y0 + 1, app.loadingPlugin, colour::accent, bg, true, boxW - title.length() - 5);
     canvas.text (x0 + 2, y0 + 3, app.loadingWhy, colour::dim, bg, false, boxW - 4);

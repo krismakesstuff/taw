@@ -229,7 +229,10 @@ std::pair<juce::String, juce::String> App::browserAxisEnds (bool y) const
 void App::loadLibrary()
 {
     if (library == nullptr)
+    {
+        timing::Scope t ("sample library read");
         library = std::make_unique<Library> (libraryFile());
+    }
 }
 
 Result App::showBrowser (bool show)

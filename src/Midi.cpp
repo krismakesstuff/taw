@@ -1,4 +1,5 @@
 #include "Midi.h"
+#include "Timing.h"
 
 namespace taw
 {
@@ -37,37 +38,90 @@ MidiInputs::MidiInputs (std::array<MidiQueue, maxPorts>& q, juce::StringArray sw
     : queues (q), off (std::move (switchedOff)),
       deviceListConnection (juce::MidiDeviceListConnection::make ([this] { refresh(); }))
 {
-    refresh();
+    // The first update is already wanted: it opens everything.
+    worker = std::thread ([this]
+    {
+        for (;;)
+        {
+            {
+                std::unique_lock l (lock);
+                wake.wait (l, [this] { return wanted || quitting; });
+
+                if (quitting)
+                    return;
+
+                wanted = false;
+            }
+
+            busy = true;
+            update();
+            busy = false;
+        }
+    });
 }
 
 MidiInputs::~MidiInputs()
 {
+    {
+        const std::scoped_lock l (lock);
+        quitting = true;
+    }
+
+    wake.notify_one();
+    worker.join(); // after any port it's opening
+
     for (auto& p : ports)
         p->input.reset(); // stops its callbacks before the port goes
 }
 
 void MidiInputs::refresh()
 {
-    available = juce::MidiInput::getAvailableDevices();
+    {
+        const std::scoped_lock l (lock);
+        wanted = true;
+    }
+
+    wake.notify_one();
+}
+
+void MidiInputs::update()
+{
+    timing::mark ("MIDI: listing inputs");
+    const auto found = juce::MidiInput::getAvailableDevices();
+    timing::mark ("MIDI: " + juce::String (found.size()) + " inputs listed");
+    juce::StringArray switchedOff;
+    std::vector<std::unique_ptr<Port>> closing;
 
     // Close ports whose device is gone or was switched off. Stopping it first means its queue
     // has no producer left, so the slot can go to the next device.
-    for (auto it = ports.begin(); it != ports.end();)
     {
-        if (! available.contains ((*it)->info) || off.contains ((*it)->info.name))
+        const std::scoped_lock l (lock);
+        available = found;
+        switchedOff = off;
+
+        for (auto it = ports.begin(); it != ports.end();)
         {
-            (*it)->input.reset();
-            it = ports.erase (it);
-        }
-        else
-        {
-            ++it;
+            if (! available.contains ((*it)->info) || off.contains ((*it)->info.name))
+            {
+                closing.push_back (std::move (*it));
+                it = ports.erase (it);
+            }
+            else
+            {
+                ++it;
+            }
         }
     }
 
-    for (const auto& info : available)
+    for (auto& p : closing)
+        p->input.reset();
+
+    closing.clear();
+
+    // Only this thread changes ports, so it can read them without the lock.
+    for (const auto& info : found)
     {
-        if (off.contains (info.name) || std::any_of (ports.begin(), ports.end(), [&] (const auto& p) { return p->info == info; }))
+        if (switchedOff.contains (info.name) || std::any_of (ports.begin(), ports.end(), [&] (const auto& p) { return p->info == info; }))
             continue;
 
         int slot = 0;
@@ -84,17 +138,20 @@ void MidiInputs::refresh()
         port->queue = &queues[(size_t) slot];
         port->received = &received;
         port->input = juce::MidiInput::openDevice (info.identifier, port.get());
+        timing::mark ("MIDI: opened " + info.name + (port->input == nullptr ? " (failed)" : ""));
 
         if (port->input == nullptr)
             continue; // another app has it open (Windows doesn't share MIDI inputs)
 
         port->input->start();
+        const std::scoped_lock l (lock);
         ports.push_back (std::move (port));
     }
 }
 
 std::vector<MidiInputs::Device> MidiInputs::devices() const
 {
+    const std::scoped_lock l (lock);
     std::vector<Device> out;
 
     for (const auto& info : available)
@@ -120,16 +177,21 @@ std::vector<MidiInputs::Device> MidiInputs::devices() const
 
 void MidiInputs::setOn (const juce::String& name, bool on)
 {
-    if (on)
-        off.removeString (name);
-    else
-        off.addIfNotAlreadyThere (name);
+    {
+        const std::scoped_lock l (lock);
+
+        if (on)
+            off.removeString (name);
+        else
+            off.addIfNotAlreadyThere (name);
+    }
 
     refresh();
 }
 
 juce::StringArray MidiInputs::names() const
 {
+    const std::scoped_lock l (lock);
     juce::StringArray s;
 
     for (const auto& p : ports)

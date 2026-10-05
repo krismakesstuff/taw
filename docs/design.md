@@ -727,6 +727,18 @@ counts what's left. Opening a plugin's window, or bounce, loads what it needs at
 (`close`, or quitting with a session open) does the same in reverse: each plugin's state is
 saved and the plugin unloaded under a closing box.
 
+**Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
+(opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long
+again when the driver asks to be restarted; its MIDI ports wait the whole time. So: a box says
+`OPENING <device>` or `SWITCHING <device> to 48 kHz` while it happens and stays up until the
+driver has settled; MIDI inputs open on a thread of their own (the MIDI panel says so while
+they're coming in); the device's state is saved at the new rate, so the next start opens the
+hardware as it was left instead of switching it back; and `taw --new` makes sessions at the
+device's last rate, not always 48 kHz. Plugins wait for the first frame.
+
+`timing.log` in the config folder lists each step of the last start and open with how long it
+took (and anything later that held a frame for over 150 ms), to find what made one slow.
+
 ## When things go wrong
 
 - **Saves are atomic and constant.** `session.json` is rewritten (temp file + rename) after

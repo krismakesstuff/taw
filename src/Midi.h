@@ -3,6 +3,9 @@
 #include "SpscQueue.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 
 namespace taw
 {
@@ -63,7 +66,9 @@ struct HostTransport
 // The MIDI inputs on the system. Every one is opened unless switched off in the MIDI panel
 // ("midi"; the off list is kept in settings.json by name). Inputs come and go as devices are
 // plugged in. Each open port feeds its own queue (one producer per queue); the audio thread
-// reads them all. Message thread.
+// reads them all. Ports open on a thread of their own: a driver can take seconds to open one
+// (an audio interface's MIDI ports wait while its driver changes sample rate), and the screen
+// shouldn't wait with it. The rest is called from the message thread.
 class MidiInputs
 {
 public:
@@ -72,7 +77,8 @@ public:
     MidiInputs (std::array<MidiQueue, maxPorts>& queues, juce::StringArray switchedOff);
     ~MidiInputs();
 
-    void refresh(); // opens new devices, closes ones that went away or were switched off
+    void refresh(); // soon (on the ports' thread): opens new devices, closes ones that went away or were switched off
+    bool opening() const noexcept { return busy.load(); } // ports are being opened right now
 
     struct Device
     {
@@ -93,11 +99,19 @@ public:
 private:
     struct Port;
 
+    void update(); // on the ports' thread
+
     std::array<MidiQueue, maxPorts>& queues;
-    std::vector<std::unique_ptr<Port>> ports;
-    juce::Array<juce::MidiDeviceInfo> available;
-    juce::StringArray off;
+    std::vector<std::unique_ptr<Port>> ports;     // changed only on the ports' thread, under lock
+    juce::Array<juce::MidiDeviceInfo> available;  // likewise
+    juce::StringArray off;                        // under lock
     std::atomic<int> received { 0 };
+    std::atomic<bool> busy { true };
+
+    mutable std::mutex lock;
+    std::condition_variable wake;
+    bool wanted = true, quitting = false; // under lock
+    std::thread worker;
     juce::MidiDeviceListConnection deviceListConnection;
 };
 

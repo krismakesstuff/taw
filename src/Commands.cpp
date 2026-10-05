@@ -55,7 +55,7 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 
 // Every verb, so a verb glued to its argument can be split off: "2i2", "2v-6", "bpm92".
 const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "import", "imp", "undo", "redo", "dev", "panel",
-                              "help", "q", "quit", "exit", "save", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
+                              "help", "q", "quit", "exit", "save", "cons", "consolidate", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
@@ -464,10 +464,10 @@ Result App::convertTrack (int index, bool toSample)
     // So it sounds the same: a hit wherever a clip started (only if it has no hits yet).
     int added = 0;
 
-    if (Session::hits (track).empty())
+    if (Session::hitClips (track).empty())
         for (const auto& c : Session::clips (track))
         {
-            track.appendChild (Session::makeHit ((double) (juce::int64) c[ids::start] / session->samplesPerBeat(), 1.0f), um());
+            addHit (index, (double) (juce::int64) c[ids::start] / session->samplesPerBeat(), 1.0f);
             ++added;
         }
 
@@ -533,21 +533,21 @@ Result App::writePattern (const std::vector<int>& tracks, const juce::String& st
 
     for (auto t : tracks)
     {
+        // The pattern is one clip over its range, replacing whatever was there.
         auto track = session->track (t);
-
-        // The pattern replaces whatever hits were in the range.
-        for (const auto& h : Session::hits (track))
-            if (const double b = h[ids::beat]; b >= from - halfSample && b < to - halfSample)
-                track.removeChild (h, um());
+        auto clip = Session::makeHitClip (from, 0.0, to - from);
 
         for (int k = 0; from + k * stepBeats < to - halfSample; ++k)
             if (const auto vel = steps[k % steps.size()]; vel > 0.0f)
             {
                 // Swing: the second of each pair of steps moves later, toward the next pair.
                 const auto late = (k % 2 == 1) ? stepBeats * (2.0 * swing / 100.0 - 1.0) : 0.0;
-                track.appendChild (Session::makeHit (from + k * stepBeats + late, vel), um());
+                clip.appendChild (Session::makeHit (k * stepBeats + late, vel), nullptr);
                 ++written;
             }
+
+        clearRange (t, { std::llround (from * spb), std::llround (to * spb) });
+        track.appendChild (clip, um());
     }
 
     return Result::good (juce::String (written) + " hits" + (swing > 50.0 ? " (swing " + juce::String (swing, 0) + ")" : juce::String()) + " on " + juce::String (tracks.size() == 1 ? "track " + juce::String (tracks.front() + 1) : juce::String ((int) tracks.size()) + " tracks")
@@ -559,7 +559,7 @@ Result App::toggleHitAtCursor()
     if (session == nullptr || mixFocused() || onTopLane() || ! Session::isSampleTrack (session->track (focused)))
         return Result::fail (L"alt+/ places hits on sample tracks \x2014 focus one with \x2191\x2193");
 
-    auto track = session->track (focused);
+    const auto track = session->track (focused);
     const bool rolling = engine.isRolling();
     const auto at = rolling ? heardPlayhead() : cursor;
     auto beat = (double) at / session->samplesPerBeat();
@@ -579,11 +579,12 @@ Result App::toggleHitAtCursor()
         // Stopped: step entry at the cursor, toggling the hit on the grid step.
         const auto step = hitStepBeats();
 
-        for (const auto& h : Session::hits (track))
-            if (std::abs ((double) h[ids::beat] - beat) < step * 0.5)
+        for (const auto& h : Session::placedHits (track))
+            if (std::abs (h.beat - beat) < step * 0.5)
             {
                 beginEdit ("remove hit");
-                track.removeChild (h, um());
+                auto clip = h.clip;
+                clip.removeChild (h.node, um());
                 return Result::good ("removed hit at " + formatBars (at));
             }
 
@@ -597,7 +598,7 @@ Result App::toggleHitAtCursor()
         engine.triggerPad (focused, 0.8f);
 
     beginEdit ("add hit");
-    track.appendChild (Session::makeHit (beat, 0.8f), um());
+    addHit (focused, beat, 0.8f);
     return Result::good ("hit at " + formatBars (std::llround (beat * session->samplesPerBeat())));
 }
 
@@ -810,7 +811,9 @@ Result App::execute (const juce::String& line)
     }
 
     // Editing over the time selection: ctrl+c / x / v / d and delete do the same.
+    if (v == "sel" && p.args[0].equalsIgnoreCase ("clip")) return selectClipAtCursor();
     if (v == "sel")   return selectRange (p.args[0], p.args[1]);
+    if (v == "cons" || v == "consolidate") return consolidate (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "copy")  return copySelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "cut")   return cutSelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "del")   return deleteSelection (p.hasSelector ? p.tracks : defaultTargets());

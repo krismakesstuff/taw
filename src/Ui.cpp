@@ -1137,13 +1137,21 @@ void Ui::drawTimeline (App& app)
 
         std::vector<LaneClip> laneClips;
         std::vector<std::pair<double, float>> laneHits; // sample tracks: (position in samples, velocity)
+        std::vector<std::pair<double, double>> hitSpans;  // ...and their clips, in samples
 
         if (sampleTrack)
         {
-            for (const auto& hitNode : Session::hits (t))
-                laneHits.push_back ({ (double) hitNode[ids::beat] * s.samplesPerBeat(), (float) (double) hitNode[ids::vel] });
+            for (const auto& h : Session::placedHits (t))
+                laneHits.push_back ({ h.beat * s.samplesPerBeat(), h.vel });
 
             std::sort (laneHits.begin(), laneHits.end());
+
+            // The clip a pass is recording into reaches to the playhead.
+            const auto passClip = app.recording && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
+
+            for (const auto& c : Session::hitClips (t))
+                hitSpans.push_back ({ (double) c[ids::beat] * s.samplesPerBeat(),
+                                      std::max (Session::clipEnd (c) * s.samplesPerBeat(), c == passClip ? (double) playhead : 0.0) });
         }
         else
         {
@@ -1186,6 +1194,16 @@ void Ui::drawTimeline (App& app)
                     ch = line > 0 ? gridMark : L'\x00b7';
                     fg = line == 2 ? colour::dim : line == 1 ? colour::gridBar : colour::faint;
 
+                    // Inside a clip: its shade (neighbours alternate) and an outline, top and
+                    // bottom, so a loop reads as one block.
+                    for (int k = (int) hitSpans.size(); --k >= 0;)
+                        if (t1 > hitSpans[(size_t) k].first + 0.5 && t0 < hitSpans[(size_t) k].second - 0.5)
+                        {
+                            cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
+                            inClip = true;
+                            break;
+                        }
+
                     auto it = std::lower_bound (laneHits.begin(), laneHits.end(), std::make_pair (t0 - 0.5, 0.0f));
                     float vel = -1.0f;
 
@@ -1196,7 +1214,9 @@ void Ui::drawTimeline (App& app)
                     {
                         ch = vel >= 0.95f ? L'\x2588' : vel >= 0.7f ? L'\x2593' : vel >= 0.4f ? L'\x2592' : L'\x2591';
                         fg = colour::hit;
-                        cellBg = colour::clipBg;
+
+                        if (! inClip)
+                            cellBg = colour::clipBg;
                     }
                 }
 
@@ -1554,7 +1574,7 @@ void Ui::drawBottom (App& app)
         hints = app.hasTimeSelection() ? L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 ctrl+v pastes at the cursor \x00b7 l loop \x00b7 shift \x2190\x2192 extend \x00b7 space stop"
                                        : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ctrl+k marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
     else if (app.hasTimeSelection())
-        hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
+        hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
         hints = app.ioCell < App::ioFirstSend
                     ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 | opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves"
@@ -1604,6 +1624,7 @@ void Ui::drawHelp (App&)
         { Pair, L"sample f", L"new sample track", L"ctrl c x v", L"copy / cut / paste" },
         { Pair, L".  >", L"play armed (> accent)", L"snap  snap 50", L"quantize hits (%)" },
         { Pair, L"3 sample", L"convert (3 audio: back)", L"ctrl d", L"duplicate after itself" },
+        { Pair, L"sel clip", L"select the clip here", L"alt+shift+3", L"consolidate (cons)" },
         { Pair, L"3 pat x...", L"pattern: X x o .", L"delete", L"clear the range" },
         { Pair, L"grid 16", L"steps of a 16th", L"ctrl z / y", L"undo / redo" },
         { Pair, L"alt+/", L"toggle a hit at cursor", L"sel 3 5", L"select bars 3 to 5" },

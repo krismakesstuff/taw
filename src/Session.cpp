@@ -6,6 +6,7 @@ static const juce::Identifier typeKey { "type" }, childrenKey { "children" };
 
 static void migrateTakesToClips (juce::ValueTree& session);
 static void migrateNotesToMidiClips (juce::ValueTree& session);
+static void wrapLooseHits (juce::ValueTree& session);
 
 // Every open copies session.json into backups\ as it was on disk, keeping the newest few, so
 // a bad save never leaves you without the version you opened.
@@ -233,6 +234,8 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
     if ((int) tree.getProperty (ids::version, 1) < 3)
         migrateNotesToMidiClips (tree);
 
+    wrapLooseHits (tree); // version 3 (or a hand-written file)
+
     applyDefaults (tree);
     dir.getChildFile ("audio").createDirectory();
 
@@ -373,22 +376,45 @@ juce::ValueTree Session::makeClip (const juce::String& file, juce::int64 start, 
     return c;
 }
 
-std::vector<juce::ValueTree> Session::hits (const juce::ValueTree& track)
-{
-    std::vector<juce::ValueTree> out;
-
-    for (const auto& c : track)
-        if (c.hasType (ids::HIT))
-            out.push_back (c);
-
-    return out;
-}
-
 juce::ValueTree Session::makeHit (double beat, float vel)
 {
     juce::ValueTree h (ids::HIT);
     h.setProperty (ids::beat, beat, nullptr).setProperty (ids::vel, juce::jlimit (0.0f, 1.0f, vel), nullptr);
     return h;
+}
+
+std::vector<juce::ValueTree> Session::hitClips (const juce::ValueTree& track)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : track)
+        if (c.hasType (ids::HITCLIP))
+            out.push_back (c);
+
+    return out;
+}
+
+juce::ValueTree Session::makeHitClip (double beat, double offset, double len)
+{
+    juce::ValueTree c (ids::HITCLIP);
+    c.setProperty (ids::beat, beat, nullptr).setProperty (ids::offset, offset, nullptr).setProperty (ids::len, len, nullptr);
+    return c;
+}
+
+std::vector<juce::ValueTree> Session::beatClips (const juce::ValueTree& track)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : track)
+        if (isBeatClip (c))
+            out.push_back (c);
+
+    return out;
+}
+
+juce::ValueTree Session::makeBeatClip (const juce::ValueTree& kindOf, double beat, double offset, double len)
+{
+    return kindOf.hasType (ids::HITCLIP) ? makeHitClip (beat, offset, len) : makeMidiClip (beat, offset, len);
 }
 
 std::vector<juce::ValueTree> Session::midiClips (const juce::ValueTree& track)
@@ -457,6 +483,18 @@ std::vector<Session::PlacedNote> Session::placedNotes (const juce::ValueTree& tr
     return out;
 }
 
+std::vector<Session::PlacedHit> Session::placedHits (const juce::ValueTree& track)
+{
+    std::vector<PlacedHit> out;
+
+    for (const auto& clip : hitClips (track))
+        for (const auto& h : clip)
+            if (h.hasType (ids::HIT) && inWindow (clip, h[ids::beat]))
+                out.push_back ({ h, clip, contentZero (clip) + (double) h[ids::beat], (float) (double) h[ids::vel] });
+
+    return out;
+}
+
 std::vector<Session::PlacedControl> Session::placedControls (const juce::ValueTree& track)
 {
     std::vector<PlacedControl> out;
@@ -477,7 +515,7 @@ juce::ValueTree Session::trimmedMidiClip (const juce::ValueTree& clip, double fr
         return {};
 
     const auto zero = contentZero (clip);
-    auto out = makeMidiClip (lo, lo - zero, hi - lo);
+    auto out = makeBeatClip (clip, lo, lo - zero, hi - lo);
 
     for (const auto& n : clip)
         if (inWindow (out, n[ids::beat]))
@@ -523,9 +561,7 @@ juce::int64 Session::contentEnd() const
         {
             if (! sampleTrack && c.hasType (ids::CLIP))
                 end = juce::jmax (end, (juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
-            else if (sampleTrack && c.hasType (ids::HIT))
-                end = juce::jmax (end, (juce::int64) std::llround ((double) c[ids::beat] * samplesPerBeat()));
-            else if (c.hasType (ids::MIDICLIP))
+            else if (isBeatClip (c))
                 end = juce::jmax (end, (juce::int64) std::llround (clipEnd (c) * samplesPerBeat()));
         }
     }
@@ -601,6 +637,48 @@ static void migrateNotesToMidiClips (juce::ValueTree& session)
     }
 
     session.setProperty (ids::version, 3, nullptr);
+}
+
+// Version 3 kept a sample track's hits on the track. They go into one hit clip covering them, out
+// to whole bars, its content beats the timeline's, as notes did going to version 3.
+static void wrapLooseHits (juce::ValueTree& session)
+{
+    const auto beatsPerBar = (double) juce::jmax (1, (int) session.getProperty (ids::timeSigNum, 4));
+
+    for (auto track : session)
+    {
+        if (! track.hasType (ids::TRACK))
+            continue;
+
+        std::vector<juce::ValueTree> loose;
+        double first = 0.0, last = 0.0;
+
+        for (const auto& c : track)
+            if (c.hasType (ids::HIT))
+            {
+                const double beat = c[ids::beat];
+                first = loose.empty() ? beat : std::min (first, beat);
+                last = loose.empty() ? beat : std::max (last, beat);
+                loose.push_back (c);
+            }
+
+        if (loose.empty())
+            continue;
+
+        const auto from = std::max (0.0, std::floor (first / beatsPerBar) * beatsPerBar);
+        const auto to = std::max (from + beatsPerBar, std::floor (last / beatsPerBar + 1.0) * beatsPerBar); // the bar the last hit is in
+        auto clip = Session::makeHitClip (from, from, to - from);
+
+        for (auto& c : loose)
+        {
+            track.removeChild (c, nullptr);
+            clip.appendChild (c, nullptr);
+        }
+
+        track.appendChild (clip, nullptr);
+    }
+
+    session.setProperty (ids::version, Session::currentVersion, nullptr);
 }
 
 //==============================================================================

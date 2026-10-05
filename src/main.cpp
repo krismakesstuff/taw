@@ -442,13 +442,19 @@ int main (int argc, char** argv)
             }
             else if (taw::Session::isSampleTrack (track))
             {
+                // Each hit clip as beat+length, then the hits that play (timeline beats).
+                const auto clips = taw::Session::hitClips (track);
                 std::vector<double> beats;
+                what << (int) clips.size() << " clips:";
 
-                for (const auto& h : taw::Session::hits (track))
-                    beats.push_back ((double) h[taw::ids::beat]);
+                for (const auto& c : clips)
+                    what << " " << juce::String ((double) c[taw::ids::beat], 2) << "+" << juce::String ((double) c[taw::ids::len], 2);
+
+                for (const auto& h : taw::Session::placedHits (track))
+                    beats.push_back (h.beat);
 
                 std::sort (beats.begin(), beats.end());
-                what << (int) beats.size() << " hits:";
+                what << ", " << (int) beats.size() << " hits:";
 
                 for (auto b : beats)
                     what << " " << juce::String (b, 2);
@@ -781,11 +787,40 @@ int main (int argc, char** argv)
                 check ("...covering whole bars (beats 4 to 16)", clips.size() == 1 && approx (clips[0][ids::beat], 4.0) && approx (clips[0][ids::len], 12.0));
                 check ("...with every note where it was", notes.size() == 2 && approx (notes[0].start, 5.5) && approx (notes[1].start, 9.0)
                                                               && approx (notes[1].end, 12.5));
-                check ("...and the session is version 3", (int) s->tree()[ids::version] == 3);
+                check ("...and the session is up to date", (int) s->tree()[ids::version] == Session::currentVersion);
             }
             else
             {
                 check ("v2 session loads", false);
+            }
+
+            // Version 3: a sample track's hits go into one hit clip, out to the bar of the last.
+            juce::ValueTree v3 (ids::SESSION);
+            v3.setProperty (ids::version, 3, nullptr).setProperty (ids::timeSigNum, 4, nullptr);
+            juce::ValueTree drums (ids::TRACK);
+            drums.setProperty (ids::kind, "sample", nullptr);
+            drums.appendChild (Session::makeHit (4.0, 1.0f), nullptr);
+            drums.appendChild (Session::makeHit (10.5, 0.5f), nullptr);
+            drums.appendChild (Session::makeHit (12.0, 0.8f), nullptr); // starts bar 4: the clip takes it in
+            v3.appendChild (drums, nullptr);
+            dir.getChildFile ("session.json").replaceWithText (juce::JSON::toString (taw::treeToVar (v3)));
+
+            if (auto s = Session::load (dir, error))
+            {
+                const auto t = s->track (0);
+                const auto clips = Session::hitClips (t);
+                const auto hits = Session::placedHits (t);
+                check ("v3 hits move into one hit clip", clips.size() == 1 && t.getNumChildren() == 1 && hits.size() == 3);
+                check ("...covering whole bars (beats 4 to 16)", clips.size() == 1 && approx (clips[0][ids::beat], 4.0) && approx (clips[0][ids::len], 12.0));
+                check ("...with every hit where it was", hits.size() == 3 && approx (hits[1].beat, 10.5) && std::abs (hits[1].vel - 0.5f) < 1e-6f);
+
+                // Trimming a hit clip keeps its kind and only the hits inside.
+                const auto piece = Session::trimmedMidiClip (clips[0], 8.0, 12.0);
+                check ("a trimmed hit clip is a hit clip with its hits", piece.hasType (ids::HITCLIP) && piece.getNumChildren() == 1);
+            }
+            else
+            {
+                check ("v3 session loads", false);
             }
 
             dir.deleteRecursively();

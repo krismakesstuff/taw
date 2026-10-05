@@ -8,7 +8,7 @@ namespace taw
 class Session
 {
 public:
-    static constexpr int currentVersion = 3; // 2: tracks hold CLIPs instead of TAKEs; 3: notes live in MIDICLIPs
+    static constexpr int currentVersion = 4; // 2: tracks hold CLIPs instead of TAKEs; 3: notes live in MIDICLIPs; 4: hits in HITCLIPs
 
     // Creates <parentDir>/<name>/ with session.json and audio/, seeded from a template tree.
     static std::unique_ptr<Session> create (const juce::File& dir, const juce::ValueTree& templateTree,
@@ -50,10 +50,21 @@ public:
     static juce::ValueTree lastClip (const juce::ValueTree& track);
     static juce::ValueTree makeClip (const juce::String& file, juce::int64 start, juce::int64 offset, juce::int64 length);
 
-    // Sample tracks: the track plays its sample once per HIT.
+    // Sample tracks: the track plays its sample once per HIT. Hits live in HITCLIPs, which work
+    // like MIDI clips (below): a window onto the hits inside, so a loop moves, copies and trims
+    // as one thing. A hit's beat is in its clip's content.
     static bool isSampleTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "sample"; }
-    static std::vector<juce::ValueTree> hits (const juce::ValueTree& track);
     static juce::ValueTree makeHit (double beat, float vel);
+    static std::vector<juce::ValueTree> hitClips (const juce::ValueTree& track);
+    static juce::ValueTree makeHitClip (double beat, double offset, double len);
+    struct PlacedHit { juce::ValueTree node, clip; double beat; float vel; };
+    static std::vector<PlacedHit> placedHits (const juce::ValueTree& track); // the hits that play, on the timeline (beats)
+
+    // The clips measured in beats, either kind: MIDI clips and hit clips.
+    static bool isBeatClip (const juce::ValueTree& c) { return c.hasType (ids::MIDICLIP) || c.hasType (ids::HITCLIP); }
+    static std::vector<juce::ValueTree> beatClips (const juce::ValueTree& track);
+    // A new clip of the same kind as this one.
+    static juce::ValueTree makeBeatClip (const juce::ValueTree& kindOf, double beat, double offset, double len);
 
     // Instrument tracks: a plugin plays the track's NOTEs and CCs (positions in beats).
     static bool isInstrumentTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "instrument"; }
@@ -71,7 +82,7 @@ public:
     static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);
     static juce::ValueTree makeControl (double beat, int num, int val, int channel = 1);
 
-    // MIDI clips: a window [offset, offset + len) onto the clip's content (its NOTEs and CCs,
+    // MIDI clips (and hit clips): a window [offset, offset + len) onto the clip's content (its NOTEs and CCs,
     // positioned in content beats), placed at beat on the timeline. Like an audio clip's window
     // into its file, trimming hides notes without losing them. A note belongs to the clip it
     // starts in, and is cut off at the clip's end. Overlapping MIDI clips both play.
@@ -92,8 +103,8 @@ public:
     static std::vector<PlacedNote> placedNotes (const juce::ValueTree& track);
     static std::vector<PlacedControl> placedControls (const juce::ValueTree& track);
 
-    // A copy of a clip cut down to [from, to) on the timeline, keeping only the notes and
-    // controllers inside that (the rest would be hidden for good). Invalid if they don't meet.
+    // A copy of a clip (MIDI or hits) cut down to [from, to) on the timeline, keeping only what's
+    // inside that (the rest would be hidden for good). Invalid if they don't meet.
     static juce::ValueTree trimmedMidiClip (const juce::ValueTree& clip, double from, double to);
 
     // The fine grid step (alt + arrows, step editing), in beats: 1 for quarters, 0.25 for 16ths.

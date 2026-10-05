@@ -1248,8 +1248,8 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
                 tp.sampleLength = wanted > 0 ? juce::jmin (wanted, fileLength - tp.sampleOffset) : fileLength - tp.sampleOffset;
                 tp.stereo = data->audio->getNumChannels() > 1;
 
-                for (const auto& h : Session::hits (t))
-                    tp.hits.push_back ({ std::llround ((double) h[ids::beat] * session->samplesPerBeat()), (float) (double) h[ids::vel] });
+                for (const auto& h : Session::placedHits (t))
+                    tp.hits.push_back ({ std::llround (h.beat * session->samplesPerBeat()), h.vel });
 
                 std::sort (tp.hits.begin(), tp.hits.end(), [] (const auto& a, const auto& b) { return a.pos < b.pos; });
             }
@@ -1945,7 +1945,7 @@ bool App::playPads (float velocity, bool repeat)
             engine.triggerPad (t, velocity);
 
         if (rec)
-            session->track (t).appendChild (Session::makeHit (beat, velocity), um());
+            addHit (t, beat, velocity);
     }
 
     return true;
@@ -2004,19 +2004,22 @@ Result App::quantizeHits (const juce::String& argIn, const std::vector<int>& tra
         if (! Session::isSampleTrack (track))
             continue;
 
-        for (auto h : Session::hits (track))
+        // In their clips, as notes are: one snapped back past its clip's start takes the clip with it.
+        for (const auto& h : Session::placedHits (track))
         {
-            const auto beat = (double) h[ids::beat];
-            const auto pos = (juce::int64) std::llround (beat * spb);
+            const auto pos = (juce::int64) std::llround (h.beat * spb);
 
             if (ranged && ! range.contains (pos))
                 continue;
 
-            const auto target = std::round (beat / step) * step;
+            const auto target = std::round (h.beat / step) * step;
 
-            if (std::abs (target - beat) > 1e-9)
+            if (std::abs (target - h.beat) > 1e-9)
             {
-                h.setProperty (ids::beat, beat + (target - beat) * strength, um());
+                const auto to = h.beat + (target - h.beat) * strength;
+                Session::growMidiClip (h.clip, to, to + 1.0 / 1024.0, um());
+                auto node = h.node;
+                node.setProperty (ids::beat, (double) node[ids::beat] + (to - h.beat), um());
                 ++moved;
             }
         }
@@ -2252,11 +2255,11 @@ Result App::moveToNextClipEdge (bool extendSelection)
         }
 
         if (Session::isSampleTrack (track))
-            for (const auto& h : Session::hits (track))
-                consider (std::llround ((double) h[ids::beat] * session->samplesPerBeat()));
+            for (const auto& h : Session::placedHits (track))
+                consider (std::llround (h.beat * session->samplesPerBeat()));
 
-        // MIDI clip edges, and the notes in them.
-        for (const auto& c : Session::midiClips (track))
+        // MIDI and hit clip edges, and the notes in them.
+        for (const auto& c : Session::beatClips (track))
         {
             consider (std::llround ((double) c[ids::beat] * session->samplesPerBeat()));
             consider (std::llround (Session::clipEnd (c) * session->samplesPerBeat()));
@@ -2341,13 +2344,17 @@ void App::handleMouse (const Key& k)
         if (const auto clip = midiClipAt (track, t0, t1); clip.isValid())
         {
             const auto spb = session->samplesPerBeat();
+            focusTrack (track);
             timeAnchor = std::llround ((double) clip[ids::beat] * spb);
             timeHead = std::llround (Session::clipEnd (clip) * spb);
 
             if (! engine.isRolling())
                 setCursor (timeAnchor);
 
-            say (openMidiEditor (clip));
+            // A hit clip has no editor: selected, for ctrl+c / ctrl+x / ctrl+d.
+            say (clip.hasType (ids::HITCLIP) ? Result::good ("selected the clip " + formatBars (timeAnchor) + L" \x2192 " + formatBars (timeHead)
+                                                             + L" \x00b7 ctrl+c copies, ctrl+x cuts, ctrl+d repeats it")
+                                             : openMidiEditor (clip));
             return;
         }
 
@@ -2482,7 +2489,7 @@ Result App::toggleEditor()
         return clip.isValid() ? openAudioEditor (clip) : Result::fail (label + L" has no clips \x2014 record or import one");
     }
 
-    return Result::fail (label + (Session::isSampleTrack (track) ? L" is a sample track \x2014 its hits are edited on the timeline (pat, alt+/)"
+    return Result::fail (label + (Session::isSampleTrack (track) ? L" is a sample track \x2014 its hits are edited on the timeline (pat, alt+/; sel clip selects a clip)"
                                                                  : L" is a bus \x2014 it has no clips"));
 }
 
@@ -2517,7 +2524,7 @@ juce::ValueTree App::midiClipAt (int track, double from, double to) const
     if (session == nullptr || track < 0 || track >= session->numTracks())
         return {};
 
-    const auto midi = Session::midiClips (session->track (track));
+    const auto midi = Session::beatClips (session->track (track));
     const auto spb = session->samplesPerBeat();
 
     for (auto it = midi.rbegin(); it != midi.rend(); ++it)
@@ -2664,6 +2671,14 @@ void App::handleMainKey (const Key& k)
         for (auto& m : trackMeters) m.clipped = false;
         for (auto& m : masterMeters) m.clipped = false;
         say (Result::good ("clip lights cleared"));
+        return;
+    }
+
+    // Alt+shift+3 consolidates the selection into one clip per track, as in Pro Tools.
+    if (k.code == Key::Char && k.alt && ! k.ctrl && k.ch == '#')
+    {
+        beginEdit ("consolidate");
+        say (consolidate (defaultTargets()));
         return;
     }
 

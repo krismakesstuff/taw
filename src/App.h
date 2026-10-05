@@ -60,14 +60,14 @@ juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
 juce::String trackList (const std::vector<int>& tracks); // "track 2", "tracks 1,3"
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
-// What ctrl+c holds: per track, its clips (audio) or hits (sample track), positioned relative
-// to the start of the copied range.
+// What ctrl+c holds: per track, its clips (audio, MIDI or hits), trimmed to the copied range
+// and positioned relative to its start.
 struct Clipboard
 {
     struct Lane
     {
         bool sample = false, instrument = false;
-        std::vector<juce::ValueTree> items; // CLIPs (start in samples), HITs, or NOTEs and CCs (beat in beats)
+        std::vector<juce::ValueTree> items; // CLIPs (start in samples), or MIDICLIPs / HITCLIPs (beat in beats)
     };
 
     juce::int64 length = 0; // samples
@@ -330,7 +330,7 @@ public:
     std::map<int, HeldNote> heldNotes; // by channel * 128 + pitch
     std::vector<int> midiRecordTracks;
     double midiPassStart = 0.0;                  // beats: where this recording pass began
-    std::map<int, juce::ValueTree> midiPassClips; // by track: the clip this pass records into (made on its first note)
+    std::map<int, juce::ValueTree> midiPassClips; // by track: the clip this pass records into (made on its first note or hit)
 
     // "f": the focused track fills the track area (instrument tracks become a piano roll).
     bool fillView = false;
@@ -344,13 +344,20 @@ public:
     Result returnPlayhead();
     Result setGridDivision (int noteValue);
 
-    // Editing over the time selection (Editing.cpp). Audio tracks move clips, sample tracks hits.
+    // Editing over the time selection (Editing.cpp). Clips move, trimmed to the selection.
     Result copySelection (const std::vector<int>& tracks);
     Result cutSelection (const std::vector<int>& tracks);
     Result deleteSelection (const std::vector<int>& tracks);
     Result duplicateSelection (const std::vector<int>& tracks); // right after itself
     Result paste (int firstTrack); // at the cursor, lanes on consecutive tracks
     Result selectRange (const juce::String& from, const juce::String& to); // "sel 3 5": bars 3 to 5
+    Result selectClipAtCursor(); // "sel clip": the focused track's clip under the cursor
+    // Consolidate (alt+shift+3, as in Pro Tools): what plays in the selection becomes one new
+    // clip per track: MIDI and hits gathered into one clip, audio rendered to a new file.
+    Result consolidate (const std::vector<int>& tracks);
+    // A hit at a timeline beat on a sample track: into the clip there, this record pass's clip,
+    // or a clip for its bar (growing the one just before when it reaches the bar).
+    void addHit (int track, double beat, float vel);
     Clipboard clipboard;
 
     static juce::StringArray splitPaths (const juce::String& text);
@@ -488,7 +495,7 @@ private:
     void handleKey (const Key&);
     void handleMainKey (const Key&);
     void handleMouse (const Key&);
-    // The MIDI clip on top in [from, to) samples on a track, or invalid.
+    // The MIDI or hit clip on top in [from, to) samples on a track, or invalid.
     juce::ValueTree midiClipAt (int track, double from, double to) const;
     void handleDevicePickerKey (const Key&);
     void handleTemplatePickerKey (const Key&);

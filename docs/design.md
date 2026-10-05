@@ -318,8 +318,18 @@ sample group (a kit) comes later, on top of normal tracks.
 
 ```
 TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
-  HIT { beat, vel }        # beats from the session start, so patterns follow the tempo
+  HITCLIP { beat, offset, len }  # like a MIDI clip: a window onto its content, in beats
+    HIT { beat, vel }            # beats in the clip's content, so patterns follow the tempo
 ```
+
+- Hits live in clips, so a loop copies, moves, repeats and trims as one block. A hit clip works
+  like a MIDI clip: trimming hides hits without losing them, and overlapping hit clips both play.
+- Hits placed with `Alt+/` go into the clip under the cursor; outside one, the clip ending
+  earlier in that bar grows to the bar's end, else a new one-bar clip is made, so entering steps
+  bar after bar builds one clip. Hits recorded with the pad key go into one clip per record pass,
+  as notes do. `pat` writes one clip over its range.
+- Version 3 sessions kept hits on the track; on load they go into one clip from the bar of the
+  first hit to the end of the bar of the last.
 
 - Each hit plays the whole sample once at its velocity; overlapping hits ring out (no choke
   yet). Rendering depends only on position, like clips, so loops, seeks and bounces agree.
@@ -331,13 +341,14 @@ TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
 - Dropped files under 2 s become sample tracks automatically; longer ones stay audio.
 - `pat` writes steps over the time selection (repeating), or from the cursor for a bar:
   `X` accent, `x` normal, `o` ghost, `.`/`-` rest; spaces and `|` ignored. Steps are 16ths
-  unless `pat /8 …` etc. A pattern replaces the hits in its range. `~58` (or `swing58`)
+  unless `pat /8 …` etc. A pattern is a new clip over its range, replacing what was there. `~58` (or `swing58`)
   anywhere in it swings: every second step lands late, 50 straight to 75 (66 is a triplet feel),
   the MPC way, so `pat /16 ~58 …` swings the 16ths.
 - `grid 16` (or 4, 8, 32) sets the fine step: `Alt+←/→` move one step (`Ctrl+Alt` four) and the view zooms
   to one column per step. `Alt+/` toggles a hit at the cursor on a focused sample track (at the
   playhead while playing).
-- The lane shows each step: a hit's velocity as a shade, an empty step as a faint dot.
+- The lane shows each step: a hit's velocity as a shade, an empty step as a faint dot. A clip's
+  steps are shaded (neighbouring clips alternate) and outlined top and bottom.
 - Sample tracks can't be recorded onto.
 
 **Positions between samples.** At tempos like 99 bpm a beat is 26727.27 samples, so grid lines
@@ -528,19 +539,28 @@ TRACK { …, pan?, channels? }   # pan -1..1 (absent = centre); channels 1 or 2 
 ## Editing
 
 Select a range with Shift+arrows (time) and Shift+↑↓ (tracks); with no track selection the
-focused track is used. What moves depends on the track: clips on audio tracks, hits on sample
-tracks, MIDI clips on instrument tracks.
+focused track is used. What moves is clips, trimmed to the range: audio clips, hit clips on
+sample tracks, MIDI clips on instrument tracks.
 
 | Key | Command | Does |
 |---|---|---|
-| `Ctrl+C` | `copy` | copy the range (clips trimmed to it, hits inside it) |
+| `Ctrl+C` | `copy` | copy the range (clips trimmed to it) |
 | `Ctrl+X` | `cut` | copy, then clear the range |
 | `Ctrl+V` | `paste` | paste at the cursor (also during playback) onto the focused track, extra lanes on the tracks below |
 | `Ctrl+D` | `dup` | paste right after the range, then select the copy (press again to keep repeating) |
 | `Delete` | `del` | clear the range |
 | | `sel 3 5` | select bars 3 to 5 (any `@` position: `sel 1.2 1:30`) |
+| double-click | `sel clip` | select the clip under the cursor on the focused track (a MIDI or audio clip also opens its editor on double-click) |
+| `Alt+Shift+3` | `cons` | consolidate: what plays in the range becomes one clip per track (below) |
 
-- Pasted clips layer on top (later wins); pasted hits replace hits on the same step.
+- Pasted audio clips layer on top (later wins); pasted hit clips replace what was under them
+  (two loops at once would double every hit); pasted MIDI clips add to what's there.
+- **Consolidate** (`cons`, as in Pro Tools): the range on each track becomes one clip exactly
+  its length. MIDI and hit clips: the notes and hits that play there are gathered into one new
+  clip (a note keeps the length it played for). Audio: what plays there is rendered into a new
+  file in `audio/` (`03-Name-cons.wav`, 32-bit float), silence where nothing plays, later clips
+  over earlier ones; the old files stay. Gain, inserts and pan aren't printed. Undo takes the
+  new clip away and brings the old ones back.
 - Clips only point into files, so copies cost nothing on disk.
 - A lane only pastes onto its own kind of track; mismatches are skipped and reported.
 - Each edit is one undo step. Hits are positioned in beats, so they follow tempo changes.

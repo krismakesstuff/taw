@@ -238,6 +238,7 @@ int App::run()
     }
 
     timing::mark ("console open");
+    interactive = true;
     startupDevice();
 
     // MIDI controllers, all of them, for armed instrument tracks. Only the interactive app opens
@@ -1780,9 +1781,45 @@ void App::pollBounce()
             say (Result::fail ("bounced, but it clips! " + summary));
         else
             say (Result::good ("bounced " + summary));
+
+        lastBounce = bounce->file();
+
+        if (interactive && session != nullptr && (bool) session->tree()[ids::bounceReveal])
+            lastBounce.revealToUser();
     }
 
     bounce.reset();
+}
+
+Result App::revealBounces (const juce::String& arg)
+{
+    if (session == nullptr)
+        return Result::fail ("no session open");
+
+    auto s = session->tree();
+
+    if (arg == "on" || arg == "off")
+    {
+        beginEdit ("bounce reveal");
+        s.setProperty (ids::bounceReveal, arg == "on", um());
+        return Result::good (arg == "on" ? L"each bounce opens in the file explorer \x00b7 bounces off stops it"
+                                         : L"bounces stay put \x00b7 bounces opens the folder");
+    }
+
+    if (arg.isNotEmpty())
+        return Result::fail ("bounces [on|off]");
+
+    const auto folder = session->folder().getChildFile (s[ids::bounceFolder].toString());
+
+    // The latest bounce, picked out in its folder; else just the folder.
+    if (lastBounce.existsAsFile() && lastBounce.getParentDirectory() == folder)
+        lastBounce.revealToUser();
+    else if (folder.isDirectory())
+        folder.startAsProcess();
+    else
+        return Result::fail ("nothing bounced yet \x00b7 select a range, then b");
+
+    return Result::good ("opened " + folder.getFullPathName());
 }
 
 //==============================================================================

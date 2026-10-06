@@ -121,6 +121,7 @@ static void applyDefaults (juce::ValueTree& s)
     def (ids::loopEnd, (juce::int64) 0);
     def (ids::bounceFormat, "wav");
     def (ids::bounceFolder, "bounces");
+    def (ids::bounceReveal, true);
 
     for (auto t : s)
     {

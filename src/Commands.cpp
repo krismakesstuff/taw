@@ -54,7 +54,7 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 }
 
 // Every verb, so a verb glued to its argument can be split off: "2i2", "2v-6", "bpm92".
-const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "import", "imp", "undo", "redo", "dev", "panel",
+const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "bounces", "import", "imp", "undo", "redo", "dev", "panel",
                               "help", "q", "quit", "exit", "save", "cons", "consolidate", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
@@ -308,6 +308,17 @@ Result App::setCountIn (const juce::String& argIn)
 //==============================================================================
 // Project settings panel ("project")
 
+static juce::String fileExplorer()
+{
+#if JUCE_WINDOWS
+    return "Explorer";
+#elif JUCE_MAC
+    return "Finder";
+#else
+    return "file manager";
+#endif
+}
+
 std::vector<App::Setting> App::projectSettings() const
 {
     if (session == nullptr)
@@ -334,6 +345,7 @@ std::vector<App::Setting> App::projectSettings() const
         { "Track height", juce::String (height) + (height == 1 ? " row" : " rows"), "height " },
         { "Bounce format", s[ids::bounceFormat].toString(), {} },
         { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
+        { "Show bounces in " + fileExplorer(), onOff (s[ids::bounceReveal]) + L"  (bounces opens it any time)", {} },
         { "Sample rate", juce::String (sampleRate() / 1000.0, 1) + L" kHz  (set when the session was made)", {}, false },
         { "Theme (all sessions)", theme, {} },
         { "New session rate", juce::String (newRate / 1000.0, newRate == 44100.0 || newRate == 88200.0 ? 1 : 0) + L" kHz  (all sessions)", {} },
@@ -388,6 +400,8 @@ Result App::stepSetting (int index, int direction)
         saveSettings();
         return Result::good (dateSessionNames ? "new sessions are named " + datedName ("name") : juce::String ("new sessions keep the name you type"));
     }
+
+    if (name.startsWith ("Show bounces")) return execute ((bool) s[ids::bounceReveal] ? "bounces off" : "bounces on");
 
     if (name == "Bounce format")
     {
@@ -723,6 +737,7 @@ Result App::execute (const juce::String& line)
     if (v == "lowlat")             return setLowLatency (p.args[0]);
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
+    if (v == "bounces")            return revealBounces (p.args[0].toLowerCase());
     if (v == "import" || v == "imp")
         return startImport (splitPaths (p.rest), p.hasSelector && ! p.tracks.empty() ? p.tracks.front() : -1);
     if (v == "undo")               return undoEdit();

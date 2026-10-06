@@ -1659,6 +1659,7 @@ void Ui::drawHelp (App&)
 #else
         { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
 #endif
+        { Pair, L"bounces", L"open the bounce folder", L"bounces off", L"...not after every bounce" },
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
         { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder to it" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },

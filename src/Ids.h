@@ -43,6 +43,7 @@ TAW_ID (loopStart)
 TAW_ID (loopEnd)
 TAW_ID (bounceFormat) // "wav" | "mp3"
 TAW_ID (bounceFolder) // relative to the session folder, or absolute
+TAW_ID (bounceReveal) // open the file explorer on a finished bounce
 
 TAW_ID (kind)         // TRACK: "audio" (default) | "sample" | "instrument" | "bus". Never "type": that key is the node type in JSON.
 TAW_ID (busId)        // bus track: what outputs and sends call it (stays put when tracks move or get renamed)

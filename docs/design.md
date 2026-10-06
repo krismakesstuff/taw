@@ -710,7 +710,11 @@ over the time selection, offline on its own thread, faster than real time. `Esc`
   ships with Windows, so nothing extra to install (needs a 32/44.1/48 kHz session).
 - Default folder `bounces/` in the session; default name `<session>-<timestamp>`. Never
   overwrites. Files are written as `name.part.ext` and renamed only when complete.
-- Reports length, path and peak; a peak over 0 dBFS is flagged as clipping.
+- Reports length, path and peak; a peak over 0 dBFS is flagged as clipping. A progress bar sits
+  in front of the command line while it runs.
+- A finished bounce opens in the file explorer with the file picked out (a session setting, on
+  by default; `bounces off` / `bounces on`). `bounces` opens the folder any time. Headless runs
+  (`--exec`) never open it.
 - `taw --bouncetest <dir>` renders a synthetic mix to both formats without a device.
 
 ## Startup

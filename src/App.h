@@ -368,6 +368,9 @@ public:
     static juce::StringArray splitPaths (const juce::String& text);
     static juce::String expandHome (const juce::String& path); // ~/x -> /Users/you/x (not on Windows)
     bool isBouncing() const { return bounce != nullptr; }
+    Result revealBounces (const juce::String& arg); // "bounces": the folder in the file explorer; "bounces on/off": after each bounce
+    juce::File lastBounce;                          // this session's latest finished bounce
+    bool interactive = false;                       // run() is driving (not taw --exec): may open other windows
     const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
     void openDevicePicker();
     Result showControlPanel();

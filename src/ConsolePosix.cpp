@@ -1,8 +1,13 @@
 ﻿#include "Console.h"
 #include "Safety.h"
 
+#if defined(__APPLE__)
+#include "MacFocus.h"
+#endif
+
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sys/ioctl.h>
@@ -18,8 +23,9 @@ termios oldMode {};
 // Keyboard enhancement (kitty protocol, "disambiguate"): terminals that support it (iTerm2,
 // Ghostty, kitty, WezTerm) report ctrl+[ apart from Escape and ctrl+m apart from Enter.
 // Terminal.app ignores it and keeps sending the classic sequences, which are decoded too.
-constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u";
-constexpr const char* leave = "\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
+// Mouse buttons are reported (1000) in SGR form (1006), so clicks come in as cells.
+constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u\x1b[?1000h\x1b[?1006h";
+constexpr const char* leave = "\x1b[?1006l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
 
 void writeAll (const char* data, size_t size)
 {
@@ -143,6 +149,35 @@ Key csiKey (const std::string& params, char final)
     return k;
 }
 
+// The last left or right press, to spot the second click of a double-click: terminals only
+// report presses, so it's the same button in the same cell soon after.
+struct LastClick { double at = -1.0e9; int x = -1, y = -1; bool right = false; } lastClick;
+
+// An SGR mouse report: "<b;x;y" then M (pressed) or m (released). b is the button (0 left,
+// 1 middle, 2 right) plus 4 shift, 8 alt, 16 ctrl, 32 moved, 64 wheel; x and y count from 1.
+// Only left and right presses become keys, as the Windows console reports them.
+Key mouseKey (const std::string& params, char final)
+{
+    const auto p = csiParams (params.substr (1));
+    Key k;
+
+    if (final != 'M' || p.size() < 3 || (p[0] & (32 | 64)) != 0 || (p[0] & 3) == 1 || (p[0] & 3) == 3)
+        return k;
+
+    k.code = Key::Mouse;
+    k.right = (p[0] & 3) == 2;
+    k.shift = (p[0] & 4) != 0;
+    k.alt = (p[0] & 8) != 0;
+    k.ctrl = (p[0] & 16) != 0;
+    k.x = std::max (0, p[1] - 1);
+    k.y = std::max (0, p[2] - 1);
+
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    k.doubleClick = now - lastClick.at < 500.0 && k.x == lastClick.x && k.y == lastClick.y && k.right == lastClick.right;
+    lastClick = k.doubleClick ? LastClick {} : LastClick { now, k.x, k.y, k.right }; // a third click starts over
+    return k;
+}
+
 // Bytes a UTF-8 sequence starting with c needs (1 for anything unexpected).
 int utf8Length (unsigned char c)
 {
@@ -193,7 +228,8 @@ size_t decodeOne (const std::string& s, size_t i, Key& k)
         if (j >= s.size())
             return 0;
 
-        k = csiKey (s.substr (i + 2, j - i - 2), s[j]);
+        const auto params = s.substr (i + 2, j - i - 2);
+        k = params.starts_with ('<') ? mouseKey (params, s[j]) : csiKey (params, s[j]);
         return j - i + 1;
     }
 
@@ -296,7 +332,13 @@ Console::~Console()
 }
 
 void Console::reclaimKeyboard (const std::vector<void*>&, void*) {}
-void Console::focusTerminal() {}
+void Console::focusTerminal()
+{
+#if defined(__APPLE__)
+    if (opened)
+        macFocus::activateTerminal();
+#endif
+}
 void* Console::keyboardHeldBy() const { return nullptr; }
 void Console::toggleKeyboardHold (void*) {}
 

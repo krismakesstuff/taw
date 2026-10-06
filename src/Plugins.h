@@ -154,6 +154,8 @@ private:
 
     void save() const;
     void finish (ScanJob&, bool exited);
+    juce::String nameOf (const juce::String& plugin) const; // a file's name, or an Audio Unit's
+    bool shadowed (const juce::PluginDescription&) const;   // an Audio Unit also here as a VST3
 
     juce::AudioPluginFormatManager formats;
     juce::KnownPluginList list;

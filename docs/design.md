@@ -145,8 +145,10 @@ ranges).
 
 ### Mouse
 
-The keyboard does everything; the mouse is a shortcut. Windows only so far (the console reports
-clicks by cell).
+The keyboard does everything; the mouse is a shortcut. Clicks arrive by cell: the Windows
+console's mouse events, and on macOS the terminal's SGR mouse reports (a double-click is the same
+cell clicked again within half a second). To select text in the terminal while taw runs, turn
+off View > Allow Mouse Reporting (Terminal.app).
 
 - Click a track's lane: that track gets the focus and the cursor goes there (as in Pro Tools).
   Shift-click stretches the time and track selections to it.
@@ -358,7 +360,8 @@ half a sample of a grid line as on it.
 
 ## Instrument tracks
 
-A VST3 instrument per track, played from a MIDI controller and recorded as notes.
+A VST3 instrument per track (or an Audio Unit on macOS), played from a MIDI controller and
+recorded as notes. A plugin installed as both is listed once, as the VST3.
 
 ```
 TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
@@ -378,8 +381,8 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
 - `inst` opens the instrument picker (type to filter, enter loads); `inst vital` loads the best
   name match. Either makes a new instrument track, armed, so the controller plays it at once.
   `3 inst vital` puts it on track 3 (an empty or instrument track; the notes stay).
-- `scan` looks for new or changed plugins in the VST3 folders (opening the picker the first
-  time starts it). Finding out what a plugin is means loading it, and some crash or hang when
+- `scan` looks for new or changed plugins in the VST3 folders, and on macOS among the Audio
+  Units (opening the picker the first time starts it). Finding out what a plugin is means loading it, and some crash or hang when
   loaded cold, so each file is looked at in a child process (`taw --scan-plugin`, four at a
   time, 60 s each): one that crashes or hangs only takes its child down and is skipped from
   then on; `scan retry` tries those again. The list is cached in `plugins.xml` in the config

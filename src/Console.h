@@ -25,7 +25,7 @@ struct Key
         PageDown,
         Delete,
         F1,
-        Mouse // a button pressed in the terminal (Windows only so far)
+        Mouse // a button pressed in the terminal
     };
 
     Code code = None;

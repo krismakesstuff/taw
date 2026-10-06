@@ -13,10 +13,14 @@ const juce::File terminalDefaults ("/System/Applications/Utilities/Terminal.app/
 juce::File askedFile() { return configFolder().getChildFile ("terminal-profile.json"); }
 
 // Keys in Terminal's format: $ shift, ^ ctrl, ~ option, then the key's code (F700 up, F701 down,
-// F702 left, F703 right, F729 home, F72B end). Values are what taw decodes (xterm sequences).
+// F702 left, F703 right, F729 home, F72B end) or, for an ordinary key, its character. Values are
+// what taw decodes (xterm sequences; kitty's CSI u for keys xterm has none for).
 const std::pair<const char*, const char*> added[] = {
     { "$F700", "\x1b[1;2A" },  { "$F701", "\x1b[1;2B" },   // shift+up/down: select tracks
     { "~F700", "\x1b[1;3A" },  { "~F701", "\x1b[1;3B" },   // option+up/down: move tracks
+    { "^F700", "\x1b[1;5A" },  { "^F701", "\x1b[1;5B" },   // ctrl+up/down: the browser's jumps
+    { "$\r", "\x1b[13;2u" },                               // shift+return: apart from return
+    { "^m", "\x1b[109;5u" },   { "^[", "\x1b[91;5u" },     // ctrl+m, ctrl+[: apart from return, esc
     { "F729", "\x1b[H" },      { "F72B", "\x1b[F" },       // home/end (fn+left/right)
     { "$F729", "\x1b[1;2H" },  { "$F72B", "\x1b[1;2F" },   // shift+home/end: select to there
     { "~^F702", "\x1b[1;7D" }, { "~^F703", "\x1b[1;7C" },  // ctrl+option+left/right: 4 steps
@@ -67,7 +71,8 @@ juce::Result install()
     profile->setProperty ("useOptionAsMetaKey", true);
     profile->setProperty ("keyMapBoundKeys", keys);
 
-    // Terminal reads property lists; plutil turns the JSON into one.
+    // Terminal reads property lists; plutil turns the JSON into one. Binary, because XML can't
+    // carry shift+return's key (a carriage return in a key name).
     configFolder().createDirectory();
     const auto json = configFolder().getChildFile ("taw.terminal.json");
     const auto target = configFolder().getChildFile ("taw.terminal");
@@ -75,7 +80,7 @@ juce::Result install()
     if (! json.replaceWithText (juce::JSON::toString (juce::var (profile))))
         return juce::Result::fail ("can't write " + json.getFullPathName());
 
-    run ({ "plutil", "-convert", "xml1", "-o", target.getFullPathName(), json.getFullPathName() }, ok);
+    run ({ "plutil", "-convert", "binary1", "-o", target.getFullPathName(), json.getFullPathName() }, ok);
     json.deleteFile();
 
     if (! ok)
@@ -92,7 +97,8 @@ void offerOnce()
         return;
 
     std::puts ("taw works best in Terminal with a few keyboard settings: Option as Alt, and\n"
-               "Shift+\xe2\x86\x91\xe2\x86\x93, Home/End (fn+\xe2\x86\x90\xe2\x86\x92) and Ctrl+Option+\xe2\x86\x90\xe2\x86\x92 passed on to taw.\n");
+               "Shift+\xe2\x86\x91\xe2\x86\x93, Option+\xe2\x86\x91\xe2\x86\x93, Ctrl+\xe2\x86\x91\xe2\x86\x93, Shift+Return, Home/End (fn+\xe2\x86\x90\xe2\x86\x92) and\n"
+               "Ctrl+Option+\xe2\x86\x90\xe2\x86\x92 passed on to taw.\n");
     std::fputs ("Add a \"taw\" Terminal profile with these settings? Your own profiles stay as they are. [y/n] ", stdout);
     std::fflush (stdout);
 
@@ -116,7 +122,8 @@ void offerOnce()
     }
 
     std::puts ("\nOne more, done in System Settings: Keyboard > Keyboard Shortcuts > Mission Control,\n"
-               "turn off \"Move left a space\" and \"Move right a space\" so Ctrl+\xe2\x86\x90\xe2\x86\x92 reach taw.\n");
+               "turn off \"Mission Control\", \"Application windows\", \"Move left a space\" and \"Move right a space\"\n"
+               "so Ctrl+\xe2\x86\x91\xe2\x86\x93\xe2\x86\x90\xe2\x86\x92 reach taw.\n");
     std::fputs ("Press Enter to continue.", stdout);
     std::fflush (stdout);
     std::fgets (line, sizeof (line), stdin);

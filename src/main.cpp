@@ -868,12 +868,14 @@ int main (int argc, char** argv)
         auto describe = [] (const std::vector<taw::Key>& keys)
         {
             static const char* names[] = { "None", "Char", "Enter", "Backspace", "Escape", "Tab", "Left", "Right", "Up",
-                                           "Down", "Home", "End", "PageUp", "PageDown", "Delete", "F1" };
+                                           "Down", "Home", "End", "PageUp", "PageDown", "Delete", "F1", "Mouse" };
             juce::StringArray out;
 
             for (const auto& k : keys)
                 out.add (juce::String (k.ctrl ? "ctrl+" : "") + (k.alt ? "alt+" : "") + (k.shift ? "shift+" : "")
-                         + (k.code == taw::Key::Char ? juce::String::charToString ((juce::juce_wchar) k.ch) : juce::String (names[k.code])));
+                         + (k.code == taw::Key::Char    ? juce::String::charToString ((juce::juce_wchar) k.ch)
+                            : k.code == taw::Key::Mouse ? juce::String (k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
+                                                        : juce::String (names[k.code])));
 
             return out.joinIntoString (" ");
         };
@@ -890,6 +892,13 @@ int main (int argc, char** argv)
             // kitty keyboard protocol (iTerm2, Ghostty, kitty, WezTerm); cmd counts as alt
             { "\x1b[27u", "Escape" }, { "\x1b[91;5u", "ctrl+[" }, { "\x1b[109;5u", "ctrl+m" }, { "\x1b[32;5u", "ctrl+ " },
             { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
+            // taw's Terminal profile: shift+return, ctrl+up/down
+            { "\x1b[13;2u", "shift+Enter" }, { "\x1b[1;5A", "ctrl+Up" }, { "\x1b[1;5B", "ctrl+Down" },
+            // SGR mouse: presses only (not releases, moves, the wheel or the middle button), cells from 0
+            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<32;10;5M", "" },
+            { "\x1b[<1;10;5M", "" }, { "\x1b[<6;3;2M", "shift+right@2,1" }, { "\x1b[<16;3;2M", "ctrl+click@2,1" },
+            { "\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M", "click@19,6 click2@19,6 click@19,6" },
+            { "\x1b[<0;30;7M\x1b[<0;31;7M", "click@29,6 click@30,6" },
         };
 
         // Control bytes made readable: esc[1;5D, 0x1a.

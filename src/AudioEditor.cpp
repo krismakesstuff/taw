@@ -642,7 +642,7 @@ private:
     {
         const auto dy = w.deltaY != 0.0f ? w.deltaY : w.deltaX;
 
-        if (e.mods.isCtrlDown())
+        if (ctrlOrCmd (e.mods))
             zoomAround (e.position.x, std::pow (1.25, -dy * 4.0));
         else if (e.mods.isAltDown())
             ampZoom = juce::jlimit (0.25, 64.0, ampZoom * std::pow (1.25, dy * 4.0));
@@ -672,9 +672,9 @@ private:
         const auto cursorX = xOf ((double) app.cursor);
         const auto around = cursorX >= 0.0f && cursorX <= (float) getWidth() ? cursorX : (float) getWidth() * 0.5f;
 
-        if ((ch == '+' || ch == '=') && ! mods.isCtrlDown())
+        if ((ch == '+' || ch == '=') && ! ctrlOrCmd (mods))
             zoomAround (around, 1.0 / 1.5);
-        else if (ch == '-' && ! mods.isCtrlDown())
+        else if (ch == '-' && ! ctrlOrCmd (mods))
             zoomAround (around, 1.5);
         else if (kp.getKeyCode() == juce::KeyPress::escapeKey)
             app.console.focusTerminal(); // the keyboard back to taw

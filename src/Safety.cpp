@@ -284,7 +284,7 @@ void handleCrash (const char* what, int sig, const void* address, void* context)
     // 2. Leave the alternate screen and give the terminal back.
     if (haveConsole)
     {
-        writeOut ("\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l");
+        writeOut ("\x1b[?1006l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l");
         tcsetattr (STDIN_FILENO, TCSANOW, &consoleMode);
     }
 

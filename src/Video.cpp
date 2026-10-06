@@ -20,6 +20,7 @@ JUCE_END_IGNORE_WARNINGS_MSVC
 #endif
 
 #include <cmath>
+#include <cstring>
 
 namespace taw
 {
@@ -33,6 +34,7 @@ bool videoAvailable (juce::String& why)
             if (LoadLibraryW (dll) == nullptr)
                 return juce::String (dll);
 
+        av_log_set_level (AV_LOG_QUIET); // FFmpeg's messages would land on taw's screen
         return juce::String();
     }();
 
@@ -229,7 +231,12 @@ bool VideoDecoder::open (const juce::File& file, juce::String& error)
     if (rate.num <= 0 || rate.den <= 0)
         rate = d->stream->avg_frame_rate;
 
-    videoInfo.fps = rate.num > 0 && rate.den > 0 ? av_q2d (rate) : 25.0;
+    if (rate.num <= 0 || rate.den <= 0)
+        rate = { 25, 1 };
+
+    videoInfo.fps = av_q2d (rate);
+    videoInfo.fpsNum = rate.num;
+    videoInfo.fpsDen = rate.den;
     d->frameTicks = juce::jmax<int64_t> (1, (int64_t) std::llround (1.0 / (videoInfo.fps * d->timeBase)));
     videoInfo.width = d->codec->width;
     videoInfo.height = d->codec->height;
@@ -310,6 +317,306 @@ void VideoDecoder::render (juce::Image& into, int w, int h)
     int stride[4] = { out.lineStride, 0, 0, 0 };
     sws_scale (d.scaler, f->data, f->linesize, 0, f->height, dst, stride);
 }
+
+const AVFrame* VideoDecoder::frame() const
+{
+    return impl != nullptr && impl->haveCurrent ? impl->current : nullptr;
+}
+
+//==============================================================================
+struct VideoMuxer::Impl
+{
+    VideoDecoder decoder;
+    AVFormatContext* out = nullptr;
+    AVCodecContext* video = nullptr;
+    AVCodecContext* audio = nullptr;
+    AVStream* videoStream = nullptr;
+    AVStream* audioStream = nullptr;
+    AVFrame* picture = nullptr; // the encoder's frame
+    AVFrame* sound = nullptr;
+    AVPacket* packet = nullptr;
+    SwsContext* scaler = nullptr;
+    bool headerWritten = false;
+
+    double from = 0.0, rate = 44100.0;
+    AVRational fps { 25, 1 };
+    int64_t totalFrames = 0, nextFrame = 0;
+    int64_t samplesIn = 0, audioPts = 0;
+    std::vector<float> left, right; // mix waiting for a whole AAC frame
+
+    bool open (const juce::File&, double from, juce::int64 samples, double sampleRate, juce::String& error);
+
+    ~Impl()
+    {
+        sws_freeContext (scaler);
+        av_frame_free (&picture);
+        av_frame_free (&sound);
+        av_packet_free (&packet);
+        avcodec_free_context (&video);
+        avcodec_free_context (&audio);
+
+        if (out != nullptr)
+        {
+            if (out->pb != nullptr)
+                avio_closep (&out->pb);
+
+            avformat_free_context (out);
+        }
+    }
+
+    // A frame (or nullptr: the end) into an encoder, and whatever comes out into the file.
+    bool encode (AVCodecContext* c, AVStream* s, AVFrame* f)
+    {
+        if (avcodec_send_frame (c, f) < 0)
+            return false;
+
+        for (;;)
+        {
+            const int r = avcodec_receive_packet (c, packet);
+
+            if (r == AVERROR (EAGAIN) || r == AVERROR_EOF)
+                return true;
+
+            if (r < 0)
+                return false;
+
+            av_packet_rescale_ts (packet, c->time_base, s->time_base);
+            packet->stream_index = s->index;
+
+            if (av_interleaved_write_frame (out, packet) < 0)
+                return false;
+        }
+    }
+
+    // Output frame n: the frame showing at that moment (as the window would show it), or black.
+    bool encodePicture (int64_t n)
+    {
+        if (av_frame_make_writable (picture) < 0)
+            return false;
+
+        const auto shown = decoder.seek (from + (double) n * fps.den / fps.num);
+        const auto* f = shown >= 0 ? decoder.frame() : nullptr;
+
+        if (f != nullptr)
+        {
+            scaler = sws_getCachedContext (scaler, f->width, f->height, (AVPixelFormat) f->format, picture->width, picture->height,
+                                           AV_PIX_FMT_YUV420P, SWS_BICUBIC, nullptr, nullptr, nullptr);
+
+            if (scaler == nullptr)
+                return false;
+
+            // Keep its colours: the same matrix and range in as out (BT.709 for HD when unsaid).
+            const int space = f->colorspace != AVCOL_SPC_UNSPECIFIED ? (int) f->colorspace : (f->height >= 720 ? SWS_CS_ITU709 : SWS_CS_ITU601);
+            const auto* coefficients = sws_getCoefficients (space);
+            sws_setColorspaceDetails (scaler, coefficients, f->color_range == AVCOL_RANGE_JPEG ? 1 : 0, coefficients, 0, 0, 1 << 16, 1 << 16);
+            sws_scale (scaler, f->data, f->linesize, 0, f->height, picture->data, picture->linesize);
+        }
+        else
+        {
+            // Black, in video range.
+            for (int y = 0; y < picture->height; ++y)
+                std::memset (picture->data[0] + y * picture->linesize[0], 16, (size_t) picture->width);
+
+            for (int plane = 1; plane < 3; ++plane)
+                for (int y = 0; y < picture->height / 2; ++y)
+                    std::memset (picture->data[plane] + y * picture->linesize[plane], 128, (size_t) picture->width / 2);
+        }
+
+        picture->pts = n;
+        return encode (video, videoStream, picture);
+    }
+
+    // The waiting mix out in AAC frames; at the end (last) the short one that's left too.
+    bool encodeSound (bool last)
+    {
+        const auto frameSize = (size_t) audio->frame_size;
+
+        while (left.size() >= frameSize || (last && ! left.empty()))
+        {
+            const auto n = juce::jmin (frameSize, left.size());
+
+            if (av_frame_make_writable (sound) < 0)
+                return false;
+
+            sound->nb_samples = (int) n;
+            std::memcpy (sound->data[0], left.data(), n * sizeof (float));
+            std::memcpy (sound->data[1], right.data(), n * sizeof (float));
+            sound->pts = audioPts;
+            audioPts += (int64_t) n;
+            left.erase (left.begin(), left.begin() + (ptrdiff_t) n);
+            right.erase (right.begin(), right.begin() + (ptrdiff_t) n);
+
+            if (! encode (audio, audioStream, sound))
+                return false;
+        }
+
+        return true;
+    }
+
+    // The picture up to where the mix has got (so the file interleaves as it's written).
+    bool encodePicturesTo (int64_t frames)
+    {
+        for (frames = juce::jmin (frames, totalFrames); nextFrame < frames; ++nextFrame)
+            if (! encodePicture (nextFrame))
+                return false;
+
+        return true;
+    }
+};
+
+VideoMuxer::VideoMuxer (const juce::File& file, const juce::File& source, double from, juce::int64 samples, double sampleRate, juce::String& error)
+{
+    auto d = std::make_unique<Impl>();
+
+    if (d->decoder.open (source, error) && d->open (file, from, samples, sampleRate, error))
+        impl = std::move (d);
+}
+
+bool VideoMuxer::Impl::open (const juce::File& file, double start, juce::int64 samples, double sampleRate, juce::String& error)
+{
+    auto* d = this;
+    const auto& info = d->decoder.info();
+    d->from = start;
+    d->rate = sampleRate;
+    d->fps = { info.fpsNum, info.fpsDen };
+    d->totalFrames = (int64_t) std::ceil ((double) samples / sampleRate * info.fps - 1.0e-6);
+    const auto path = file.getFullPathName().toRawUTF8();
+    auto fail = [&] (const juce::String& why)
+    {
+        error = why;
+        return false;
+    };
+
+    if (avformat_alloc_output_context2 (&d->out, nullptr, "mp4", path) < 0 || d->out == nullptr)
+        return fail ("can't make an MP4");
+
+    const bool globalHeader = (d->out->oformat->flags & AVFMT_GLOBALHEADER) != 0;
+
+    // Picture: H.264 (x264), near-transparent quality, the source's size (even, as 4:2:0 needs).
+    const AVCodec* h264 = avcodec_find_encoder_by_name ("libx264");
+
+    if (h264 == nullptr)
+        return fail ("no H.264 encoder in this FFmpeg");
+
+    d->video = avcodec_alloc_context3 (h264);
+    d->video->width = info.width & ~1;
+    d->video->height = info.height & ~1;
+    d->video->pix_fmt = AV_PIX_FMT_YUV420P;
+    d->video->time_base = av_inv_q (d->fps);
+    d->video->framerate = d->fps;
+    d->video->gop_size = juce::jmax (1, juce::roundToInt (info.fps * 2.0));
+    d->video->thread_count = 0; // as many as it likes
+
+    if (info.height >= 720)
+    {
+        d->video->colorspace = AVCOL_SPC_BT709;
+        d->video->color_primaries = AVCOL_PRI_BT709;
+        d->video->color_trc = AVCOL_TRC_BT709;
+    }
+
+    d->video->color_range = AVCOL_RANGE_MPEG;
+
+    if (globalHeader)
+        d->video->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+    AVDictionary* x264 = nullptr;
+    av_dict_set (&x264, "crf", "18", 0);
+    av_dict_set (&x264, "preset", "faster", 0);
+    const bool videoOpen = avcodec_open2 (d->video, h264, &x264) >= 0;
+    av_dict_free (&x264);
+
+    if (! videoOpen)
+        return fail ("the H.264 encoder wouldn't start");
+
+    // Sound: AAC, stereo, at the session's rate.
+    const AVCodec* aac = avcodec_find_encoder (AV_CODEC_ID_AAC);
+
+    if (aac == nullptr)
+        return fail ("no AAC encoder in this FFmpeg");
+
+    d->audio = avcodec_alloc_context3 (aac);
+    d->audio->sample_fmt = AV_SAMPLE_FMT_FLTP;
+    d->audio->sample_rate = (int) sampleRate;
+    av_channel_layout_default (&d->audio->ch_layout, 2);
+    d->audio->bit_rate = 320000;
+    d->audio->time_base = { 1, (int) sampleRate };
+
+    if (globalHeader)
+        d->audio->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+    if (avcodec_open2 (d->audio, aac, nullptr) < 0)
+        return fail ("the AAC encoder wouldn't start at " + juce::String (sampleRate / 1000.0, 1) + " kHz");
+
+    d->videoStream = avformat_new_stream (d->out, nullptr);
+    d->audioStream = avformat_new_stream (d->out, nullptr);
+
+    if (d->videoStream == nullptr || d->audioStream == nullptr
+        || avcodec_parameters_from_context (d->videoStream->codecpar, d->video) < 0
+        || avcodec_parameters_from_context (d->audioStream->codecpar, d->audio) < 0)
+        return fail ("can't make an MP4");
+
+    d->videoStream->time_base = d->video->time_base;
+    d->videoStream->avg_frame_rate = d->fps;
+    d->audioStream->time_base = d->audio->time_base;
+
+    if (avio_open (&d->out->pb, path, AVIO_FLAG_WRITE) < 0)
+        return fail ("can't write " + file.getFullPathName());
+
+    // Its index at the front, so it starts playing before it has all downloaded.
+    AVDictionary* mp4 = nullptr;
+    av_dict_set (&mp4, "movflags", "+faststart", 0);
+    const bool header = avformat_write_header (d->out, &mp4) >= 0;
+    av_dict_free (&mp4);
+
+    if (! header)
+        return fail ("can't write " + file.getFullPathName());
+
+    d->headerWritten = true;
+    d->packet = av_packet_alloc();
+    d->picture = av_frame_alloc();
+    d->sound = av_frame_alloc();
+    d->picture->format = AV_PIX_FMT_YUV420P;
+    d->picture->width = d->video->width;
+    d->picture->height = d->video->height;
+    d->sound->format = AV_SAMPLE_FMT_FLTP;
+    d->sound->nb_samples = d->audio->frame_size;
+    d->sound->sample_rate = d->audio->sample_rate;
+    av_channel_layout_copy (&d->sound->ch_layout, &d->audio->ch_layout);
+
+    if (av_frame_get_buffer (d->picture, 0) < 0 || av_frame_get_buffer (d->sound, 0) < 0)
+        return fail ("out of memory");
+
+    return true;
+}
+
+VideoMuxer::~VideoMuxer() = default;
+
+bool VideoMuxer::write (const juce::AudioBuffer<float>& block, int n)
+{
+    if (impl == nullptr)
+        return false;
+
+    auto& d = *impl;
+
+    for (int i = 0; i < n; ++i)
+    {
+        d.left.push_back (juce::jlimit (-1.0f, 1.0f, block.getSample (0, i)));
+        d.right.push_back (juce::jlimit (-1.0f, 1.0f, block.getSample (1, i)));
+    }
+
+    d.samplesIn += n;
+    return d.encodeSound (false) && d.encodePicturesTo ((int64_t) std::floor ((double) d.samplesIn / d.rate * av_q2d (d.fps)));
+}
+
+bool VideoMuxer::finish()
+{
+    if (impl == nullptr)
+        return false;
+
+    auto& d = *impl;
+    return d.encodeSound (true) && d.encodePicturesTo (d.totalFrames) && d.encode (d.audio, d.audioStream, nullptr)
+           && d.encode (d.video, d.videoStream, nullptr) && av_write_trailer (d.out) >= 0;
+}
 #else
 struct VideoDecoder::Impl {};
 VideoDecoder::VideoDecoder() = default;
@@ -317,6 +624,13 @@ VideoDecoder::~VideoDecoder() = default;
 bool VideoDecoder::open (const juce::File&, juce::String& error) { return videoAvailable (error); }
 juce::int64 VideoDecoder::seek (double) { return -1; }
 void VideoDecoder::render (juce::Image&, int, int) {}
+const AVFrame* VideoDecoder::frame() const { return nullptr; }
+
+struct VideoMuxer::Impl {};
+VideoMuxer::VideoMuxer (const juce::File&, const juce::File&, double, juce::int64, double, juce::String& error) { videoAvailable (error); }
+VideoMuxer::~VideoMuxer() = default;
+bool VideoMuxer::write (const juce::AudioBuffer<float>&, int) { return false; }
+bool VideoMuxer::finish() { return false; }
 #endif
 
 //==============================================================================

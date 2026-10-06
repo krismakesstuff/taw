@@ -123,8 +123,9 @@ follows the playhead: playing, stopped on the cursor, jumping, looping. It's a n
 starts at the session start; `video at 5` (or `video at 1:30`, or `video at -0:05` to skip a
 slate) moves it. `video offset 2` shows the picture two frames late, for a screen that lags;
 `video` shows or hides the window; `video remove` takes it out. The picture allows for what the
-audio device and plugin delay compensation add, so it matches what you hear. Windows only for
-now.
+audio device and plugin delay compensation add, so it matches what you hear. `bv` bounces the
+selection (or, with nothing selected, the whole video) as an MP4: the picture, frame for frame,
+with the mix. Windows only for now.
 
 ## Roadmap
 

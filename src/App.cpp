@@ -1742,7 +1742,7 @@ void App::finishDrop()
 //==============================================================================
 // Bounce
 
-Result App::startBounce (const juce::StringArray& args)
+Result App::startBounce (const juce::StringArray& args, bool withVideo)
 {
     if (bounce != nullptr)
         return Result::fail (L"already bouncing \x00b7 esc cancels");
@@ -1750,16 +1750,47 @@ Result App::startBounce (const juce::StringArray& args)
     if (recording)
         return Result::fail ("stop recording first");
 
-    if (! hasTimeSelection())
-        return Result::fail (L"select a time range first (shift + \x2190 \x2192), then b");
-
     auto s = session->tree();
+    Bounce::Picture picture;
+    juce::Range<juce::int64> range;
+
+    if (withVideo)
+    {
+        // bv: the selection, else the whole video (from the session start, if it starts before).
+        picture.file = videoFile();
+        VideoDecoder probe;
+        juce::String error;
+
+        if (picture.file == juce::File())
+            return Result::fail (L"no video \x00b7 video <file> adds one, then bv");
+
+        if (! probe.open (picture.file, error))
+            return Result::fail (error);
+
+        const auto start = (juce::int64) s[ids::videoStart];
+        range = hasTimeSelection() ? timeSelection()
+                                   : juce::Range<juce::int64> (juce::jmax<juce::int64> (0, start), start + std::llround (probe.info().duration * sampleRate()));
+
+        if (range.isEmpty())
+            return Result::fail ("the video ends before the session starts");
+
+        picture.from = (double) (range.getStart() - start) / sampleRate();
+    }
+    else if (! hasTimeSelection())
+    {
+        return Result::fail (L"select a time range first (shift + \x2190 \x2192), then b");
+    }
+    else
+    {
+        range = timeSelection();
+    }
+
     juce::StringArray nameParts;
 
     // b | b mp3 | b wav D:\mixes | b mp3 "rough mix 3"  (format and folder are remembered)
     for (const auto& a : args)
     {
-        if (a.equalsIgnoreCase ("wav") || a.equalsIgnoreCase ("mp3"))
+        if (! withVideo && (a.equalsIgnoreCase ("wav") || a.equalsIgnoreCase ("mp3")))
             s.setProperty (ids::bounceFormat, a.toLowerCase(), nullptr);
         else if (a.containsAnyOf ("\\/:"))
             s.setProperty (ids::bounceFolder, expandHome (a.unquoted()), nullptr);
@@ -1767,7 +1798,9 @@ Result App::startBounce (const juce::StringArray& args)
             nameParts.add (a.unquoted());
     }
 
-    const auto format = s[ids::bounceFormat].toString() == "mp3" ? Bounce::Format::mp3 : Bounce::Format::wav;
+    const auto format = withVideo ? Bounce::Format::video
+                        : s[ids::bounceFormat].toString() == "mp3" ? Bounce::Format::mp3
+                                                                   : Bounce::Format::wav;
     const auto folder = session->folder().getChildFile (s[ids::bounceFolder].toString());
     const auto name = nameParts.isEmpty() ? session->name() + "-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S")
                                           : nameParts.joinIntoString (" ");
@@ -1776,9 +1809,10 @@ Result App::startBounce (const juce::StringArray& args)
     if (file.exists())
         file = file.getNonexistentSibling (false);
 
-    bounce = std::make_unique<Bounce> (buildGraph (true), timeSelection(), sampleRate(), format, file);
+    bounce = std::make_unique<Bounce> (buildGraph (true), range, sampleRate(), format, file, picture);
     bounce->start();
-    return Result::good ("bouncing " + formatBars (timeSelection().getStart()) + L" \x2192 " + formatBars (timeSelection().getEnd()));
+    return Result::good ("bouncing " + juce::String (withVideo ? "with picture " : "") + formatBars (range.getStart()) + L" \x2192 "
+                         + formatBars (range.getEnd()));
 }
 
 void App::pollBounce()

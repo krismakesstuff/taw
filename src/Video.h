@@ -1,8 +1,11 @@
 #pragma once
 
+#include <juce_audio_basics/juce_audio_basics.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+
+struct AVFrame;
 
 namespace taw
 {
@@ -13,6 +16,7 @@ struct VideoInfo
 {
     int width = 0, height = 0;
     double fps = 0.0;      // the stream's frame rate (r_frame_rate), what "a frame" means
+    int fpsNum = 25, fpsDen = 1; // ...exactly
     double duration = 0.0; // seconds
     juce::String codec;
 };
@@ -38,6 +42,7 @@ public:
 
     // That frame, scaled to w x h (an ARGB image, reused when it's already that size).
     void render (juce::Image& into, int w, int h);
+    const AVFrame* frame() const; // ...as decoded (nullptr: none)
 
     int seeks = 0, decodedFrames = 0; // what it took, for tests
 
@@ -45,6 +50,25 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl;
     VideoInfo videoInfo;
+};
+
+// Bouncing with picture: an MP4 of the video, re-encoded as H.264 so every frame is exactly
+// where it was (each one is the frame the window would show then; black before or after the
+// video), with the mix as AAC. Fed the mix a block at a time, it encodes the frames up to there.
+class VideoMuxer
+{
+public:
+    // from: where in the video the bounce starts, seconds (negative: black until it starts).
+    // samples: how long the bounce is, at sampleRate.
+    VideoMuxer (const juce::File& out, const juce::File& video, double from, juce::int64 samples, double sampleRate, juce::String& error);
+    ~VideoMuxer();
+
+    bool write (const juce::AudioBuffer<float>&, int numSamples);
+    bool finish(); // the rest of the picture, then the file's index
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl;
 };
 
 // The video window and the thread that keeps it on the right frame. The window is only a view:

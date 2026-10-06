@@ -1669,6 +1669,7 @@ void Ui::drawHelp (App&)
         { Pair, L"library", L"its folders, samples in each", L"index remove f", L"take a folder out" },
         { Pair, L"video f", L"picture window (or drop one)", L"video", L"show / hide it" },
         { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
+        { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };

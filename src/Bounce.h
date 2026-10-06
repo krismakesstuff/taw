@@ -10,9 +10,16 @@ namespace taw
 class Bounce final : private juce::Thread
 {
 public:
-    enum class Format { wav, mp3 };
+    enum class Format { wav, mp3, video };
 
-    Bounce (std::unique_ptr<Graph>, juce::Range<juce::int64> range, double sampleRate, Format, juce::File target);
+    // Format::video: the session's video, and where in it the range starts (seconds).
+    struct Picture
+    {
+        juce::File file;
+        double from = 0.0;
+    };
+
+    Bounce (std::unique_ptr<Graph>, juce::Range<juce::int64> range, double sampleRate, Format, juce::File target, Picture = {});
     ~Bounce() override;
 
     void start() { startThread(); }
@@ -29,7 +36,7 @@ public:
     const juce::File& file() const { return target; }
     double seconds() const { return (double) range.getLength() / sampleRate; }
 
-    static juce::String extension (Format f) { return f == Format::mp3 ? ".mp3" : ".wav"; }
+    static juce::String extension (Format f) { return f == Format::mp3 ? ".mp3" : f == Format::video ? ".mp4" : ".wav"; }
 
 private:
     void run() override;
@@ -40,6 +47,7 @@ private:
     double sampleRate;
     Format format;
     juce::File target;
+    Picture picture;
 
     juce::AudioBuffer<float> bus;
     juce::AudioBuffer<float> buses; // left and right for each bus track

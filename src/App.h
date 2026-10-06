@@ -137,7 +137,7 @@ public:
     Result setClick (const juce::String& arg); // "" toggle | on | off | rec | always | <dB>
     juce::String clickStatus() const;
     Result setLoop (const juce::String& arg); // "" = loop the selection, or toggle | on | off
-    Result startBounce (const juce::StringArray& args);
+    Result startBounce (const juce::StringArray& args, bool withVideo = false); // withVideo: bv, an MP4 with the picture
     // New track per file at the cursor; with target >= 0, onto that track instead (a clip, or for
     // samples, the track's new sample).
     enum class ImportAs { audio, sample, autoByLength };

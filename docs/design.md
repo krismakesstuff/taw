@@ -757,6 +757,14 @@ own, it shows the frame for where the playhead is, so it can't drift.
   physical pixels so painting is a copy. Its close button hides it until `video` or the next
   open (not saved: Windows sends every window the same close on shutdown). Its place is saved
   in the session (`videoWindow`).
+- **Bounce with picture (`bv`):** `Bounce` with `Format::video` feeds the mix to `VideoMuxer`,
+  which re-encodes the picture (x264, CRF 18, the source's size and frame rate) rather than
+  copying it, so a bounce can start on any frame. Output frame n is the frame the window would
+  show at range start + n frames (black outside the video); the mix is AAC 320k. Frames are
+  encoded as the mix reaches them, so the file interleaves and the progress bar covers both.
+  The range is the selection, else the whole video (clipped to the session start). The video
+  offset isn't applied: it's for the screen. FFmpeg's log is silenced (it would draw over the
+  screen).
 - **Session:** `videoFile` (relative to the session if inside it), `videoStart`,
   `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
   undo and opening sessions need nothing else.

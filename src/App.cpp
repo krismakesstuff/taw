@@ -275,7 +275,7 @@ int App::run()
         // on it once it has finished arriving.
         if (dropPending && keys.empty())
             finishDrop();
-        else if (mode == Mode::Main && (dropPending || chars >= 4))
+        else if (mode == Mode::Main && ! liveKeys.on() && (dropPending || chars >= 4)) // a chord in keys mode isn't a drop
         {
             for (const auto& k : keys)
                 if (k.code == Key::Char)
@@ -292,6 +292,12 @@ int App::run()
         // Keys the MIDI editor passed on (space, ctrl+z, ...).
         for (const auto& k : std::exchange (deferredKeys, {}))
             handleKey (k);
+
+        // Keys mode: notes end when their keys come up; it ends with the session.
+        if (liveKeys.on() && session == nullptr)
+            liveKeys.setOn (false);
+
+        liveKeys.poll (juce::Time::getMillisecondCounterHiRes());
 
         collectFinishedTakes();
         drainLiveOverviews();
@@ -1703,6 +1709,15 @@ void App::finishDrop()
         return;
     }
 
+    // "index" (or "index remove") typed, then a folder dropped: indexed (or taken out) at once,
+    // as a drop alone imports.
+    if (const auto line = commandLine.trim(); line.equalsIgnoreCase ("index") || line.equalsIgnoreCase ("index remove"))
+    {
+        commandLine.clear();
+        say (execute (line + " " + text.trim()));
+        return;
+    }
+
     if (session != nullptr)
     {
         const auto paths = splitPaths (text);
@@ -2840,11 +2855,45 @@ juce::ValueTree App::midiClipAt (int track, double from, double to) const
     return {};
 }
 
+Result App::toggleLiveKeys()
+{
+    if (liveKeys.on())
+    {
+        liveKeys.setOn (false);
+        return Result::good ("keys mode off");
+    }
+
+    if (session == nullptr)
+        return Result::fail ("open a session first, then ctrl+k plays the armed instrument from the keyboard");
+
+    liveKeys.setOn (true);
+    bool armed = false;
+
+    for (int i = 0; i < session->numTracks(); ++i)
+        armed = armed || (Session::isInstrumentTrack (session->track (i)) && (bool) session->track (i)[ids::armed]);
+
+    return Result::good (L"keys mode: the keyboard plays " + liveKeys.range()
+                         + (armed ? juce::String() : juce::String (L" \x00b7 arm an instrument track (shift+R) to hear it")));
+}
+
 void App::handleMainKey (const Key& k)
 {
     // Arrows: plain = bar, ctrl = 4 bars, alt = 1 step, ctrl+alt = 4 steps. Shift never changes
     // the distance; it extends the selection (time with left/right, tracks with up/down).
     const auto step = k.alt ? (k.ctrl ? Step::FineLarge : Step::Fine) : (k.ctrl ? Step::Large : Step::Normal);
+
+    // Keys mode: typing plays notes (space, arrows and ctrl keys still work); esc leaves it.
+    if (liveKeys.on())
+    {
+        if (k.code == Key::Escape)
+        {
+            say (toggleLiveKeys());
+            return;
+        }
+
+        if (liveKeys.handle (k, juce::Time::getMillisecondCounterHiRes()))
+            return;
+    }
 
     // Naming a new marker: the command line is its name field. Enter keeps the name, esc keeps
     // the number; any other key (arrows, ctrl+...) leaves the number and does its usual job.
@@ -3055,6 +3104,8 @@ void App::handleMainKey (const Key& k)
             say (execute ("close")); // saves, then back to the sessions
         else if (k.ch == '\\' && session != nullptr)
             say (execute ("ed close")); // every plugin window, from anywhere
+        else if (k.ch == 'k')
+            say (toggleLiveKeys());
         else if (k.ch == 'b') // into the sample browser (showing it); from inside it, hides it
             say (browserVisible && browserActive ? showBrowser (false) : focusBrowser());
         else if (k.ch == 'z')
@@ -3080,11 +3131,6 @@ void App::handleMainKey (const Key& k)
         {
             beginEdit ("duplicate");
             say (duplicateSelection (defaultTargets()));
-        }
-        else if (k.ch == 'k' || k.ch == 'm') // k: macOS Terminal sends ctrl+m as Enter
-        {
-            beginEdit ("marker");
-            say (addMarker (engine.isRolling() ? heardPlayhead() : cursor));
         }
 
 
@@ -3157,9 +3203,15 @@ void App::handleMainKey (const Key& k)
                 zoom (-1);
             else if (lineEmpty && (k.ch == 'q' || k.ch == 'w'))
                 showSelectionEdge (k.ch == 'w');
-            // k: to the markers row (pairs with ctrl+k, add a marker); again: back to the track.
-            // (m would block typing mark, mute, mon and mix.)
-            else if (lineEmpty && k.ch == 'k' && session != nullptr)
+            // ~ (shift+`): a marker here (the playhead while rolling). No ctrl+` for it: macOS
+            // Terminal sends nothing for that.
+            else if (lineEmpty && k.ch == '~' && session != nullptr)
+            {
+                beginEdit ("marker");
+                say (addMarker (engine.isRolling() ? heardPlayhead() : cursor));
+            }
+            // `: to the markers row (pairs with ~, add a marker); again: back to the track.
+            else if (lineEmpty && k.ch == '`' && session != nullptr)
             {
                 if (topLane == TopLane::markers)
                     focusTrack (focused);

@@ -1,0 +1,59 @@
+#pragma once
+
+#include "Console.h"
+#include "Midi.h"
+
+#include <functional>
+#include <map>
+
+namespace taw
+{
+// Keys mode (ctrl+k): the typing keyboard is a MIDI keyboard, laid out like Ableton's. The home
+// row is the white keys (A is C4), the row above the black ones; Z X shift an octave, C V the
+// velocity. Its notes go in as one more controller, so armed instrument tracks play them and
+// recording writes them down.
+//
+// Terminals report presses, not releases (Windows' console aside), so a note ends when its key
+// is seen to be up (Console::keyDown, polled each frame). Where that can't be told, a note ends
+// once its key stops auto-repeating.
+class LiveKeys
+{
+public:
+    using Send = std::function<void (MidiMsg)>;
+    using IsDown = std::function<int (wchar_t)>; // 1 down, 0 up, -1 can't tell
+
+    LiveKeys (Send s, IsDown d) : send (std::move (s)), isDown (std::move (d)) {}
+
+    bool on() const { return active; }
+    void setOn (bool); // off lets go of every note
+
+    // A key while on: true if keys mode used it (a note, the octave or the velocity, or a
+    // character it swallows so it can't type commands). Space, arrows, esc and ctrl/alt keys
+    // are left to taw.
+    bool handle (const Key&, double nowMs);
+
+    void poll (double nowMs); // ends the notes whose keys are up
+
+    int velocity() const { return vel; }
+    juce::String range() const; // "C4-F5": what the keys play now
+
+private:
+    struct Held
+    {
+        int pitch = 0;
+        double lastSeen = 0.0; // the press, or its latest auto-repeat
+        bool repeated = false;
+    };
+
+    void noteOn (wchar_t, int pitch, double nowMs);
+    void noteOff (wchar_t);
+
+    Send send;
+    IsDown isDown;
+    bool active = false;
+    int base = 60; // A's note
+    int vel = 100;
+    bool polling = false; // keyDown has said a key is down: it can be trusted to say it's up
+    std::map<wchar_t, Held> held;
+};
+} // namespace taw

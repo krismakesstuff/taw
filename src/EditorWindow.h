@@ -9,6 +9,10 @@ namespace taw
 // on to taw). Code None: nothing taw would know.
 Key keyForTaw (const juce::KeyPress&);
 
+// Ctrl in the editors' own keys and mouse; on a Mac Cmd too, as Mac windows use it. (JUCE's
+// command modifier is ctrl elsewhere.)
+inline bool ctrlOrCmd (const juce::ModifierKeys& m) { return m.isCtrlDown() || m.isCommandDown(); }
+
 // The window the MIDI and audio editors live in: taw's title bar (TitledWindow), over the
 // terminal like the plugin windows, resizable. Content is the editor's component; it names the
 // window with title(). Unlike a plugin window it keeps the keyboard while it's in front (the

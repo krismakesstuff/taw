@@ -59,7 +59,7 @@ int letterOf (const juce::KeyPress& kp)
     return 0;
 }
 
-bool ctrlHeld (const juce::KeyPress& kp) { return kp.getModifiers().isCtrlDown() || isControlCode (kp.getKeyCode()); }
+bool ctrlHeld (const juce::KeyPress& kp) { return ctrlOrCmd (kp.getModifiers()) || isControlCode (kp.getKeyCode()); }
 } // namespace
 
 Key keyForTaw (const juce::KeyPress& kp)
@@ -1297,7 +1297,7 @@ private:
     {
         const auto dy = w.deltaY != 0.0f ? w.deltaY : w.deltaX;
 
-        if (e.mods.isCtrlDown())
+        if (ctrlOrCmd (e.mods))
         {
             // Zoom time around the mouse.
             const auto at = beatAt (e.position.x);
@@ -1344,7 +1344,7 @@ private:
         else if ((code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey) && any)
         {
             const auto g = gridBeats() > 0.0 ? gridBeats() : 1.0;
-            shiftSelected ((code == juce::KeyPress::leftKey ? -1.0 : 1.0) * (mods.isCtrlDown() ? beatsPerBar() : g));
+            shiftSelected ((code == juce::KeyPress::leftKey ? -1.0 : 1.0) * (ctrlOrCmd (mods) ? beatsPerBar() : g));
         }
         else if (letterOf (kp) == 'A' && ctrlHeld (kp) && ! mods.isAltDown())
         {
@@ -1358,9 +1358,9 @@ private:
             duplicateSelected();
         else if (letterOf (kp) == 'Q' && ! mods.isAnyModifierKeyDown() && ! ctrlHeld (kp))
             quantize();
-        else if ((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! mods.isCtrlDown())
+        else if ((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! ctrlOrCmd (mods))
             zoomBy (1.5);
-        else if (kp.getTextCharacter() == '-' && ! mods.isCtrlDown())
+        else if (kp.getTextCharacter() == '-' && ! ctrlOrCmd (mods))
             zoomBy (1.0 / 1.5);
         else if (code == juce::KeyPress::escapeKey)
         {

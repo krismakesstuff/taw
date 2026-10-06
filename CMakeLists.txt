@@ -40,6 +40,7 @@ target_sources(taw PRIVATE
     src/Browser.cpp
     src/Import.cpp
     src/Library.cpp
+    src/LiveKeys.cpp
     src/Timing.cpp
     src/Safety.cpp
     src/Editing.cpp
@@ -62,6 +63,11 @@ target_compile_definitions(taw PRIVATE
     JUCE_PLUGINHOST_VST3=1 # instrument tracks host VST3 plugins (in process for now)
     TAW_VERSION="${PROJECT_VERSION}")
 
+if (APPLE)
+    target_compile_definitions(taw PRIVATE JUCE_PLUGINHOST_AU=1) # and Audio Units on macOS
+    target_link_libraries(taw PRIVATE "-framework CoreAudioKit")  # their generic editor (AUGenericView)
+endif()
+
 # Which build this is (commit, + for changes on top, when), shown in the title bar.
 set(TAW_BUILD_INFO ${CMAKE_BINARY_DIR}/generated/BuildInfo.cpp)
 add_custom_target(taw_build_info
@@ -77,7 +83,7 @@ else()
 endif()
 
 if (APPLE)
-    target_sources(taw PRIVATE src/TerminalSetup.cpp)
+    target_sources(taw PRIVATE src/TerminalSetup.cpp src/MacFocus.mm)
 endif()
 
 if (WIN32)

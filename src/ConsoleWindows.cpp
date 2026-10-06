@@ -443,6 +443,16 @@ std::vector<Key> Console::poll()
     return keys;
 }
 
+int Console::keyDown (wchar_t ch) const
+{
+    const auto scan = VkKeyScanW (ch);
+
+    if (scan == -1)
+        return -1;
+
+    return (GetAsyncKeyState (LOBYTE (scan)) & 0x8000) != 0 ? 1 : 0;
+}
+
 void Console::setClipboardText (const char* text)
 {
     if (! OpenClipboard (nullptr))

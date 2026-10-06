@@ -53,6 +53,14 @@ public:
     // the index), on all cores. progress gets (done, total) now and then.
     void scan (const juce::Array<juce::File>& folders, std::function<void (int, int)> progress = {});
 
+    // Takes a folder's samples out of the index, and the folder (or folders inside it) off the
+    // list. Returns how many samples went.
+    int remove (const juce::File& folder);
+
+    // The folders indexed (index <folder>), as given. An index from before the list was kept
+    // has samples but no folders until they're indexed again.
+    const juce::StringArray& folders() const { return folderList; }
+
     // Gives samples their soundKind: the k nearest samples with a nameKind vote. Returns how
     // often that vote matches the name, for samples that have one (leave-one-out): how far the
     // sound alone can be trusted.
@@ -83,6 +91,7 @@ private:
 
     juce::File indexFile;
     std::vector<SampleInfo> items;
+    juce::StringArray folderList;
     mutable std::vector<float> mean, spread; // worked out when first needed
 };
 } // namespace taw

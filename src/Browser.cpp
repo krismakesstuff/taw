@@ -711,11 +711,18 @@ Result App::startIndexing (const juce::StringArray& paths)
     if (isIndexing())
         return Result::fail (L"already indexing \x00b7 it says when it's done");
 
+    if (paths[0].equalsIgnoreCase ("remove"))
+    {
+        auto folders = paths;
+        folders.remove (0);
+        return removeFromLibrary (folders);
+    }
+
     if (paths.isEmpty())
 #if JUCE_WINDOWS
-        return Result::fail (L"index what? index D:\\Samples\\Drums (it's only read; the index lives in taw's settings folder)");
+        return Result::fail (L"index what? index D:\\Samples\\Drums, or type index and drop a folder (it's only read)");
 #else
-        return Result::fail (L"index what? index ~/Samples/Drums (it's only read; the index lives in taw's settings folder)");
+        return Result::fail (L"index what? index ~/Samples/Drums, or type index and drop a folder (it's only read)");
 #endif
 
     juce::Array<juce::File> folders;
@@ -743,7 +750,7 @@ Result App::startIndexing (const juce::StringArray& paths)
         Library lib (libraryFile());
         const auto started = juce::Time::getMillisecondCounterHiRes();
         lib.scan (folders, [this] (int done, int total) { indexDone = done; indexTotal = total; });
-        const auto agree = lib.classify();
+        const auto agree = lib.samples().empty() ? 0.0 : lib.classify();
         lib.layout();
         lib.save();
 
@@ -755,6 +762,115 @@ Result App::startIndexing (const juce::StringArray& paths)
 
     return Result::good ("indexing " + folders[0].getFileName() + (folders.size() > 1 ? " and " + juce::String (folders.size() - 1) + " more" : juce::String())
                          + (missing.isEmpty() ? juce::String() : L" \x00b7 not found: " + missing.joinIntoString (", ")));
+}
+
+namespace
+{
+// ~/Samples rather than /Users/you/Samples (Windows paths as they are).
+juce::String shortPath (const juce::String& path)
+{
+#if JUCE_WINDOWS
+    return path;
+#else
+    const auto home = juce::File::getSpecialLocation (juce::File::userHomeDirectory).getFullPathName();
+    return path.startsWith (home + "/") ? "~" + path.substring (home.length()) : path;
+#endif
+}
+
+int samplesIn (const Library& lib, const juce::File& folder)
+{
+    int n = 0;
+
+    for (const auto& s : lib.samples())
+        n += juce::File (s.path).isAChildOf (folder) ? 1 : 0;
+
+    return n;
+}
+} // namespace
+
+Result App::removeFromLibrary (const juce::StringArray& paths)
+{
+    if (paths.isEmpty())
+        return Result::fail ("index remove what? type index remove and drop the folder, or its path (library lists them)");
+
+    loadLibrary();
+    juce::Array<juce::File> folders;
+    juce::StringArray unknown;
+
+    // The folder may be gone (a drive unplugged): it only has to be in the index.
+    for (const auto& p : paths)
+    {
+        const auto f = Import::resolve (expandHome (p.unquoted()), juce::File::getCurrentWorkingDirectory());
+        bool listed = false;
+
+        for (const auto& l : library->folders())
+            listed = listed || juce::File (l) == f || juce::File (l).isAChildOf (f);
+
+        if (listed || samplesIn (*library, f) > 0)
+            folders.add (f);
+        else
+            unknown.add (shortPath (f.getFullPathName()));
+    }
+
+    if (folders.isEmpty())
+        return Result::fail (L"not in the library: " + unknown.joinIntoString (", ") + L" \x00b7 library lists its folders");
+
+    indexDone = 0;
+    indexTotal = 0;
+    indexFinished = false;
+
+    indexThread = std::thread ([this, folders]
+    {
+        Library lib (libraryFile());
+        int removed = 0;
+
+        for (const auto& f : folders)
+            removed += lib.remove (f);
+
+        // What's left is sorted and mapped again without them.
+        if (! lib.samples().empty())
+        {
+            lib.classify();
+            lib.layout();
+        }
+
+        lib.save();
+        indexSummary = "took " + juce::String (removed) + " samples out of the library \x00b7 " + juce::String ((int) lib.samples().size()) + " left";
+        indexFinished = true;
+    });
+
+    return Result::good ("taking " + folders[0].getFileName() + (folders.size() > 1 ? " and " + juce::String (folders.size() - 1) + " more" : juce::String())
+                         + " out of the library" + (unknown.isEmpty() ? juce::String() : L" \x00b7 not in it: " + unknown.joinIntoString (", ")));
+}
+
+Result App::describeLibrary()
+{
+    loadLibrary();
+    const auto total = (int) library->samples().size();
+
+    if (total == 0 && library->folders().isEmpty())
+#if JUCE_WINDOWS
+        return Result::good (L"the library is empty \x00b7 index D:\\Samples adds a folder, or type index and drop one");
+#else
+        return Result::good (L"the library is empty \x00b7 index ~/Samples adds a folder, or type index and drop one");
+#endif
+
+    juce::StringArray parts;
+    int counted = 0;
+
+    for (const auto& folder : library->folders())
+    {
+        const auto n = samplesIn (*library, juce::File (folder));
+        counted += n;
+        parts.add (shortPath (folder) + " " + juce::String (n));
+    }
+
+    // Indexed before the folders were kept: indexing them again lists them.
+    if (counted < total)
+        parts.add (juce::String (total - counted) + " from earlier (index their folder again to list it)");
+
+    return Result::good ("library: " + juce::String (total) + L" samples \x00b7 " + parts.joinIntoString (juce::String (L" \x00b7 "))
+                         + L" \x00b7 index remove <folder> takes one out");
 }
 
 void App::pollIndexing()

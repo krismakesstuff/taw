@@ -11,6 +11,7 @@
 #include "Session.h"
 #include "Timing.h"
 #include "Ui.h"
+#include "Video.h"
 
 #include <functional>
 #include <map>
@@ -633,7 +634,27 @@ public:
     Result newMidiClipForEditor(); // "edit new": an empty MIDI clip to draw into
     void* editorWindow() const;    // the open editor's window, which keeps the keyboard
 
+    // The picture (Video.h): the session's video in a window of its own, following the playhead.
+    // syncVideo keeps it in step with the session every frame (opens, swaps, closes, shows it),
+    // so undo and opening sessions need nothing else.
+    std::unique_ptr<VideoPlayer> video;
+    Result videoCommand (const juce::StringArray& args, const juce::String& rest);
+    juce::File videoFile() const; // the session's, resolved; none: no video
+    juce::String videoStartText() const;
+
 private:
+    // What the decoder thread's clock reads (it can't touch the session): set each frame.
+    struct VideoClock
+    {
+        std::atomic<juce::int64> start { 0 }, lateBy { 0 }, playFrom { 0 };
+        std::atomic<double> rate { 44100.0 }, offset { 0.0 }; // offset: seconds shown late
+    };
+    VideoClock videoClock;
+    juce::String videoFailed; // the file that wouldn't open, so it isn't tried every frame
+    bool videoClosed = false; // its close button hid it (until "video", or the next open)
+    void syncVideo();
+    double videoSeconds(); // where the picture is (the clock, on the decoder thread)
+
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
     bool cursorMovedWhileRolling = false;

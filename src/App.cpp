@@ -120,6 +120,15 @@ void App::releaseSession()
         midiPassClips.clear();
         fillView = pluginPickerVisible = false;
 
+        // The video window's place, for next time (not an edit).
+        if (video != nullptr)
+        {
+            session->tree().setProperty (ids::videoWindow, video->windowState(), nullptr);
+            video.reset();
+        }
+
+        videoFailed.clear();
+        videoClosed = false;
         session->tree().removeListener (this);
         session->save();
         session.reset();
@@ -322,6 +331,8 @@ int App::run()
             rebuildGraph();
             session->save();
         }
+
+        syncVideo();
 
         if (engine.isRolling())
         {
@@ -1820,6 +1831,184 @@ Result App::revealBounces (const juce::String& arg)
         return Result::fail ("nothing bounced yet \x00b7 select a range, then b");
 
     return Result::good ("opened " + folder.getFullPathName());
+}
+
+//==============================================================================
+// Video: the picture, in its own window, following the playhead
+
+juce::File App::videoFile() const
+{
+    if (session == nullptr)
+        return {};
+
+    const auto path = session->tree()[ids::videoFile].toString();
+    return path.isEmpty() ? juce::File() : session->folder().getChildFile (path);
+}
+
+// Runs on the video's decoder thread: reads only the engine's atomics and videoClock. Rolling,
+// it's what you hear (the playhead less the mix's delay compensation and the device's output
+// latency); stopped, the cursor.
+double App::videoSeconds()
+{
+    const auto& c = videoClock;
+    const auto pos = engine.isRolling() ? juce::jmax (c.playFrom.load(), engine.playhead() - c.lateBy.load())
+                                        : engine.targetPosition();
+    return (double) (pos - c.start.load()) / c.rate.load() - c.offset.load();
+}
+
+void App::syncVideo()
+{
+    const auto want = opening == nullptr && closing == nullptr ? videoFile() : juce::File();
+
+    if (want == juce::File())
+    {
+        video.reset();
+        videoFailed.clear();
+        return;
+    }
+
+    auto s = session->tree();
+
+    if (video == nullptr || video->file() != want)
+    {
+        if (videoFailed == want.getFullPathName())
+            return;
+
+        auto player = std::make_unique<VideoPlayer> ([this] { return videoSeconds(); });
+        juce::String error;
+
+        if (! player->open (want, error))
+        {
+            videoFailed = want.getFullPathName();
+            video.reset();
+            say (Result::fail (error));
+            return;
+        }
+
+        player->restoreWindowState (s[ids::videoWindow].toString());
+        video = std::move (player);
+        videoFailed.clear();
+    }
+
+    auto& c = videoClock;
+    const auto fps = juce::jmax (1.0, video->info().fps);
+    int outputLatency = 0;
+
+    if (auto* d = engine.devices().getCurrentAudioDevice())
+        outputLatency = d->getOutputLatencyInSamples();
+
+    c.rate = sampleRate();
+    c.start = (juce::int64) s[ids::videoStart];
+    c.offset = (int) s[ids::videoOffset] / fps;
+    c.lateBy = mixLatency + outputLatency;
+    c.playFrom = playFrom;
+
+    // Its close button hides it until "video" or the next open. Not saved: Windows closes every
+    // window this way on shutdown (and taskkill), which mustn't turn the picture off for good.
+    if (video->takeCloseRequest())
+        videoClosed = true;
+
+    if (const bool shown = (bool) s[ids::videoShown] && ! videoClosed; video->isVisible() != shown)
+        video->setVisible (shown);
+
+    // It's only a view: the keyboard stays with taw.
+    if (video->hasKeyboard())
+        console.focusTerminal();
+}
+
+juce::String App::videoStartText() const
+{
+    const auto start = (juce::int64) session->tree()[ids::videoStart];
+
+    if (start == 0)
+        return "the session start";
+
+    if (start < 0)
+        return "-" + formatTime (-start) + " (before the session start)";
+
+    return formatTime (start) + " (bar " + formatBars (start) + ")";
+}
+
+// video <file> | video (show/hide) | video at <position> | video offset <frames> | video remove
+Result App::videoCommand (const juce::StringArray& args, const juce::String& rest)
+{
+    auto s = session->tree();
+    const auto first = args[0].toLowerCase();
+    const bool have = videoFile() != juce::File();
+
+    if (rest.isEmpty())
+    {
+        if (! have)
+            return Result::fail (L"no video \x00b7 video <file> adds one (mp4)");
+
+        const bool show = video != nullptr ? ! video->isVisible() : ! (bool) s[ids::videoShown];
+        s.setProperty (ids::videoShown, show, nullptr); // a window, not an edit
+        videoClosed = false;
+        return Result::good (show ? juce::String ("video shown") : juce::String (L"video hidden \x00b7 video shows it"));
+    }
+
+    if (first == "remove" || first == "rm")
+    {
+        if (! have)
+            return Result::fail ("no video");
+
+        const auto name = videoFile().getFileName();
+        s.removeProperty (ids::videoFile, um());
+        return Result::good (L"removed the video " + name + L" \x00b7 undo puts it back");
+    }
+
+    if (first == "at")
+    {
+        if (! have)
+            return Result::fail (L"no video \x00b7 video <file> adds one (mp4)");
+
+        // video at 5 | video at 1:30 | video at -0:05 (before the session: skips a slate)
+        auto spec = rest.fromFirstOccurrenceOf (args[0], false, true).trim();
+        const bool before = spec.startsWithChar ('-');
+        juce::int64 pos = 0;
+
+        if (before)
+            spec = spec.substring (1).trim();
+
+        if (auto r = parsePosition (spec, pos); r.failed())
+            return Result::fail (L"video at 5 \x00b7 video at 1:30 \x00b7 video at -0:05");
+
+        s.setProperty (ids::videoStart, before ? -pos : pos, um());
+        return Result::good ("the video starts at " + videoStartText());
+    }
+
+    if (first == "offset")
+    {
+        if (args[1].isEmpty() || ! args[1].trimCharactersAtStart ("+-").containsOnly ("0123456789"))
+            return Result::fail (L"video offset 2 shows the picture 2 frames late \x00b7 -2 early");
+
+        const auto frames = juce::jlimit (-100, 100, args[1].getIntValue());
+        s.setProperty (ids::videoOffset, frames, um());
+        return Result::good (frames == 0 ? juce::String ("the picture is on time")
+                                         : "the picture is shown " + juce::String (std::abs (frames)) + (std::abs (frames) == 1 ? " frame " : " frames ")
+                                               + (frames > 0 ? "late" : "early"));
+    }
+
+    // A file: it replaces any video, starting at the session start.
+    const auto file = Import::resolve (rest, session->folder());
+    VideoDecoder probe;
+    juce::String error;
+
+    if (! probe.open (file, error))
+        return Result::fail (error);
+
+    const auto& info = probe.info();
+    const auto path = file.isAChildOf (session->folder()) ? file.getRelativePathFrom (session->folder()) : file.getFullPathName();
+    s.setProperty (ids::videoFile, path, um());
+    s.setProperty (ids::videoStart, (juce::int64) 0, um());
+    s.setProperty (ids::videoShown, true, nullptr);
+    videoFailed.clear();
+
+    const auto mins = (int) (info.duration / 60.0);
+    const auto secs = juce::roundToInt (info.duration - mins * 60.0);
+    return Result::good ("video " + file.getFileName() + L" \x00b7 " + juce::String (info.width) + "x" + juce::String (info.height) + " "
+                         + juce::String (info.fps, info.fps == std::round (info.fps) ? 0 : 3) + " fps " + juce::String (mins) + ":"
+                         + juce::String (secs).paddedLeft ('0', 2) + L" \x00b7 starts at the session start (video at <bar> moves it)");
 }
 
 //==============================================================================

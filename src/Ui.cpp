@@ -1662,6 +1662,8 @@ void Ui::drawHelp (App&)
         { Pair, L"bounces", L"open the bounce folder", L"bounces off", L"...not after every bounce" },
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
         { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder to it" },
+        { Pair, L"video f", L"picture window (mp4)", L"video", L"show / hide it" },
+        { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };

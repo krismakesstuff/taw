@@ -53,6 +53,7 @@ Modelled on Tracktion Engine.
 | Audio (device callback) | The compiled playback graph | No allocation, no locks, no file I/O |
 | Disk writer | Take files | Fed by lock-free FIFOs (`AudioFormatWriter::ThreadedWriter`) |
 | MIDI input | Device callbacks | One lock-free queue per port into the audio thread |
+| Video | Decoding and scaling the picture | Reads the engine's playhead atomics and a few the message thread sets each frame; hands frames to the window under a lock |
 
 The message thread compiles the tree into an immutable **playback graph** and hands it to
 the audio thread through a lock-free queue. Retired graphs come back the same way and are
@@ -716,6 +717,32 @@ over the time selection, offline on its own thread, faster than real time. `Esc`
   by default; `bounces off` / `bounces on`). `bounces` opens the folder any time. Headless runs
   (`--exec`) never open it.
 - `taw --bouncetest <dir>` renders a synthetic mix to both formats without a device.
+
+## Video
+
+Picture for scoring (`Video.h`). The audio is the clock: the picture never runs a timer of its
+own, it shows the frame for where the playhead is, so it can't drift.
+
+- **Decoding:** FFmpeg's libraries (libavformat, libavcodec, libswscale), linked from Gyan's
+  pinned 9.0.2 shared build, which CMake downloads. The DLLs are delay-loaded, so taw starts
+  without loading them, and still runs without video if they're missing. FFmpeg rather than
+  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode.
+- **Exact frames:** the frame for a time is the last one whose timestamp is at or before it.
+  Moving forward decodes on from the current frame (it's always one frame ahead, so playback
+  only has to scale); a jump past a keyframe seeks to the keyframe before the target and decodes
+  up to it. `--videotest` checks frames against the ffmpeg command line's, pixel for pixel.
+- **Clock:** rolling, the playhead less the mix's delay compensation and the device's output
+  latency (what you hear); stopped, the cursor. Less the video's start (`videoStart`, samples,
+  negative to skip a slate), less `videoOffset` frames (for a screen that lags).
+- **Window:** a normal JUCE window with the native title bar, a view only: it ignores keys,
+  never activates (`WS_EX_NOACTIVATE`; set up before it goes on the desktop, because JUCE
+  activates a window when it remakes it), and the decoder thread scales frames to its size in
+  physical pixels so painting is a copy. Its close button hides it until `video` or the next
+  open (not saved: Windows sends every window the same close on shutdown). Its place is saved
+  in the session (`videoWindow`).
+- **Session:** `videoFile` (relative to the session if inside it), `videoStart`,
+  `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
+  undo and opening sessions need nothing else.
 
 ## Startup
 

@@ -73,6 +73,53 @@ Result App::removeTracks (std::vector<int> tracks)
 }
 
 //==============================================================================
+// Moving tracks: alt+up/down swaps the selected tracks (or the focused one) with the track
+// next to them, so they move as a block. The focus and selection go with them.
+
+Result App::moveTracks (int direction)
+{
+    if (session == nullptr)
+        return Result::fail ("no session open");
+
+    if (recording)
+        return Result::fail (L"not while recording \x2014 stop first");
+
+    if (onTopLane() || mixFocused())
+        return Result::fail (L"alt+\x2191\x2193 moves a track \x2014 \x2193 to one");
+
+    auto tracks = selectedTracks();
+
+    if (tracks.empty())
+        tracks = { focused };
+
+    const int first = tracks.front(), last = tracks.back();
+    const int other = direction < 0 ? first - 1 : last + 1;
+
+    if (other < 0 || other >= session->numTracks())
+        return Result::fail (direction < 0 ? "already at the top" : "already at the bottom");
+
+    // The neighbour hops over the block, to just after it (moving up) or just before it.
+    auto& tree = session->tree();
+    const int from = tree.indexOf (session->track (other));
+    const int to = tree.indexOf (session->track (direction < 0 ? last : first));
+
+    beginEdit ("move tracks");
+    tree.moveChild (from, to, um());
+
+    focused += direction;
+
+    if (trackAnchor >= 0)
+        trackAnchor += direction;
+
+    std::vector<int> now;
+
+    for (auto t : tracks)
+        now.push_back (t + direction);
+
+    return Result::good ("moved " + trackList (tracks) + (direction < 0 ? " up" : " down") + L" \x2192 " + trackList (now).fromFirstOccurrenceOf (" ", false, false));
+}
+
+//==============================================================================
 // The track menu (shift+T): what you can do to the focused track, or the selected ones. Each
 // item has a letter, and shows the command it stands for, so the menu teaches the typed way.
 

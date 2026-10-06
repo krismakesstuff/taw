@@ -2708,9 +2708,14 @@ void App::handleMainKey (const Key& k)
         case Key::Left:  nudge (-1, step, k.shift); return;
         case Key::Right: nudge (+1, step, k.shift); return;
         // Ctrl jumps to the first / last track; with shift it selects every track on the way.
+        // Alt moves the selected (or focused) tracks up or down a place.
         case Key::Up:
         case Key::Down:
-            if (k.ctrl && session != nullptr && session->numTracks() > 0)
+            if (k.alt && ! k.ctrl)
+            {
+                say (moveTracks (k.code == Key::Up ? -1 : +1));
+            }
+            else if (k.ctrl && session != nullptr && session->numTracks() > 0)
             {
                 const auto from = onTopLane() ? 0 : juce::jmin (focused, session->numTracks() - 1);
                 topLane = TopLane::none;

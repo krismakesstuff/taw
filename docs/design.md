@@ -232,6 +232,7 @@ records the selected tracks, else whatever is armed.
 | `3 i 4` | track 3 takes hardware input 4 |
 | `2 v -6` | set volume to −6 dB |
 | `2 n Vox` | rename |
+| `Alt+↑` / `Alt+↓` | move the selected tracks (or the focused one) up / down a place, swapping with the neighbour; ctrl+z puts it back |
 | `2 remove` / `2-4 remove` | delete tracks (`rm` too); a bus's feeds go back to the mix and sends to it go; ctrl+z brings it all back |
 | `@17` / `@17.3` / `@1:30` | move cursor to bar 17 / bar 17 beat 3 / 1 min 30 s |
 | `mix v -3` | set the mix volume |

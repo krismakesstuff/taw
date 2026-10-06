@@ -316,6 +316,7 @@ public:
     Result openTrackMenu();
     bool handleTrackMenuKey (const Key&);
     Result removeTracks (std::vector<int> tracks); // "2 remove"
+    Result moveTracks (int direction);             // alt+up/down: the selected (or focused) tracks, one place
 
     PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr
     juce::String instrumentProblem (int track) const; // why it isn't loaded

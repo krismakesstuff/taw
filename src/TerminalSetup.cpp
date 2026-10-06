@@ -16,6 +16,7 @@ juce::File askedFile() { return configFolder().getChildFile ("terminal-profile.j
 // F702 left, F703 right, F729 home, F72B end). Values are what taw decodes (xterm sequences).
 const std::pair<const char*, const char*> added[] = {
     { "$F700", "\x1b[1;2A" },  { "$F701", "\x1b[1;2B" },   // shift+up/down: select tracks
+    { "~F700", "\x1b[1;3A" },  { "~F701", "\x1b[1;3B" },   // option+up/down: move tracks
     { "F729", "\x1b[H" },      { "F72B", "\x1b[F" },       // home/end (fn+left/right)
     { "$F729", "\x1b[1;2H" },  { "$F72B", "\x1b[1;2F" },   // shift+home/end: select to there
     { "~^F702", "\x1b[1;7D" }, { "~^F703", "\x1b[1;7C" },  // ctrl+option+left/right: 4 steps

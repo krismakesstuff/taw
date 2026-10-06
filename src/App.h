@@ -368,6 +368,7 @@ public:
     static juce::StringArray splitPaths (const juce::String& text);
     static juce::String expandHome (const juce::String& path); // ~/x -> /Users/you/x (not on Windows)
     bool isBouncing() const { return bounce != nullptr; }
+    const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
     void openDevicePicker();
     Result showControlPanel();
     // Quitting saves and closes the session first: on screen, in steps under the closing box.

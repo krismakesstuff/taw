@@ -1487,6 +1487,19 @@ void Ui::drawBottom (App& app)
         x = canvas.text (0, cmdY, L" \x25ba PLAYING ", 231, colour::playBg, true);
     }
 
+    // A bounce in progress: a bar, so nobody opens the file before it's written.
+    if (const auto* b = app.currentBounce())
+    {
+        constexpr int barW = 20;
+        const auto p = juce::jlimit (0.0f, 1.0f, b->progress());
+        const auto filled = juce::roundToInt (p * barW);
+        x = canvas.text (x, cmdY, L" \x2193 BOUNCING ", 231, colour::marker, true);
+        x = canvas.text (x, cmdY, juce::String::repeatedString (juce::String (L"\x2588"), filled), colour::marker, -1);
+        x = canvas.text (x, cmdY, juce::String::repeatedString (juce::String (L"\x2591"), barW - filled), colour::faint, -1);
+        x = canvas.text (x + 1, cmdY, juce::String (juce::roundToInt (p * 100.0f)) + "%  " + b->file().getFileName() + L" \x00b7 esc cancels ",
+                         colour::text, -1, false, std::max (0, w - x - 4));
+    }
+
     {
         if (app.namingMarker.isValid())
             x = canvas.text (x, cmdY, " name marker " + app.namingMarker[ids::name].toString() + " ", 231, colour::marker, true);

@@ -1710,8 +1710,9 @@ void App::finishDrop()
     }
 
     // "index" (or "index remove") typed, then a folder dropped: indexed (or taken out) at once,
-    // as a drop alone imports.
-    if (const auto line = commandLine.trim(); line.equalsIgnoreCase ("index") || line.equalsIgnoreCase ("index remove"))
+    // as a drop alone imports. "video", then a file: that's the picture.
+    if (const auto line = commandLine.trim();
+        line.equalsIgnoreCase ("index") || line.equalsIgnoreCase ("index remove") || line.equalsIgnoreCase ("video"))
     {
         commandLine.clear();
         say (execute (line + " " + text.trim()));

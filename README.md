@@ -116,7 +116,8 @@ with `2 pan l30` or alt+[ ].
 
 ## Video
 
-For scoring to picture: `video D:\cuts\reel1.mp4` opens the video in a window of its own that
+For scoring to picture: `video D:\cuts\reel1.mp4` (or type `video` and drop the file on the
+terminal) opens the video in a window of its own that
 follows the playhead: playing, stopped on the cursor, jumping, looping. It's a normal window
 (put it on another screen, maximise it) that never takes the keyboard from taw. The video
 starts at the session start; `video at 5` (or `video at 1:30`, or `video at -0:05` to skip a

@@ -1581,11 +1581,14 @@ void Ui::drawBottom (App& app)
 
     juce::String hints;
 
-    if (app.recording)
-        hints = L"space stop \x00b7 ctrl+space punch out \x00b7 ctrl+k marker \x00b7 commands work: 2m 3s c \x00b7 [ ] volume";
+    if (app.liveKeys.on())
+        hints = L"KEYS  a w s e d f t g y h u j k o l p ; ' play " + app.liveKeys.range() + L" \x00b7 z x octave \x00b7 c v velocity "
+                + juce::String (app.liveKeys.velocity()) + L" \x00b7 space play \x00b7 ctrl+space record \x00b7 esc or ctrl+k leaves";
+    else if (app.recording)
+        hints = L"space stop \x00b7 ctrl+space punch out \x00b7 ~ marker \x00b7 commands work: 2m 3s c \x00b7 [ ] volume";
     else if (rolling)
         hints = app.hasTimeSelection() ? L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 ctrl+v pastes at the cursor \x00b7 l loop \x00b7 shift \x2190\x2192 extend \x00b7 space stop"
-                                       : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ctrl+k marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
+                                       : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ~ marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
@@ -1619,7 +1622,7 @@ void Ui::drawHelp (App&)
         { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
         { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch in/out" },
         { Pair, L"home / end", L"start / end", L"shift+I 2mon", L"hear input on playback too" },
-        { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"ctrl k  k", L"add marker / markers row" },
+        { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"~  `", L"add marker / markers row" },
         { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
         { Pair, L"r t   enter", L"zoom out, in / return", L"l", L"loop the selection / toggle loop" },
         { Pair, L"q w", L"go to sel. start / end", L"tab", L"next clip edge / hit" },
@@ -1646,6 +1649,7 @@ void Ui::drawHelp (App&)
         { Pair, L"shift+R  |", L"arm for MIDI / plugin window", L"2 send verb", L"send A-E (a new name: a bus)" },
         { Pair, L"f  shift+E", L"piano roll / editor window", L"2 send b -6", L"level; pre post off on x" },
         { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
+        { Pair, L"ctrl+K", L"keys mode: type to play", L"", L"" },
         { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },
         { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"\\   io", L"inserts+sends column / hide" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
@@ -1661,7 +1665,8 @@ void Ui::drawHelp (App&)
 #endif
         { Pair, L"bounces", L"open the bounce folder", L"bounces off", L"...not after every bounce" },
         { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
-        { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder to it" },
+        { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder (or drop one)" },
+        { Pair, L"library", L"its folders, samples in each", L"index remove f", L"take a folder out" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };
@@ -1921,7 +1926,7 @@ void Ui::drawBrowser (App& app)
 #else
         canvas.text (x0 + 2, top + 3, L"index ~/Samples/Drums", colour::text, -1, false, cw - 2);
 #endif
-        canvas.text (x0, top + 4, "(folders are only read)", colour::faint, -1, false, cw);
+        canvas.text (x0, top + 4, "or type index and drop a folder (it's only read)", colour::faint, -1, false, cw);
         return;
     }
 

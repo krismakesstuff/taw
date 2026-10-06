@@ -14,12 +14,12 @@ juce::File askedFile() { return configFolder().getChildFile ("terminal-profile.j
 
 // Keys in Terminal's format: $ shift, ^ ctrl, ~ option, then the key's code (F700 up, F701 down,
 // F702 left, F703 right, F729 home, F72B end) or, for an ordinary key, its character. Values are
-// what taw decodes (xterm sequences; kitty's CSI u for keys xterm has none for).
+// what taw decodes (xterm sequences; kitty's CSI u for keys xterm has none for). Shift+return
+// isn't here: Terminal ignores a mapping for it, so taw reads shift from the keyboard instead.
 const std::pair<const char*, const char*> added[] = {
     { "$F700", "\x1b[1;2A" },  { "$F701", "\x1b[1;2B" },   // shift+up/down: select tracks
     { "~F700", "\x1b[1;3A" },  { "~F701", "\x1b[1;3B" },   // option+up/down: move tracks
     { "^F700", "\x1b[1;5A" },  { "^F701", "\x1b[1;5B" },   // ctrl+up/down: the browser's jumps
-    { "$\r", "\x1b[13;2u" },                               // shift+return: apart from return
     { "^m", "\x1b[109;5u" },   { "^[", "\x1b[91;5u" },     // ctrl+m, ctrl+[: apart from return, esc
     { "F729", "\x1b[H" },      { "F72B", "\x1b[F" },       // home/end (fn+left/right)
     { "$F729", "\x1b[1;2H" },  { "$F72B", "\x1b[1;2F" },   // shift+home/end: select to there
@@ -97,7 +97,7 @@ void offerOnce()
         return;
 
     std::puts ("taw works best in Terminal with a few keyboard settings: Option as Alt, and\n"
-               "Shift+\xe2\x86\x91\xe2\x86\x93, Option+\xe2\x86\x91\xe2\x86\x93, Ctrl+\xe2\x86\x91\xe2\x86\x93, Shift+Return, Home/End (fn+\xe2\x86\x90\xe2\x86\x92) and\n"
+               "Shift+\xe2\x86\x91\xe2\x86\x93, Option+\xe2\x86\x91\xe2\x86\x93, Ctrl+\xe2\x86\x91\xe2\x86\x93, Home/End (fn+\xe2\x86\x90\xe2\x86\x92) and\n"
                "Ctrl+Option+\xe2\x86\x90\xe2\x86\x92 passed on to taw.\n");
     std::fputs ("Add a \"taw\" Terminal profile with these settings? Your own profiles stay as they are. [y/n] ", stdout);
     std::fflush (stdout);

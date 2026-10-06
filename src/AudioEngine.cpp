@@ -361,7 +361,8 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     // recording, back to the message thread to be written down.
     int numLive = 0;
 
-    for (auto& q : midiIn)
+    auto takeLive = [&] (MidiQueue& q)
+    {
         for (MidiMsg m; numLive < (int) liveMidi.size() && q.pop (m);)
         {
             liveMidi[(size_t) numLive++] = m;
@@ -369,6 +370,12 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
             if (isRolling && current->recording)
                 recordedMidi.push ({ pos, m });
         }
+    };
+
+    for (auto& q : midiIn)
+        takeLive (q);
+
+    takeLive (typedMidi); // keys mode plays like a controller
 
     // Notes the MIDI editor auditions, for whichever track they're for.
     int numAuditions = 0;

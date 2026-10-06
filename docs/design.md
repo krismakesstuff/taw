@@ -118,7 +118,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `{` / `}` or `Ctrl+[` / `Ctrl+]` | Mix volume −1 / +1 dB, from anywhere (`{ }` because macOS Terminal sends `Ctrl+[` as Escape) | same |
 | `r` / `t` (empty command line; also `-` / `+`) | zoom out / in (Pro Tools keys) | same |
 | `Ctrl+↑` / `Ctrl+↓` | first / last track; with Shift, selects every track from where you were to there | same |
-| `k` (empty command line) | to the markers row (ctrl+k adds a marker); `k` again returns to the track | same |
+| `` ` `` (empty command line) | to the markers row (`~` adds a marker); `` ` `` again returns to the track | same |
 | `f` (empty command line) | fill: the focused track takes every track row (a piano roll on instrument tracks); `f` again shows all tracks | same |
 | `q` / `w` (empty command line) | cursor to the selection's start / end, centred in the view; the selection stays (select, `snap`, `q`, play) | same |
 | `Tab` / `Shift+Tab` | cursor to the next clip start or end, or the next hit on sample tracks, on the selected or focused tracks / extend the selection to it | same |
@@ -266,7 +266,7 @@ records the selected tracks, else whatever is armed.
 | `Space` / `Esc` (empty command line) | stop (cursor returns to where play started) |
 | `Enter` (empty command line) | back to where play started, still playing |
 | `Ctrl+Space` | punch: toggle recording on armed tracks without stopping (in, out, in again…) |
-| `Ctrl+K` (or `Ctrl+M`) | drop a marker at the playhead (stopped: at the cursor); `Ctrl+K` because macOS Terminal sends `Ctrl+M` as Enter |
+| `~` (shift+`` ` ``, empty command line) | drop a marker at the playhead (stopped: at the cursor) |
 | `Ctrl+C` / `X` / `D`, `Delete` | edit the selection, as when stopped |
 | `←` `→` (any modifier) | move the cursor / selection, not the playhead |
 | `Ctrl+V` | paste at the cursor |
@@ -392,6 +392,16 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   while playing, so enter keeps its one job (back to the start). On a track that's its
   instrument, else its first insert, else the effects picker; in the routing column, the slot
   under the cursor. `ed` is the typed version.
+- **Keys mode** (`ctrl+k`, again or esc leaves): the typing keyboard is a MIDI keyboard, laid out
+  like Ableton's. `a s d f g h j k l ; '` are the white keys from C4, `w e t y u o p` the black
+  ones; `z`/`x` shift an octave, `c`/`v` step the velocity (1 20 40 ... 127). Its notes go in as
+  one more controller (`AudioEngine::playTyped`), so armed instrument tracks play them and
+  recording writes them down. Other characters are swallowed (letters are notes, not
+  commands); space, arrows and ctrl keys work as usual. Terminals report presses but not
+  releases, so a note ends when its key is seen to be up, read from the keyboard each frame
+  (`Console::keyDown`: `GetAsyncKeyState` on Windows, `CGEventSourceKeyState` on macOS, by
+  the key's place on a US keyboard). Where that can't be read, a note ends once its key stops
+  auto-repeating.
 - **MIDI in.** Every input is opened at startup and as devices come and go (up to 32), unless
   switched off. `midi` opens the MIDI panel, like the audio device picker: each input on or off
   (kept by name in `settings.json`, for every session), whether it opened (Windows doesn't
@@ -634,7 +644,11 @@ are read as UTF-16 for the same reason.
 
 For finding the right sample among thousands: taw measures each one once, sorts them by kind
 and lays them out on a map where samples that sound alike sit together. `index <folder>` (on its
-own thread; `taw --index <folder> ...` from a shell prints a report) adds folders.
+own thread; `taw --index <folder> ...` from a shell prints a report) adds folders; typing
+`index` and dropping a folder on the input line does the same, as a drop alone imports.
+`index remove <folder>` (or `index remove` and a drop) takes a folder's samples out again, and
+`library` lists the indexed folders with how many samples each holds. The folders are kept in
+the index; one inside an indexed folder isn't listed twice.
 
 **The browser** docks in a column right of the timeline and its meters (about three tenths of
 the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input

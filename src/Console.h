@@ -72,6 +72,11 @@ public:
     void* keyboardHeldBy() const;
     void toggleKeyboardHold (void* pluginWindow);
 
+    // Whether the key that types ch (unshifted) is held down right now: 1 down, 0 up, -1 can't
+    // tell. Read from the keyboard itself, for keys mode (LiveKeys), since terminals don't
+    // report releases. macOS reads it by the key's place on a US keyboard.
+    int keyDown (wchar_t ch) const;
+
     // Puts text on the system clipboard.
     static void setClipboardText (const char* text);
     int height() const;

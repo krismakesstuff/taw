@@ -5,6 +5,7 @@
 #include "AudioEditor.h"
 #include "Import.h"
 #include "Library.h"
+#include "LiveKeys.h"
 #include "MidiEditor.h"
 #include "Plugins.h"
 #include "Console.h"
@@ -253,7 +254,9 @@ public:
     std::vector<juce::String> browserKinds() const;     // "all", then the kinds the library has
     std::vector<int> browserShown() const;              // the samples the badge and filter leave, list order
     std::pair<float, float> browserPosition (int sample) const; // on the map now showing, 0..1
-    Result startIndexing (const juce::StringArray& folders);
+    Result startIndexing (const juce::StringArray& folders);    // index <folder>...; index remove <folder>...
+    Result removeFromLibrary (const juce::StringArray& folders); // index remove
+    Result describeLibrary();                                    // library: its folders and how many samples each
     void pollIndexing();
     bool browserVisible = false;
     BrowserFocus browserFocus = BrowserFocus::kinds;
@@ -323,6 +326,10 @@ public:
     void openPluginPicker (int targetTrack, int effectSlot = -1); // effectSlot >= 0: effects, for that insert
     PluginCatalog plugins;
     std::unique_ptr<MidiInputs> midiInputs;
+
+    // Keys mode (ctrl+k): the typing keyboard plays the armed instrument tracks (LiveKeys.h).
+    LiveKeys liveKeys { [this] (MidiMsg m) { engine.playTyped (m); }, [this] (wchar_t ch) { return console.keyDown (ch); } };
+    Result toggleLiveKeys();
 
     // While recording: notes whose key is still down, drawn from where they started to the
     // playhead. Written to the track as NOTEs when the key comes up.

@@ -892,7 +892,7 @@ int main (int argc, char** argv)
             // kitty keyboard protocol (iTerm2, Ghostty, kitty, WezTerm); cmd counts as alt
             { "\x1b[27u", "Escape" }, { "\x1b[91;5u", "ctrl+[" }, { "\x1b[109;5u", "ctrl+m" }, { "\x1b[32;5u", "ctrl+ " },
             { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
-            // taw's Terminal profile: shift+return, ctrl+up/down
+            // kitty's shift+return; taw's Terminal profile: ctrl+up/down
             { "\x1b[13;2u", "shift+Enter" }, { "\x1b[1;5A", "ctrl+Up" }, { "\x1b[1;5B", "ctrl+Down" },
             // SGR mouse: presses only (not releases, moves, the wheel or the middle button), cells from 0
             { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<32;10;5M", "" },

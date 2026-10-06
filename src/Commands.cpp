@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -767,6 +767,7 @@ Result App::execute (const juce::String& line)
         return p.args[1].isEmpty() ? Result::fail ("browse vol -6 sets the audition level") : setAuditionDb (p.args[1].getDoubleValue());
     if (v == "browse")             return showBrowser (p.args[0].isEmpty() ? ! browserVisible : ! p.args[0].equalsIgnoreCase ("hide"));
     if (v == "index")              return startIndexing (splitPaths (p.rest));
+    if (v == "library")            return describeLibrary();
 
     // edit (shift+E): the focused track's clip at the cursor (or the nearest) in its editor;
     // "9 edit" on track 9; "edit new" an empty MIDI clip to draw into.

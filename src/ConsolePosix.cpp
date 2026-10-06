@@ -3,6 +3,8 @@
 
 #if defined(__APPLE__)
 #include "MacFocus.h"
+
+#include <CoreGraphics/CoreGraphics.h>
 #endif
 
 #include <juce_core/juce_core.h>
@@ -360,7 +362,37 @@ std::vector<Key> Console::poll()
 
     // A key sequence split across reads waits a couple of polls (~30 ms) for the rest.
     pendingPolls = gotAny ? 0 : pendingPolls + 1;
-    return decode (pending, pendingPolls >= 2);
+    auto keys = decode (pending, pendingPolls >= 2);
+
+#if defined(__APPLE__)
+    // Terminal.app sends shift+return as a plain return; whether shift is down is read from the
+    // keyboard instead (shift+enter: a new sample track from the browser).
+    for (auto& k : keys)
+        if (k.code == Key::Enter && ! k.shift)
+            k.shift = (CGEventSourceFlagsState (kCGEventSourceStateHIDSystemState) & kCGEventFlagMaskShift) != 0;
+#endif
+
+    return keys;
+}
+
+int Console::keyDown (wchar_t ch) const
+{
+#if defined(__APPLE__)
+    // macOS key codes (kVK_ANSI_*) are places on the keyboard, named for a US layout.
+    static const std::pair<wchar_t, CGKeyCode> codes[] = {
+        { 'a', 0x00 }, { 's', 0x01 }, { 'd', 0x02 }, { 'f', 0x03 }, { 'h', 0x04 }, { 'g', 0x05 }, { 'z', 0x06 },
+        { 'x', 0x07 }, { 'c', 0x08 }, { 'v', 0x09 }, { 'b', 0x0b }, { 'q', 0x0c }, { 'w', 0x0d }, { 'e', 0x0e },
+        { 'r', 0x0f }, { 'y', 0x10 }, { 't', 0x11 }, { 'o', 0x1f }, { 'u', 0x20 }, { 'i', 0x22 }, { 'p', 0x23 },
+        { 'l', 0x25 }, { 'j', 0x26 }, { '\'', 0x27 }, { 'k', 0x28 }, { ';', 0x29 }, { 'n', 0x2d }, { 'm', 0x2e },
+    };
+
+    for (const auto& [c, code] : codes)
+        if (c == ch)
+            return CGEventSourceKeyState (kCGEventSourceStateHIDSystemState, code) ? 1 : 0;
+#else
+    (void) ch;
+#endif
+    return -1;
 }
 
 void Console::setClipboardText (const char* text)

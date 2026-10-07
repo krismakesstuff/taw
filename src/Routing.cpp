@@ -172,7 +172,7 @@ void App::applyRouting (Graph& g, bool offline)
                 continue;
 
             if (const auto bus = busFor (t, session->findBus (send[ids::to])); bus >= 0)
-                tp.sends.push_back ({ bus, sendGain (send), (bool) send[ids::pre], {} });
+                tp.sends.push_back ({ bus, sendGain (send), (bool) send[ids::pre], automationCurve (track, "send " + Session::slotName (s).toLowerCase()), {} });
         }
     }
 
@@ -209,7 +209,8 @@ void App::applyRouting (Graph& g, bool offline)
     for (int t = 0; t < n; ++t)
     {
         auto& tp = g.tracks[(size_t) t];
-        tp.audible = ! (bool) session->track (t)[ids::mute] && (heard[(size_t) t] || feeding[(size_t) t]);
+        tp.soloAudible = heard[(size_t) t] || feeding[(size_t) t];
+        tp.audible = ! (bool) session->track (t)[ids::mute] && tp.soloAudible;
 
         if (! heard[(size_t) t] && tp.out < 0)
             tp.out = TrackPlay::nowhere;

@@ -3,6 +3,27 @@
 
 namespace taw
 {
+void automatePlugins (TrackPlay& tp, juce::int64 pos)
+{
+    for (auto& p : tp.parameterCurves)
+    {
+        // A mapped parameter with no points, untouched: the plugin's own setting stands.
+        if (! p.curve.active())
+        {
+            p.last = -1.0f;
+            continue;
+        }
+
+        const auto value = juce::jlimit (0.0f, 1.0f, p.curve.at (pos));
+
+        if (value != p.last)
+        {
+            p.plugin->setParameter (p.index, value);
+            p.last = value;
+        }
+    }
+}
+
 AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats();
@@ -455,6 +476,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         }
 
         renderPads (tp, t, trackL, trackR, n);
+        automatePlugins (tp, pos);
 
         if (tp.plugin != nullptr)
         {
@@ -491,8 +513,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         // Live: what you're playing right now (a monitored input, an armed instrument while stopped
         // or recording) skips delay compensation.
         const bool live = monitoring || (tp.midiLive && (! isRolling || current->recording));
-        panTrack (tp, trackL, trackR, n);
-        routeTrack (tp, trackL, trackR, n, busPtrs.data(), mixL, mixR, live);
+        mixTrack (tp, pos, trackL, trackR, n, busPtrs.data(), numBuses, mixL, mixR, live);
 
         // The meter shows what you hear from the track: the input (pre-fader, for setting
         // levels) while monitoring, otherwise its playback.
@@ -537,8 +558,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         }
     }
 
-    juce::FloatVectorOperations::multiply (mixL, current->mixGain, n);
-    juce::FloatVectorOperations::multiply (mixR, current->mixGain, n);
+    applyMixGain (*current, pos - current->latency, mixL, mixR, n); // what's heard is that late
 
     const auto l = juce::FloatVectorOperations::findMinAndMax (mixL, n);
     const auto r = juce::FloatVectorOperations::findMinAndMax (mixR, n);

@@ -67,13 +67,22 @@ double newSessionRate();
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
 // What ctrl+c holds: per track, its clips (audio, MIDI or hits), trimmed to the copied range
-// and positioned relative to its start.
+// and positioned relative to its start, and the automation under them.
 struct Clipboard
 {
+    // A lane's curve over the range: its points, with its values at both ends.
+    struct Automation
+    {
+        juce::String param;
+        juce::String plugin; // a plugin parameter's plugin (it pastes only onto the same plugin)
+        std::vector<std::pair<double, double>> points; // beats from the range start, values
+    };
+
     struct Lane
     {
         bool sample = false, instrument = false;
         std::vector<juce::ValueTree> items; // CLIPs (start in samples), or MIDICLIPs / HITCLIPs (beat in beats)
+        std::vector<Automation> automation;
     };
 
     juce::int64 length = 0; // samples
@@ -611,6 +620,7 @@ private:
     bool hitInRange (double beat, double from, double to) const;
     Clipboard gather (const std::vector<int>& tracks, juce::Range<juce::int64>) const;
     int clearRange (int track, juce::Range<juce::int64>); // returns how many clips/hits it touched
+    int clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64>); // ...and their automation there
     Result pasteAt (const Clipboard&, const std::vector<int>& destTracks, juce::int64 at);
     Result checkEditable (const std::vector<int>& tracks, bool needsRange) const;
     juce::Result parsePosition (const juce::String& spec, juce::int64& pos) const; // "17", "17.3", "1:30"
@@ -672,6 +682,99 @@ private:
 
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
+    void writeLane (const juce::ValueTree& owner, const juce::String& param, std::vector<std::pair<double, double>> points);
+    Result automationTrack (int& track, juce::String& param); // the focused track and the lane you're on
+
+public:
+    // Automation (AutomationEdit.cpp). An owner is a track, or the session for the mix (-1).
+    juce::ValueTree automationOwner (int track) const;
+    // Lanes: a track's AUTO lanes show under it while it's open (ids::lanes); focusedLane is
+    // the one you're on under the focused track (-1: the track's own row).
+    int focusedLane = -1;
+    std::vector<juce::String> lanesShown (int track) const; // params, in order (empty: closed)
+    std::vector<juce::String> laneList (const juce::ValueTree& track) const; // ...open or not
+    void setLaneList (juce::ValueTree track, const std::vector<juce::String>&);
+    Result changeLane (int track, int index, const juce::String& param); // that lane shows param instead
+    juce::String focusedLaneParam();
+    Result showLane (int track, const juce::String& param);
+    Result removeLane (int track, const juce::String& param);
+    Result laneByName (int track, const juce::String& what); // "lane cutoff"
+    Result toggleLanes();                                    // shift+A
+    // load false (drawing): a plugin not loaded yet isn't loaded for this; names and values fall back.
+    PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
+    double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
+    double automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos);
+    double currentValue (const juce::ValueTree& owner, const juce::String& param); // what it is now (readouts)
+    bool isAutomated (const juce::ValueTree& owner, const juce::String& param) const; // points, or a knob moving it
+    juce::String automationName (const juce::ValueTree& owner, const juce::String& param, bool load = true);
+    juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
+    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
+    bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
+    Result setAutomation (const juce::String& value); // pt <value>
+    Result nudgeAutomation (int direction);          // [ ] on a track showing automation
+    Result clearAutomation();                        // delete on one
+
+    // Automation follows clip edits: copied, cut, pasted and moved with the clips over it
+    // (ranges in beats). Clearing keeps the curve outside the range as it was.
+    std::vector<Clipboard::Automation> gatherAutomation (const juce::ValueTree& track, double from, double to) const;
+    void clearAutomationRange (const juce::ValueTree& track, double from, double to);
+    void pasteAutomation (const juce::ValueTree& track, const std::vector<Clipboard::Automation>&, double at, double length);
+    void moveAutomation (const juce::ValueTree& track, double from, double length, double to); // a dragged clip's
+    // While writing, what a controller has written this pass on the lane at pos (false: nothing there).
+    bool writtenValue (const juce::ValueTree& lane, juce::int64 pos, double& value);
+
+    // Controllers (MIDI CC) mapped to automation lanes: a lane's num (and ch, absent: any
+    // channel) say which. A mapped controller always moves its parameter (touch: while it
+    // moves, then back to the curve); with write on, playing, its moves are recorded.
+    Result learnControl (const juce::String& arg); // map (the next controller moved) | map 74 | map off
+    Result unmapControl (const juce::String& arg); // unmap (all) | unmap 74 | unmap lane (the one you're on)
+    juce::StringArray freeControl (int cc, int ch, const juce::ValueTree& keep); // off every lane but keep
+    Result setWrite (const juce::String& arg);     // aw | aw on | aw off (shift+W)
+    bool writeOn = false; // not saved: arming automation is for now
+
+    // The automation list ("auto"): everything the focused track can automate, with what's
+    // automated and mapped already; typing filters, enter shows it on the track.
+    struct AutoRow
+    {
+        juce::String param, name; // a header row: name only
+        bool header = false;
+    };
+    bool autoPanelVisible = false;
+    int autoPanelTrack = -1, autoPanelIndex = 0;
+    int autoPanelLane = -1; // opened from this lane: enter changes what it shows (-1: adds a lane)
+    juce::String autoPanelFilter;
+    std::vector<AutoRow> autoPanelRows; // as filtered
+    Result openAutoPanel();
+    void buildAutoPanelRows();
+    bool handleAutoPanelKey (const Key&);
+    bool isTouched (const juce::ValueTree& lane) const;
+    juce::String controlText (const juce::ValueTree& lane) const; // "CC 74", "CC 74 ch 2"
+
+private:
+    struct Touch
+    {
+        juce::ValueTree lane, owner;
+        std::shared_ptr<LiveValue> live;
+        double lastMs = 0.0;
+        std::vector<std::pair<juce::int64, float>> written; // this pass, while writing (timeline samples)
+    };
+    std::vector<Touch> touches;
+    mutable std::vector<std::pair<juce::ValueTree, std::shared_ptr<LiveValue>>> liveValues;
+    std::shared_ptr<LiveValue> liveValueFor (const juce::ValueTree& lane) const;
+    struct Learning
+    {
+        int track = -2; // -2: not learning; -1: the mix
+        juce::String param;
+    } learning;
+    void pollControls();
+    void handleControl (const ControlMsg&);
+    void releaseTouches (bool idleOnly = false); // into the lanes what was written; idleOnly: the ones let go of
+    void commitTouch (Touch&);
+    void keepAsSetting (const Touch&);
+    void syncControlMap();
+    double controlToValue (const juce::String& param, int cc) const;
+    // The automated parameters of a plugin on the track: its "inst/" or "fx a/" lanes (prefix).
+    void addParameterCurves (TrackPlay&, const juce::ValueTree& track, const std::shared_ptr<PluginSlot>&, const juce::String& prefix) const;
     bool cursorMovedWhileRolling = false;
     double cursorMovedAt = 0.0; // ms; the view stops following the playhead briefly after
     void pollBounce();

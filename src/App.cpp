@@ -302,6 +302,7 @@ int App::run()
         collectFinishedTakes();
         drainLiveOverviews();
         drainRecordedMidi();
+        pollControls(); // controllers mapped to automation
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
         pollImport();
@@ -758,6 +759,7 @@ Result App::stop()
     if (recording)
         stopRecorders();
 
+    releaseTouches(); // what a controller wrote this pass goes into its lanes
     engine.stop();
     // Back to where play started, unless you moved the cursor during playback.
     setCursor (cursorMovedWhileRolling ? cursor : playStart);
@@ -1263,8 +1265,69 @@ const ClipData* App::audioFor (const juce::String& path)
 
 void App::rebuildGraph()
 {
-    if (session != nullptr)
-        engine.setGraph (buildGraph());
+    if (session == nullptr)
+        return;
+
+    engine.setGraph (buildGraph());
+    syncControlMap();
+}
+
+Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param) const
+{
+    Curve c;
+    const auto lane = Session::automation (owner, param);
+
+    if (! lane.isValid())
+        return c;
+
+    const auto target = AutomationTarget::parse (param);
+    const auto spb = session->samplesPerBeat();
+    c.steps = target.kind == AutomationTarget::Kind::mute;
+
+    // A mapped controller can take it over while it moves; with no points, it otherwise plays
+    // the mixer's setting.
+    if (lane.hasProperty (ids::num))
+    {
+        c.live = liveValueFor (lane);
+
+        switch (target.kind)
+        {
+            case AutomationTarget::Kind::volume: c.base = (float) (double) owner[owner.hasType (ids::SESSION) ? ids::mixDb : ids::gainDb]; break;
+            case AutomationTarget::Kind::pan:    c.base = (float) (double) owner[ids::pan]; break;
+            case AutomationTarget::Kind::mute:   c.base = (bool) owner[ids::mute] ? 1.0f : 0.0f; break;
+            case AutomationTarget::Kind::send:
+                if (const auto send = Session::send (owner, target.slot); send.isValid())
+                    c.base = (float) (double) send[ids::db];
+                break;
+            default: break;
+        }
+    }
+
+    for (const auto& p : Session::points (lane))
+    {
+        c.pos.push_back (std::llround ((double) p[ids::beat] * spb));
+        c.val.push_back (target.clamp ((float) (double) p[ids::val]));
+    }
+
+    return c;
+}
+
+void App::addParameterCurves (TrackPlay& tp, const juce::ValueTree& track, const std::shared_ptr<PluginSlot>& plugin, const juce::String& prefix) const
+{
+    if (plugin == nullptr)
+        return;
+
+    for (const auto& lane : Session::automations (track))
+    {
+        const auto param = lane[ids::param].toString();
+
+        if (! param.startsWith (prefix))
+            continue;
+
+        if (const auto index = plugin->findParameter (param.substring (prefix.length())); index >= 0)
+            if (auto curve = automationCurve (track, param); ! curve.empty())
+                tp.parameterCurves.push_back ({ plugin, index, std::move (curve) });
+    }
 }
 
 std::unique_ptr<Graph> App::buildGraph (bool offline)
@@ -1283,8 +1346,12 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         tp.inputChannel = (int) t[ids::input] - 1;
         tp.armed = t[ids::armed];
         tp.inputOnly = t[ids::monitor]; // "mon": hear the input during playback too
-        tp.audible = ! (bool) t[ids::mute] && (! anySolo || (bool) t[ids::solo]);
+        tp.soloAudible = ! anySolo || (bool) t[ids::solo];
+        tp.audible = ! (bool) t[ids::mute] && tp.soloAudible;
         tp.gain = juce::Decibels::decibelsToGain ((float) (double) t[ids::gainDb], -96.0f);
+        tp.volumeCurve = automationCurve (t, "vol");
+        tp.panCurve = automationCurve (t, "pan");
+        tp.muteCurve = automationCurve (t, "mute");
 
         if (Session::isInstrumentTrack (t))
         {
@@ -1315,6 +1382,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
                 }
             }
 
+            addParameterCurves (tp, t, tp.plugin, "inst/");
             g->tracks.push_back (std::move (tp));
             continue;
         }
@@ -1434,6 +1502,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
 
     const auto& s = session->tree();
     g->mixGain = juce::Decibels::decibelsToGain ((float) (double) s[ids::mixDb], -96.0f);
+    g->mixCurve = automationCurve (s, "vol");
     g->bpm = session->bpm();
     g->timeSigNum = session->beatsPerBar();
     g->timeSigDen = juce::jmax (1, (int) s[ids::timeSigDen]);
@@ -2254,6 +2323,7 @@ void App::focusTrack (int index, bool extendSelection)
             trackAnchor = juce::jmin (focused, n - 1);
 
         focused = juce::jlimit (0, n - 1, index);
+        focusedLane = -1;
         return;
     }
 
@@ -2261,6 +2331,7 @@ void App::focusTrack (int index, bool extendSelection)
     topLane = TopLane::none;
     selectedMarker = {};
     focused = juce::jlimit (0, n, index); // n = the mix row
+    focusedLane = -1;
 }
 
 bool App::mixFocused() const
@@ -2272,6 +2343,21 @@ bool App::mixFocused() const
 // row. Down comes back the same way. Shift only ever selects tracks, so it stops at the first one.
 void App::focusUp (bool extendSelection)
 {
+    // Up through a track's lanes to its own row; from a track, onto the last lane of the one above.
+    if (topLane == TopLane::none && focusedLane >= 0 && ! extendSelection)
+    {
+        --focusedLane;
+        return;
+    }
+
+    if (topLane == TopLane::none && focused > 0 && ! extendSelection && ! lanesShown (focused - 1).empty())
+    {
+        const auto lanes = (int) lanesShown (focused - 1).size();
+        focusTrack (focused - 1);
+        focusedLane = lanes - 1;
+        return;
+    }
+
     if (topLane == TopLane::ruler)
         topLane = TopLane::markers;
     else if (topLane == TopLane::video)
@@ -2284,6 +2370,15 @@ void App::focusUp (bool extendSelection)
 
 void App::focusDown (bool extendSelection)
 {
+    // Down from a track's row through its open lanes, then on to the next track.
+    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused < session->numTracks()
+        && focusedLane + 1 < (int) lanesShown (focused).size())
+    {
+        ++focusedLane;
+        trackAnchor = -1;
+        return;
+    }
+
     if (topLane == TopLane::markers)
         topLane = TopLane::ruler, selectedMarker = {};
     else if (topLane == TopLane::ruler && videoLane())
@@ -2815,6 +2910,15 @@ void App::handleMouse (const Key& k)
     if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
         return;
 
+    // An automation lane: onto it, the cursor where it was clicked.
+    if (const auto lane = map.laneAt (k.y); lane >= 0)
+    {
+        focusTrack (track);
+        focusedLane = lane;
+        moveTo (juce::jmax<juce::int64> (0, map.positionAt (k.x)), k.shift);
+        return;
+    }
+
     if (k.doubleClick)
     {
         const auto [t0, t1] = map.span (k.x);
@@ -3096,7 +3200,8 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
+    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
+        || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.
@@ -3147,10 +3252,16 @@ void App::handleMainKey (const Key& k)
         case Key::Left:  nudge (-1, step, k.shift); return;
         case Key::Right: nudge (+1, step, k.shift); return;
         // Ctrl jumps to the first / last track; with shift it selects every track on the way.
-        // Alt moves the selected (or focused) tracks up or down a place.
+        // Alt moves the selected (or focused) tracks up or down a place (on a lane, its points).
         case Key::Up:
         case Key::Down:
-            if (k.alt && ! k.ctrl)
+            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
+            {
+                // On a lane: its points up or down (the selection's, or the one at the cursor).
+                beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
+                say (nudgeAutomation (k.code == Key::Up ? +1 : -1));
+            }
+            else if (k.alt && ! k.ctrl)
             {
                 say (moveTracks (k.code == Key::Up ? -1 : +1));
             }
@@ -3181,6 +3292,16 @@ void App::handleMainKey (const Key& k)
 
     // Delete clears the time selection on the selected (or focused) tracks. So does backspace
     // with nothing typed (a Mac keyboard's delete key sends backspace).
+    // On a track showing automation, delete removes the selection's points instead.
+    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
+
+    if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection() && onAutomation)
+    {
+        beginEdit ("delete points");
+        say (clearAutomation());
+        return;
+    }
+
     if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection())
     {
         beginEdit ("delete");
@@ -3397,6 +3518,9 @@ void App::handleMainKey (const Key& k)
                 }
             }
             // | (shift+\): open or close the plugin under the cursor, playing or not.
+            // On an automation lane: the parameters, to change what it shows.
+            else if (lineEmpty && k.ch == '|' && session != nullptr && focusedLaneParam().isNotEmpty())
+                say (openAutoPanel());
             else if (lineEmpty && k.ch == '|' && session != nullptr)
                 say (togglePluginHere());
             // f: the focused track fills the track area (a piano roll on instrument tracks).
@@ -3408,6 +3532,12 @@ void App::handleMainKey (const Key& k)
             // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
                 say (toggleEditor());
+            // shift+W: automation write (mapped controllers moved while playing are recorded).
+            else if (lineEmpty && k.ch == 'W' && session != nullptr)
+                say (setWrite ({}));
+            // shift+A: the focused track's automation lanes open under it (or close).
+            else if (lineEmpty && k.ch == 'A' && session != nullptr)
+                say (toggleLanes());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

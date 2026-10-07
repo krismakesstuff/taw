@@ -8,6 +8,8 @@ struct MidiInputs::Port final : juce::MidiInputCallback
     juce::MidiDeviceInfo info;
     int slot = -1;
     MidiQueue* queue = nullptr;
+    ControlQueue* controls = nullptr;
+    const ControlRouting* routing = nullptr;
     std::atomic<int>* received = nullptr;
     std::atomic<int> events { 0 };
     std::atomic<juce::uint32> last { 0 }; // the latest message, packed, for the panel
@@ -27,7 +29,11 @@ struct MidiInputs::Port final : juce::MidiInputCallback
         if (msg.isNoteOff())
             msg = MidiMsg::noteOff (msg.channel(), msg.d1); // a note-on at velocity 0 is a note-off
 
-        queue->push (msg); // a full queue drops it
+        // A controller mapped to automation (or any while learning) moves that, not the instrument.
+        if (msg.type() == 0xb0 && (routing->learning.load (std::memory_order_relaxed) || routing->isMapped (msg.channel(), msg.d1)))
+            controls->push ({ msg, juce::Time::getMillisecondCounterHiRes() });
+        else
+            queue->push (msg); // a full queue drops it
         last.store ((juce::uint32) msg.status << 16 | (juce::uint32) msg.d1 << 8 | msg.d2, std::memory_order_relaxed);
         events.fetch_add (1, std::memory_order_relaxed);
         received->fetch_add (1, std::memory_order_relaxed);
@@ -136,6 +142,8 @@ void MidiInputs::update()
         port->info = info;
         port->slot = slot;
         port->queue = &queues[(size_t) slot];
+        port->controls = &controlQueues[(size_t) slot];
+        port->routing = &control;
         port->received = &received;
         port->input = juce::MidiInput::openDevice (info.identifier, port.get());
         timing::mark ("MIDI: opened " + info.name + (port->input == nullptr ? " (failed)" : ""));

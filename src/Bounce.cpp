@@ -30,7 +30,8 @@ namespace taw
 {
 namespace
 {
-constexpr int blockSize = 8192;
+// As small as a live block: plugin automation moves once a block, so a bounce steps like playback.
+constexpr int blockSize = 512;
 
 #if JUCE_WINDOWS
 template <typename T>
@@ -306,7 +307,8 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         const auto t = graph->order.size() == graph->tracks.size() ? graph->order[(size_t) k] : k;
         const auto& tp = graph->tracks[(size_t) t];
 
-        if (! tp.audible)
+        // Muted for the whole bounce: skipped. With mute automation it may come back in.
+        if (! tp.audible && (tp.muteCurve.empty() || ! tp.soloAudible))
             continue;
 
         juce::FloatVectorOperations::clear (bl, n);
@@ -331,17 +333,18 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         transport.pos = pos;
         transport.rolling = true;
 
+        automatePlugins (graph->tracks[(size_t) t], pos);
+
         if (tp.plugin != nullptr)
             tp.plugin->render (tp.sequence, transport, n, nullptr, 0, bl, br);
 
         for (const auto& fx : tp.inserts)
             fx->process (transport, n, bl, br);
 
-        panTrack (tp, bl, br, n);
-        routeTrack (tp, bl, br, n, busPtrs.data(), l, r);
+        mixTrack (graph->tracks[(size_t) t], pos, bl, br, n, busPtrs.data(), numBuses, l, r);
     }
 
-    out.applyGain (0, n, graph->mixGain);
+    applyMixGain (*graph, pos - graph->latency, l, r, n); // what's heard is that late
 
     for (int ch = 0; ch < 2; ++ch)
         peakValue = juce::jmax (peakValue, out.getMagnitude (ch, 0, n));

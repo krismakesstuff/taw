@@ -33,9 +33,12 @@ void App::addInserts (TrackPlay& tp, const juce::ValueTree& track, bool offline)
         if (! offline && lowLatency && in->slot->latency() > (int) session->tree()[ids::lowLatencyMax])
             continue;
 
+        const auto prefix = "fx " + Session::slotName (s).toLowerCase() + "/";
+
         if (! offline)
         {
             tp.inserts.push_back (in->slot);
+            addParameterCurves (tp, track, in->slot, prefix);
             continue;
         }
 
@@ -46,6 +49,7 @@ void App::addInserts (TrackPlay& tp, const juce::ValueTree& track, bool offline)
         {
             copy->setState (in->slot->getState());
             copy->setNonRealtime (true);
+            addParameterCurves (tp, track, copy, prefix);
             tp.inserts.push_back (std::move (copy));
         }
     }

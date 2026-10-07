@@ -719,6 +719,65 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
 - **The map** is a t-SNE of the same distances, scaled to 0..1 and kept in the index. It's the
   exact O(n²) form, fine to a few thousand samples; a whole drive will want Barnes-Hut.
 
+## Automation
+
+Volume, pan, mute, the sends, the mix volume and any plugin parameter (instrument or insert)
+can change over time.
+
+- **Model:** an `AUTO` lane per parameter on its track (on the `SESSION` for the mix), with
+  `POINT`s at beats (so they follow the tempo, like MIDI). `param` says what it controls
+  (`AutomationTarget`): `vol` and `send a`-`e` in dB, `pan` -1..1, `mute` 0/1 (held, not
+  ramped), `inst/<id>` and `fx a/<id>` a plugin parameter 0..1 by its VST3 ID. Straight lines
+  between points, flat before the first and after the last; a new lane starts at the session
+  start with the parameter's setting, so its first point ramps from where it was.
+- **Playback:** `buildGraph` turns lanes into `Curve`s (samples). The mixer's are applied by
+  `mixTrack` in steps of 32 samples, each at its start's value, so a ride is smooth whatever the
+  block size; plugin parameters are set before each block (`automatePlugins`, only when they
+  change; JUCE's hosted parameters take values from the audio thread). The mix volume is read
+  at the playhead less delay compensation, so it moves with what you hear. Bounces use the same
+  functions and 512-sample blocks, so they step like playback. Mute automation decides
+  muting where there is some (solo still applies).
+- **Lanes:** shift+A opens a track's automation lanes under its clip row (`lanes` on the
+  track; a track with none opens with a volume lane), two rows each on tall tracks, one on
+  short ones: the curve as a filled graph, points in the accent colour, and in the header the
+  parameter, its value at the cursor (the playhead when rolling) and its controller. Up and
+  down move through them (`focusedLane`); a click lands on one. Tracks are as tall as their
+  lanes make them, so the layout keeps a row map (`LaneMap::rows`) for the mouse. A lane stays
+  when its points are cleared, until it's removed (`auto`, delete).
+- **Lanes are views:** what a track's lanes show is its own list (`laneParams`, kept once a
+  lane is added or changed; before that, its AUTO lanes), apart from the automation itself.
+  On a lane, `|` (or `auto`) opens the list and enter makes that lane show another parameter
+  (`changeLane`; a lane already showing it swaps places); the old parameter's automation keeps
+  playing and stays in the list. `lane cutoff` does the same by name; from the track's row
+  both add a lane instead.
+- **Editing:** on a lane, `pt <value>` puts a point at the cursor (with a selection, the
+  selection becomes that level and the curve outside it stays), alt+up/down moves the selection's
+  points (or the point at the cursor; makes one if needed), and delete removes the
+  selection's points. Each is one undo step. `[ ]` still ride the track's volume. `lane cutoff` adds a lane by name.
+- **The list (`auto`):** everything the focused track can automate: its lanes first, the
+  mixer, then each plugin's automatable parameters (instrument, then inserts), with each
+  one's value, points and controller. Typing filters; enter adds (and goes to) a lane;
+  delete removes one.
+- **Controllers:** `map` maps the next CC moved to the lane you're on (`map 74` names
+  it, and moves it off any other lane), saved on the lane (`num`, `ch`). `unmap` clears every
+  mapping, `unmap 74` one controller, `unmap lane` the lane you're on. The MIDI inputs send mapped CCs (all CCs
+  while learning) to the message thread instead of the instruments (`ControlRouting`). A
+  moving controller sets a `LiveValue` the lane's curve reads, so you hear it at once (touch);
+  on a lane with no points a knob is a fader (where it's left becomes the setting). With write
+  on (shift+W, `aw`) and playing, its moves are recorded; 0.6 s after it stops moving, the
+  touch releases: its points replace that stretch (one undo step) and the curve glides back
+  over 0.25 s. A stop releases everything. While it writes, the lane draws what's been
+  written so far, from the touch's first point to the playhead, in the record colour
+  (`writtenValue`).
+- **Follows the clips:** automation goes where the clips over it go. Copy (and so cut,
+  duplicate) takes each automated lane's curve over the range with the clips: its value at
+  each end and the points between (`gatherAutomation`). Paste puts it down at the cursor,
+  replacing what the lane had there and keeping the curve either side (`pasteAutomation`;
+  a plugin parameter only onto the same plugin). Cut and delete clear it from the range,
+  joining the curve across the gap (`clearAutomationRange`). Dragging a clip in the audio
+  editor moves the automation under it when it's let go (`moveAutomation`, the same undo
+  step). Consolidate leaves automation alone.
+
 ## Bouncing
 
 `b` renders the mix bus (track volume, mute/solo, mix volume; never the click or live inputs)

@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Automation.h"
 #include "Midi.h"
 #include "SpscQueue.h"
 
@@ -130,6 +131,19 @@ struct TrackPlay
     bool stereo = false; // the track's width: a mono track keeps one signal (in both sides) until it's panned
     float gain = 1.0f;
 
+    // Automation (empty curves: not automated). Volume and sends in dB, pan -1 to 1, mute 0/1.
+    // Automated values overwrite gain, pan, audible and the sends' gains as the track plays.
+    Curve volumeCurve, panCurve, muteCurve;
+    bool soloAudible = true; // solo lets it through: mute automation decides the rest
+    struct ParameterCurve
+    {
+        std::shared_ptr<PluginSlot> plugin;
+        int index = -1;
+        Curve curve;
+        float last = -1.0f; // what was last sent, so a flat stretch sends nothing
+    };
+    std::vector<ParameterCurve> parameterCurves; // the instrument's and the inserts' parameters
+
     // Pan, after the inserts: a mono signal is placed with the -3 dB pan law, a stereo one
     // balanced. monoAtPan: still mono there (no insert turned it stereo).
     bool monoAtPan = false;
@@ -168,6 +182,7 @@ struct TrackPlay
         int bus = -1;
         float gain = 1.0f;
         bool pre = false; // before the fader: the track's volume doesn't change it (mute does)
+        Curve curve;      // its level automation, in dB
         std::shared_ptr<RouteDelay> delay; // delay compensation, when this route needs it
     };
 
@@ -200,6 +215,7 @@ struct Graph
     int numBuses = 0;
     ClickSettings click;
     float mixGain = 1.0f;
+    Curve mixCurve; // the mix volume's automation, in dB
     double bpm = 120.0;
     int timeSigNum = 4, timeSigDen = 4;
 
@@ -314,6 +330,87 @@ inline void toMono (const TrackPlay& tp, float* left, float* right, int n)
     juce::FloatVectorOperations::add (left, right, n);
     juce::FloatVectorOperations::multiply (left, 0.5f, n);
     juce::FloatVectorOperations::copy (right, left, n);
+}
+
+// Automation --------------------------------------------------------------------------------
+inline bool mixerAutomated (const TrackPlay& tp)
+{
+    if (! tp.volumeCurve.empty() || ! tp.panCurve.empty() || ! tp.muteCurve.empty())
+        return true;
+
+    for (const auto& s : tp.sends)
+        if (! s.curve.empty())
+            return true;
+
+    return false;
+}
+
+// The track's fader, pan, mute and sends as their automation has them at pos.
+inline void automateMixer (TrackPlay& tp, juce::int64 pos)
+{
+    if (! tp.volumeCurve.empty())
+        tp.gain = juce::Decibels::decibelsToGain (tp.volumeCurve.at (pos), -96.0f);
+
+    if (! tp.panCurve.empty())
+        setPan (tp, tp.panCurve.at (pos));
+
+    if (! tp.muteCurve.empty())
+        tp.audible = tp.soloAudible && tp.muteCurve.at (pos) < 0.5f;
+
+    for (auto& s : tp.sends)
+        if (! s.curve.empty())
+            s.gain = juce::Decibels::decibelsToGain (s.curve.at (pos), -96.0f);
+}
+
+// The instrument's and effects' automated parameters, as they are at pos (sent only when they
+// change). Before the plugins run for the block. In AudioEngine.cpp.
+void automatePlugins (TrackPlay&, juce::int64 pos);
+
+// Pan, sends, fader and output (panTrack then routeTrack), with the mixer's automation: an
+// automated track goes in steps of automationStep samples, each at its start's values, so a
+// ride is smooth however big the block. Shared by live playback and bounces.
+inline void mixTrack (TrackPlay& tp, juce::int64 pos, float* left, float* right, int n, float* const* buses, int numBuses,
+                      float* mixL, float* mixR, bool live = false)
+{
+    if (! mixerAutomated (tp))
+    {
+        panTrack (tp, left, right, n);
+        routeTrack (tp, left, right, n, buses, mixL, mixR, live);
+        return;
+    }
+
+    std::array<float*, Graph::maxBuses * 2> from {};
+
+    for (int done = 0; done < n; done += automationStep)
+    {
+        const int len = juce::jmin (automationStep, n - done);
+        automateMixer (tp, pos + done);
+
+        for (int b = 0; b < juce::jmin (numBuses, Graph::maxBuses) * 2; ++b)
+            from[(size_t) b] = buses[b] + done;
+
+        panTrack (tp, left + done, right + done, len);
+        routeTrack (tp, left + done, right + done, len, from.data(), mixL + done, mixR + done, live);
+    }
+}
+
+// The mix volume (with its automation) on the mix bus.
+inline void applyMixGain (const Graph& g, juce::int64 pos, float* left, float* right, int n)
+{
+    if (g.mixCurve.empty())
+    {
+        juce::FloatVectorOperations::multiply (left, g.mixGain, n);
+        juce::FloatVectorOperations::multiply (right, g.mixGain, n);
+        return;
+    }
+
+    for (int done = 0; done < n; done += automationStep)
+    {
+        const int len = juce::jmin (automationStep, n - done);
+        const auto gain = juce::Decibels::decibelsToGain (g.mixCurve.at (pos + done), -96.0f);
+        juce::FloatVectorOperations::multiply (left + done, gain, len);
+        juce::FloatVectorOperations::multiply (right + done, gain, len);
+    }
 }
 
 // Adds a sample track's hits for [pos, pos + n) into its bus. Like clips, it depends only on

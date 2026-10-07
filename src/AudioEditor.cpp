@@ -614,6 +614,13 @@ private:
 
     void mouseUp (const juce::MouseEvent&) override
     {
+        // A moved clip takes its automation with it (in the same undo step).
+        if (drag == Drag::move && dragged.isValid() && (juce::int64) dragged[ids::start] != origStart && app.session != nullptr)
+        {
+            const auto spb = app.session->samplesPerBeat();
+            app.moveAutomation (track, (double) origStart / spb, (double) origLength / spb, (double) (juce::int64) dragged[ids::start] / spb);
+        }
+
         drag = Drag::none;
         dragged = {};
         repaint();

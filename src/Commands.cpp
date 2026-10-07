@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -760,6 +760,40 @@ Result App::execute (const juce::String& line)
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
     if (v == "bv")                 return startBounce (p.args, true);
+
+    // Automation: "2 lane cutoff" puts a lane for a parameter under track 2 (and goes to it);
+    // "pt -6" puts a point at the cursor (or the selection at that level) on the lane you're on.
+    if (v == "lane")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            return laneByName (p.tracks.front(), p.rest);
+
+        return onTopLane() || mixFocused() ? laneByName (-1, p.rest) : laneByName (focused, p.rest);
+    }
+
+    // Controllers: "map" maps the next knob moved to the parameter the track shows ("map 74"
+    // names it, and moves it off any other lane); "unmap" clears them all ("unmap 74" one, "unmap lane"
+    // the lane you're on); "aw" (shift+W) records mapped controllers while playing
+    // (touch). Not "write": w is a hotkey on an empty line.
+    if (v == "auto")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            focusTrack (p.tracks.front());
+
+        return openAutoPanel();
+    }
+
+    if (v == "map")    return learnControl (p.rest.trim());
+    if (v == "unmap")  return unmapControl (p.rest.trim());
+    if (v == "aw")     return setWrite (p.rest.trim());
+
+    if (v == "pt")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            focusTrack (p.tracks.front());
+
+        return setAutomation (p.rest);
+    }
     if (v == "bounces")            return revealBounces (p.args[0].toLowerCase());
     if (v == "video")              return videoCommand (p.args, p.rest.trim());
     if (v == "import" || v == "imp")

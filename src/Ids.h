@@ -20,6 +20,8 @@ TAW_ID (NOTE) // in a MIDICLIP: one MIDI note (version 2 kept them on the track)
 TAW_ID (CC)   // in a MIDICLIP: a controller, pitch bend or pressure change
 TAW_ID (SEND) // a track's send to a bus: one of five slots, a to e
 TAW_ID (INSERT) // an effect plugin in one of a track's five insert slots, a to e
+TAW_ID (AUTO)   // an automation lane, on a TRACK (or on the SESSION: the mix's volume); its POINTs
+TAW_ID (POINT)  // in an AUTO: a value (val) at a beat on the timeline
 
 TAW_ID (version)
 TAW_ID (name)
@@ -80,6 +82,10 @@ TAW_ID (monitor)
 TAW_ID (gainDb)
 TAW_ID (pan)      // TRACK: -1 (left) to 1 (right); absent = centre
 TAW_ID (channels) // TRACK: 1 (mono) or 2 (stereo); absent = from what it plays (a stereo clip or sample: stereo)
+
+TAW_ID (param) // AUTO: what it controls (AutomationTarget: "vol", "pan", "mute", "send a", "inst/<id>", "fx a/<id>")
+TAW_ID (lanes)      // TRACK: its automation lanes are open under it
+TAW_ID (laneParams) // TRACK: what its lanes show, in order (params, one per line); absent = its AUTO lanes
 
 TAW_ID (file)
 TAW_ID (start)  // CLIP: timeline position, samples

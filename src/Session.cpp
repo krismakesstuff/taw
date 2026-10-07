@@ -316,6 +316,43 @@ juce::ValueTree Session::insert (const juce::ValueTree& track, int slot)
     return {};
 }
 
+juce::ValueTree Session::automation (const juce::ValueTree& owner, const juce::String& param)
+{
+    for (const auto& c : owner)
+        if (c.hasType (ids::AUTO) && c[ids::param].toString() == param)
+            return c;
+
+    return {};
+}
+
+std::vector<juce::ValueTree> Session::automations (const juce::ValueTree& owner)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : owner)
+        if (c.hasType (ids::AUTO))
+            out.push_back (c);
+
+    return out;
+}
+
+std::vector<juce::ValueTree> Session::points (const juce::ValueTree& lane)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : lane)
+        if (c.hasType (ids::POINT))
+            out.push_back (c);
+
+    std::stable_sort (out.begin(), out.end(), [] (const auto& a, const auto& b) { return (double) a[ids::beat] < (double) b[ids::beat]; });
+    return out;
+}
+
+juce::ValueTree Session::makePoint (double beat, double value)
+{
+    return juce::ValueTree (ids::POINT, { { ids::beat, beat }, { ids::val, value } });
+}
+
 juce::ValueTree Session::track (int index) const
 {
     int n = 0;

@@ -7,6 +7,13 @@ void automatePlugins (TrackPlay& tp, juce::int64 pos)
 {
     for (auto& p : tp.parameterCurves)
     {
+        // A mapped parameter with no points, untouched: the plugin's own setting stands.
+        if (! p.curve.active())
+        {
+            p.last = -1.0f;
+            continue;
+        }
+
         const auto value = juce::jlimit (0.0f, 1.0f, p.curve.at (pos));
 
         if (value != p.last)

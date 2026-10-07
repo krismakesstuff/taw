@@ -3,6 +3,8 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <atomic>
+#include <memory>
 #include <vector>
 
 namespace taw
@@ -10,16 +12,36 @@ namespace taw
 // A parameter's automation as the audio thread plays it: points by timeline position
 // (samples), straight lines between them (held, for switches), flat before the first point and
 // after the last. Values are in the parameter's own unit (Automation::Target says which).
+// A controller moving a parameter right now (touch): while on, the parameter is this value,
+// whatever its curve says. Written by the message thread, read by the audio thread; kept
+// across graph rebuilds (the App owns it, each graph's curve points at it).
+struct LiveValue
+{
+    std::atomic<bool> on { false };
+    std::atomic<float> value { 0.0f };
+};
+
 struct Curve
 {
     std::vector<juce::int64> pos;
     std::vector<float> val;
     bool steps = false;
+    std::shared_ptr<LiveValue> live; // a mapped controller (null: none)
+    float base = 0.0f;               // with no points: the parameter's setting
 
-    bool empty() const noexcept { return pos.empty(); }
+    // Nothing that could ever change the parameter: no points, no controller.
+    bool empty() const noexcept { return pos.empty() && live == nullptr; }
+    // Something sets the parameter right now (plugins are left alone otherwise).
+    bool active() const noexcept { return ! pos.empty() || (live != nullptr && live->on.load (std::memory_order_relaxed)); }
 
     float at (juce::int64 p) const noexcept
     {
+        if (live != nullptr && live->on.load (std::memory_order_relaxed))
+            return live->value.load (std::memory_order_relaxed);
+
+        if (pos.empty())
+            return base;
+
         const auto it = std::upper_bound (pos.begin(), pos.end(), p);
 
         if (it == pos.begin())

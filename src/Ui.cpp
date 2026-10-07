@@ -466,6 +466,13 @@ void Ui::drawTransport (App& app)
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
     }
 
+    // Automation write armed: mapped controllers moved while playing are recorded.
+    if (app.writeOn)
+    {
+        gap();
+        add (L" \x25cf WRITE ", 231, rolling ? colour::rec : colour::recBg, true);
+    }
+
     // Plugins still loading after the session opened.
     if (! app.pluginQueue.empty())
     {
@@ -1329,11 +1336,17 @@ void Ui::drawTimeline (App& app)
                 }
             }
 
-            // What it is and its value where you are, over the start of the lane.
+            // What it is and its value where you are, over the start of the lane; its controller,
+            // and whether that's moving it right now.
             const auto at = rolling ? playhead : app.cursor;
+            const auto laneNode = Session::automation (t, view);
+            const auto control = app.controlText (laneNode);
+            const bool touched = laneNode.isValid() && app.isTouched (laneNode);
             const auto label = app.automationName (t, view, false) + "  "
                                + app.automationText (t, view, curve.empty() ? setting : (double) curve.at (at), false)
-                               + (curve.empty() ? juce::String (L"  \x00b7 no points: [ ] or pt <value>") : juce::String());
+                               + (control.isNotEmpty() ? L"  \x00b7 " + control : juce::String())
+                               + (touched ? juce::String (app.writeOn && rolling ? L" \x25cf writing" : L" \x00b7 moving") : juce::String())
+                               + (curve.pos.empty() && ! touched ? juce::String (L"  \x00b7 no points: [ ] pt <value> learn") : juce::String());
 
             for (int j = 0; j < label.length() && j + 1 < laneW; ++j)
                 canvas.put (laneX + 1 + j, y, (wchar_t) label[j], colour::text, canvas.at (laneX + 1 + j, y).bg);

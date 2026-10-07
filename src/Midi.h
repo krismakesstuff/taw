@@ -34,6 +34,42 @@ struct TimedMidi
 
 using MidiQueue = SpscQueue<MidiMsg, 1024>;
 
+// Controllers mapped to automation (or any, while learning a mapping) go to the message thread
+// instead of the instruments, each with the time it arrived.
+struct ControlMsg
+{
+    MidiMsg msg;
+    double ms = 0.0; // juce::Time::getMillisecondCounterHiRes when it arrived
+};
+
+using ControlQueue = SpscQueue<ControlMsg, 512>;
+
+struct ControlRouting
+{
+    std::array<std::atomic<juce::uint32>, 16 * 128 / 32> mapped {}; // a bit per channel and controller
+    std::atomic<bool> learning { false };
+
+    bool isMapped (int channel, int cc) const noexcept
+    {
+        const auto bit = channel * 128 + cc;
+        return (mapped[(size_t) (bit / 32)].load (std::memory_order_relaxed) >> (bit % 32) & 1u) != 0;
+    }
+
+    // Message thread: the controllers the session's lanes listen to (channel -1: any).
+    void set (const std::vector<std::pair<int, int>>& channelAndCc)
+    {
+        std::array<juce::uint32, 16 * 128 / 32> bits {};
+
+        for (const auto& [ch, cc] : channelAndCc)
+            for (int c = 0; c < 16; ++c)
+                if ((ch < 0 || ch == c) && cc >= 0 && cc < 128)
+                    bits[(size_t) ((c * 128 + cc) / 32)] |= 1u << ((c * 128 + cc) % 32);
+
+        for (size_t i = 0; i < bits.size(); ++i)
+            mapped[i].store (bits[i], std::memory_order_relaxed);
+    }
+};
+
 // An instrument track's notes and controllers in samples, ready to play. Built from the
 // session tree (where they're in beats) with the playback graph.
 struct Sequence
@@ -96,12 +132,26 @@ public:
     juce::StringArray names() const; // the open ones
     int eventsReceived() const noexcept { return received.load (std::memory_order_relaxed); }
 
+    // Automation's controllers: mapped ones (and every controller while learning) come here,
+    // not to the instruments. Read from the message thread.
+    ControlRouting& controlRouting() { return control; }
+    bool popControl (ControlMsg& out) noexcept
+    {
+        for (auto& q : controlQueues)
+            if (q.pop (out))
+                return true;
+
+        return false;
+    }
+
 private:
     struct Port;
 
     void update(); // on the ports' thread
 
     std::array<MidiQueue, maxPorts>& queues;
+    std::array<ControlQueue, maxPorts> controlQueues; // one per port, like queues
+    ControlRouting control;
     std::vector<std::unique_ptr<Port>> ports;     // changed only on the ports' thread, under lock
     juce::Array<juce::MidiDeviceInfo> available;  // likewise
     juce::StringArray off;                        // under lock

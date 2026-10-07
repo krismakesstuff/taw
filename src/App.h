@@ -693,7 +693,39 @@ public:
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one
 
+    // Controllers (MIDI CC) mapped to automation lanes: a lane's num (and ch, absent: any
+    // channel) say which. A mapped controller always moves its parameter (touch: while it
+    // moves, then back to the curve); with write on, playing, its moves are recorded.
+    Result learnControl (const juce::String& arg); // learn (the next controller moved) | learn 74 | learn off
+    Result unmapControl();                         // the shown lane's controller off
+    Result setWrite (const juce::String& arg);     // aw | aw on | aw off (shift+W)
+    bool writeOn = false; // not saved: arming automation is for now
+    bool isTouched (const juce::ValueTree& lane) const;
+    juce::String controlText (const juce::ValueTree& lane) const; // "CC 74", "CC 74 ch 2"
+
 private:
+    struct Touch
+    {
+        juce::ValueTree lane, owner;
+        std::shared_ptr<LiveValue> live;
+        double lastMs = 0.0;
+        std::vector<std::pair<juce::int64, float>> written; // this pass, while writing (timeline samples)
+    };
+    std::vector<Touch> touches;
+    mutable std::vector<std::pair<juce::ValueTree, std::shared_ptr<LiveValue>>> liveValues;
+    std::shared_ptr<LiveValue> liveValueFor (const juce::ValueTree& lane) const;
+    struct Learning
+    {
+        int track = -2; // -2: not learning; -1: the mix
+        juce::String param;
+    } learning;
+    void pollControls();
+    void handleControl (const ControlMsg&);
+    void releaseTouches (bool idleOnly = false); // into the lanes what was written; idleOnly: the ones let go of
+    void commitTouch (Touch&);
+    void keepAsSetting (const Touch&);
+    void syncControlMap();
+    double controlToValue (const juce::String& param, int cc) const;
     // The automated parameters of a plugin on the track: its "inst/" or "fx a/" lanes (prefix).
     void addParameterCurves (TrackPlay&, const juce::ValueTree& track, const std::shared_ptr<PluginSlot>&, const juce::String& prefix) const;
     bool cursorMovedWhileRolling = false;

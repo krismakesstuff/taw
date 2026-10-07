@@ -302,6 +302,7 @@ int App::run()
         collectFinishedTakes();
         drainLiveOverviews();
         drainRecordedMidi();
+        pollControls(); // controllers mapped to automation
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
         pollImport();
@@ -758,6 +759,7 @@ Result App::stop()
     if (recording)
         stopRecorders();
 
+    releaseTouches(); // what a controller wrote this pass goes into its lanes
     engine.stop();
     // Back to where play started, unless you moved the cursor during playback.
     setCursor (cursorMovedWhileRolling ? cursor : playStart);
@@ -1263,8 +1265,11 @@ const ClipData* App::audioFor (const juce::String& path)
 
 void App::rebuildGraph()
 {
-    if (session != nullptr)
-        engine.setGraph (buildGraph());
+    if (session == nullptr)
+        return;
+
+    engine.setGraph (buildGraph());
+    syncControlMap();
 }
 
 Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param) const
@@ -1278,6 +1283,25 @@ Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& pa
     const auto target = AutomationTarget::parse (param);
     const auto spb = session->samplesPerBeat();
     c.steps = target.kind == AutomationTarget::Kind::mute;
+
+    // A mapped controller can take it over while it moves; with no points, it otherwise plays
+    // the mixer's setting.
+    if (lane.hasProperty (ids::num))
+    {
+        c.live = liveValueFor (lane);
+
+        switch (target.kind)
+        {
+            case AutomationTarget::Kind::volume: c.base = (float) (double) owner[owner.hasType (ids::SESSION) ? ids::mixDb : ids::gainDb]; break;
+            case AutomationTarget::Kind::pan:    c.base = (float) (double) owner[ids::pan]; break;
+            case AutomationTarget::Kind::mute:   c.base = (bool) owner[ids::mute] ? 1.0f : 0.0f; break;
+            case AutomationTarget::Kind::send:
+                if (const auto send = Session::send (owner, target.slot); send.isValid())
+                    c.base = (float) (double) send[ids::db];
+                break;
+            default: break;
+        }
+    }
 
     for (const auto& p : Session::points (lane))
     {
@@ -3471,6 +3495,9 @@ void App::handleMainKey (const Key& k)
             // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
                 say (toggleEditor());
+            // shift+W: automation write (mapped controllers moved while playing are recorded).
+            else if (lineEmpty && k.ch == 'W' && session != nullptr)
+                say (setWrite ({}));
             // shift+A: the focused track's lane shows its clips, then each automation parameter.
             else if (lineEmpty && k.ch == 'A' && session != nullptr)
                 say (cycleView());

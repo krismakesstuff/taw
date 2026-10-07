@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "view", "pt", "learn", "unmap", "aw", "auto" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "learn", "unmap", "aw", "auto" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -761,17 +761,14 @@ Result App::execute (const juce::String& line)
     if (v == "b" || v == "bounce") return startBounce (p.args);
     if (v == "bv")                 return startBounce (p.args, true);
 
-    // Automation: "2 view cutoff" shows a parameter on the track's lane ("view clips" goes
-    // back); "pt -6" puts a point at the cursor (or the selection at that level) on the lane.
-    if (v == "view")
+    // Automation: "2 lane cutoff" puts a lane for a parameter under track 2 (and goes to it);
+    // "pt -6" puts a point at the cursor (or the selection at that level) on the lane you're on.
+    if (v == "lane")
     {
-        if (p.hasSelector)
-            return setView (p.tracks, p.rest);
+        if (p.hasSelector && ! p.tracks.empty())
+            return laneByName (p.tracks.front(), p.rest);
 
-        if (! selectedTracks().empty())
-            return setView (selectedTracks(), p.rest);
-
-        return onTopLane() || mixFocused() ? setView ({}, p.rest) : setView ({ focused }, p.rest);
+        return onTopLane() || mixFocused() ? laneByName (-1, p.rest) : laneByName (focused, p.rest);
     }
 
     // Controllers: "learn" maps the next knob moved to the parameter the track shows ("learn 74"

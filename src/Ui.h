@@ -85,15 +85,22 @@ public:
     {
         int laneX = 0, laneW = 0, rulerY = 0, tracksTop = 0, rowsPerTrack = 1, firstTrack = 0, tracks = 0;
         int videoY = -1; // the video row (-1: none)
+        std::vector<std::pair<int, int>> rows; // from tracksTop down: (track, automation lane; -1 its own row)
         double origin = 0.0, spc = 1.0; // column 0 starts at origin; a column is spc samples
         bool valid = false;
 
         bool inLane (int x) const { return valid && x >= laneX && x < laneX + laneW; }
-        // The track drawn on row y, or -1.
+        // The track drawn on row y (its own rows or its lanes), or -1.
         int trackAt (int y) const
         {
-            const int i = y >= tracksTop ? (y - tracksTop) / rowsPerTrack : -1;
-            return valid && i >= 0 && i < tracks ? firstTrack + i : -1;
+            const int i = y - tracksTop;
+            return valid && i >= 0 && i < (int) rows.size() ? rows[(size_t) i].first : -1;
+        }
+        // The automation lane on row y (-1: a track's own row, or none).
+        int laneAt (int y) const
+        {
+            const int i = y - tracksTop;
+            return valid && i >= 0 && i < (int) rows.size() ? rows[(size_t) i].second : -1;
         }
         // Where column x starts, in samples.
         juce::int64 positionAt (int x) const { return (juce::int64) std::llround (origin + 0.5 + (x - laneX) * spc); }

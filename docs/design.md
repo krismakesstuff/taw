@@ -737,12 +737,29 @@ can change over time.
   at the playhead less delay compensation, so it moves with what you hear. Bounces use the same
   functions and 512-sample blocks, so they step like playback. Mute automation decides
   muting where there is some (solo still applies).
-- **Seeing and editing:** a track's lane shows its clips or one parameter (`view`, shift+A
-  cycles): the curve as a filled graph up the track's rows, points in the accent colour, the
-  parameter and its value at the cursor over the lane. There, `pt <value>` puts a point at the
-  cursor (with a selection, the selection becomes that level and the curve outside it stays),
-  `[ ]` moves the selection's points (or the point at the cursor; makes one if needed), and
-  delete removes the selection's points. Each is one undo step.
+- **Lanes:** shift+A opens a track's automation lanes under its clip row (`lanes` on the
+  track; a track with none opens with a volume lane), two rows each on tall tracks, one on
+  short ones: the curve as a filled graph, points in the accent colour, and in the header the
+  parameter, its value at the cursor (the playhead when rolling) and its controller. Up and
+  down move through them (`focusedLane`); a click lands on one. Tracks are as tall as their
+  lanes make them, so the layout keeps a row map (`LaneMap::rows`) for the mouse. A lane stays
+  when its points are cleared, until it's removed (`auto`, delete).
+- **Editing:** on a lane, `pt <value>` puts a point at the cursor (with a selection, the
+  selection becomes that level and the curve outside it stays), `[ ]` moves the selection's
+  points (or the point at the cursor; makes one if needed), and delete removes the
+  selection's points. Each is one undo step. `lane cutoff` adds a lane by name.
+- **The list (`auto`):** everything the focused track can automate: its lanes first, the
+  mixer, then each plugin's automatable parameters (instrument, then inserts), with each
+  one's value, points and controller. Typing filters; enter adds (and goes to) a lane;
+  delete removes one.
+- **Controllers:** `learn` maps the next CC moved to the lane you're on (`learn 74` names
+  it; `unmap`), saved on the lane (`num`, `ch`). The MIDI inputs send mapped CCs (all CCs
+  while learning) to the message thread instead of the instruments (`ControlRouting`). A
+  moving controller sets a `LiveValue` the lane's curve reads, so you hear it at once (touch);
+  on a lane with no points a knob is a fader (where it's left becomes the setting). With write
+  on (shift+W, `aw`) and playing, its moves are recorded; 0.6 s after it stops moving, the
+  touch releases: its points replace that stretch (one undo step) and the curve glides back
+  over 0.25 s. A stop releases everything.
 
 ## Bouncing
 

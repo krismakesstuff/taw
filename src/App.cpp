@@ -2323,6 +2323,7 @@ void App::focusTrack (int index, bool extendSelection)
             trackAnchor = juce::jmin (focused, n - 1);
 
         focused = juce::jlimit (0, n - 1, index);
+        focusedLane = -1;
         return;
     }
 
@@ -2330,6 +2331,7 @@ void App::focusTrack (int index, bool extendSelection)
     topLane = TopLane::none;
     selectedMarker = {};
     focused = juce::jlimit (0, n, index); // n = the mix row
+    focusedLane = -1;
 }
 
 bool App::mixFocused() const
@@ -2341,6 +2343,21 @@ bool App::mixFocused() const
 // row. Down comes back the same way. Shift only ever selects tracks, so it stops at the first one.
 void App::focusUp (bool extendSelection)
 {
+    // Up through a track's lanes to its own row; from a track, onto the last lane of the one above.
+    if (topLane == TopLane::none && focusedLane >= 0 && ! extendSelection)
+    {
+        --focusedLane;
+        return;
+    }
+
+    if (topLane == TopLane::none && focused > 0 && ! extendSelection && ! lanesShown (focused - 1).empty())
+    {
+        const auto lanes = (int) lanesShown (focused - 1).size();
+        focusTrack (focused - 1);
+        focusedLane = lanes - 1;
+        return;
+    }
+
     if (topLane == TopLane::ruler)
         topLane = TopLane::markers;
     else if (topLane == TopLane::video)
@@ -2353,6 +2370,15 @@ void App::focusUp (bool extendSelection)
 
 void App::focusDown (bool extendSelection)
 {
+    // Down from a track's row through its open lanes, then on to the next track.
+    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused < session->numTracks()
+        && focusedLane + 1 < (int) lanesShown (focused).size())
+    {
+        ++focusedLane;
+        trackAnchor = -1;
+        return;
+    }
+
     if (topLane == TopLane::markers)
         topLane = TopLane::ruler, selectedMarker = {};
     else if (topLane == TopLane::ruler && videoLane())
@@ -2884,6 +2910,15 @@ void App::handleMouse (const Key& k)
     if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
         return;
 
+    // An automation lane: onto it, the cursor where it was clicked.
+    if (const auto lane = map.laneAt (k.y); lane >= 0)
+    {
+        focusTrack (track);
+        focusedLane = lane;
+        moveTo (juce::jmax<juce::int64> (0, map.positionAt (k.x)), k.shift);
+        return;
+    }
+
     if (k.doubleClick)
     {
         const auto [t0, t1] = map.span (k.x);
@@ -3252,7 +3287,7 @@ void App::handleMainKey (const Key& k)
     // Delete clears the time selection on the selected (or focused) tracks. So does backspace
     // with nothing typed (a Mac keyboard's delete key sends backspace).
     // On a track showing automation, delete removes the selection's points instead.
-    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && viewOf (focused).isNotEmpty();
+    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
 
     if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection() && onAutomation)
     {
@@ -3330,7 +3365,7 @@ void App::handleMainKey (const Key& k)
         // A track showing automation: [ ] move its points (or make one at the cursor).
         if (onAutomation && ! mixKey)
         {
-            beginEdit ("automation", "auto:" + juce::String (focused) + ":" + viewOf (focused));
+            beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
             say (nudgeAutomation (k.ch == ']' ? +1 : -1));
             return;
         }
@@ -3499,9 +3534,9 @@ void App::handleMainKey (const Key& k)
             // shift+W: automation write (mapped controllers moved while playing are recorded).
             else if (lineEmpty && k.ch == 'W' && session != nullptr)
                 say (setWrite ({}));
-            // shift+A: the focused track's lane shows its clips, then each automation parameter.
+            // shift+A: the focused track's automation lanes open under it (or close).
             else if (lineEmpty && k.ch == 'A' && session != nullptr)
-                say (cycleView());
+                say (toggleLanes());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

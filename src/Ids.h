@@ -84,7 +84,7 @@ TAW_ID (pan)      // TRACK: -1 (left) to 1 (right); absent = centre
 TAW_ID (channels) // TRACK: 1 (mono) or 2 (stereo); absent = from what it plays (a stereo clip or sample: stereo)
 
 TAW_ID (param) // AUTO: what it controls (AutomationTarget: "vol", "pan", "mute", "send a", "inst/<id>", "fx a/<id>")
-TAW_ID (view)  // TRACK: what its lane shows: absent = its clips; else an AUTO's param (that automation)
+TAW_ID (lanes) // TRACK: its automation lanes are open under it
 
 TAW_ID (file)
 TAW_ID (start)  // CLIP: timeline position, samples

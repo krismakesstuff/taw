@@ -59,11 +59,6 @@ juce::ValueTree App::automationOwner (int track) const
     return session == nullptr ? juce::ValueTree() : track < 0 ? session->tree() : session->track (track);
 }
 
-juce::String App::viewOf (int track) const
-{
-    return track >= 0 && session != nullptr && track < session->numTracks() ? session->track (track)[ids::view].toString() : juce::String();
-}
-
 // The plugin a lane's parameter belongs to (loading it if it isn't yet), or null.
 PluginSlot* App::automationPlugin (const juce::ValueTree& owner, const AutomationTarget& target, bool load)
 {
@@ -243,13 +238,11 @@ void App::writeLane (const juce::ValueTree& owner, const juce::String& param, st
 
     std::stable_sort (points.begin(), points.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
 
+    // An emptied lane stays under its track (and keeps its controller) until it's removed.
     if (points.empty())
     {
-        // A lane a controller is mapped to stays (empty), so the mapping does.
-        if (lane.isValid() && lane.hasProperty (ids::num))
+        if (lane.isValid())
             lane.removeAllChildren (um());
-        else if (lane.isValid())
-            parent.removeChild (lane, um());
 
         return;
     }
@@ -267,16 +260,16 @@ void App::writeLane (const juce::ValueTree& owner, const juce::String& param, st
 }
 
 // The track whose lane edits go to: the focused one (its view says which parameter).
-Result App::automationTrack (int& track, juce::String& param) const
+Result App::automationTrack (int& track, juce::String& param)
 {
     if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
         return Result::fail (L"automation is on a track \x2014 \x2193 to one");
 
     track = focused;
-    param = viewOf (track);
+    param = focusedLaneParam();
 
     if (param.isEmpty())
-        return Result::fail (L"the track shows its clips \x00b7 shift+A (or view vol) shows automation");
+        return Result::fail (L"\x2193 onto one of the track's lanes (shift+A opens them)");
 
     return Result::good();
 }
@@ -443,18 +436,20 @@ Result App::clearAutomation()
                          + (out.empty() ? juce::String (L" \x00b7 no automation left: it's back to its setting") : juce::String()));
 }
 
-// view clips | vol | pan | mute | send a | <plugin parameter name> : what the tracks' lanes show.
-Result App::setView (const std::vector<int>& tracks, const juce::String& whatIn)
+// lane vol | pan | mute | send a | <plugin parameter name>: a lane for it under the track
+// (opened, and focused); "lane ?" lists the plugins' parameters.
+Result App::laneByName (int trackIndex, const juce::String& whatIn)
 {
-    if (tracks.empty())
-        return Result::fail (L"view is for tracks \x2014 \x2193 to one");
+    if (session == nullptr || trackIndex < 0 || trackIndex >= session->numTracks())
+        return Result::fail (L"lanes are on tracks \x2014 \x2193 to one");
 
     const auto what = whatIn.trim().toLowerCase();
     juce::String param;
 
-    if (what.isEmpty() || what == "clips" || what == "notes" || what == "off")
-        param = {};
-    else if (what == "vol" || what == "volume")
+    if (what.isEmpty())
+        return toggleLanes();
+
+    if (what == "vol" || what == "volume")
         param = "vol";
     else if (what == "pan" || what == "mute")
         param = what;
@@ -463,7 +458,7 @@ Result App::setView (const std::vector<int>& tracks, const juce::String& whatIn)
     else
     {
         // A plugin parameter, by (part of) its name: the instrument's, then the inserts' in order.
-        const auto track = session->track (tracks.front());
+        const auto track = session->track (trackIndex);
         std::vector<std::pair<juce::String, PluginSlot*>> found;
 
         if (Session::isInstrumentTrack (track))
@@ -489,7 +484,7 @@ Result App::setView (const std::vector<int>& tracks, const juce::String& whatIn)
         if (param.isEmpty() && what != "?")
             param = partial;
 
-        // Not found (or "view ?"): what there is to show.
+        // Not found (or "lane ?"): what there is.
         if (param.isEmpty())
         {
             juce::StringArray names;
@@ -500,63 +495,109 @@ Result App::setView (const std::vector<int>& tracks, const juce::String& whatIn)
                         names.addIfNotAlreadyThere (p.name.toLowerCase());
 
             const auto shown = names.size() > 14 ? juce::StringArray (names.begin(), 14) : names;
-            return Result::fail ((what == "?" ? juce::String ("view: vol pan mute send a") : "no parameter called " + whatIn.trim() + L" \x00b7 view vol pan mute send a")
-                                 + (names.isEmpty() ? juce::String() : L" \x00b7 " + shown.joinIntoString (", ") + (names.size() > 14 ? L" \x2026 (" + juce::String (names.size()) + ")" : juce::String())));
+            return Result::fail ((what == "?" ? juce::String ("lane vol pan mute send a") : "no parameter called " + whatIn.trim() + L" \x00b7 lane vol pan mute send a")
+                                 + (names.isEmpty() ? juce::String() : L" \x00b7 " + shown.joinIntoString (", ") + (names.size() > 14 ? L" \x2026 (" + juce::String (names.size()) + ") \x00b7 auto lists them all" : juce::String())));
         }
     }
 
-    for (auto t : tracks)
-    {
-        auto track = session->track (t);
-
-        if (param.isEmpty())
-            track.removeProperty (ids::view, nullptr); // a view, not an edit
-        else
-            track.setProperty (ids::view, param, nullptr);
-    }
-
-    if (param.isEmpty())
-        return Result::good (trackList (tracks) + (tracks.size() == 1 ? " shows its clips" : " show their clips"));
-
-    const auto owner = automationOwner (tracks.front());
-    const auto lane = Session::automation (owner, param);
-    const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
-    return Result::good (trackList (tracks) + " shows " + automationName (owner, param)
-                         + (count == 0 ? juce::String (L" \x00b7 no points yet: pt <value> or [ ] add them")
-                                       : L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points")));
+    return showLane (trackIndex, param);
 }
 
-// shift+A: the focused track's lane through clips, volume, pan, mute, its sends and the
-// parameters it has automation for, and back to clips.
-Result App::cycleView()
+// The lanes under a track while they're open: its AUTO lanes in order, or a volume lane to
+// start with when it has none.
+std::vector<juce::String> App::lanesShown (int trackIndex) const
 {
-    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
-        return Result::fail (L"shift+A shows a track's automation \x2014 \x2193 to one");
+    if (session == nullptr || trackIndex < 0 || trackIndex >= session->numTracks())
+        return {};
 
-    const auto track = session->track (focused);
-    juce::StringArray views { "", "vol", "pan", "mute" };
+    const auto track = session->track (trackIndex);
 
-    for (int s = 0; s < Session::numSends; ++s)
-        if (Session::send (track, s).isValid())
-            views.add ("send " + Session::slotName (s).toLowerCase());
+    if (! (bool) track[ids::lanes])
+        return {};
+
+    std::vector<juce::String> out;
 
     for (const auto& lane : Session::automations (track))
-        views.addIfNotAlreadyThere (lane[ids::param].toString());
+        out.push_back (lane[ids::param].toString());
 
-    const auto next = views[(views.indexOf (viewOf (focused)) + 1) % views.size()];
-    auto t = session->track (focused);
+    if (out.empty())
+        out.push_back ("vol");
 
-    if (next.isEmpty())
+    return out;
+}
+
+// The lane under the focused track that edits go to (empty: on the track's own row).
+juce::String App::focusedLaneParam()
+{
+    if (session == nullptr || onTopLane() || mixFocused() || focusedLane < 0)
+        return {};
+
+    const auto lanes = lanesShown (focused);
+
+    if (lanes.empty())
+        return (focusedLane = -1), juce::String();
+
+    focusedLane = juce::jmin (focusedLane, (int) lanes.size() - 1); // undo can take lanes away
+    return lanes[(size_t) focusedLane];
+}
+
+// A lane for param under the track (made if it isn't there), the lanes open, the focus on it.
+Result App::showLane (int trackIndex, const juce::String& param)
+{
+    auto track = session->track (trackIndex);
+
+    if (! Session::automation (track, param).isValid())
     {
-        t.removeProperty (ids::view, nullptr); // a view, not an edit
-        return Result::good (trackList ({ focused }) + L" shows its clips \x00b7 shift+A again: its automation");
+        beginEdit ("lane");
+        track.appendChild (juce::ValueTree (ids::AUTO, { { ids::param, param } }), um());
     }
 
-    t.setProperty (ids::view, next, nullptr);
-    const auto lane = Session::automation (t, next);
-    const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
-    return Result::good (trackList ({ focused }) + " shows " + automationName (t, next)
-                         + (count == 0 ? juce::String (L" \x00b7 no points yet: [ ] or pt <value> add them") : L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points")));
+    track.setProperty (ids::lanes, true, nullptr); // open: a view, not an edit
+    focusTrack (trackIndex);
+    const auto lanes = lanesShown (trackIndex);
+    focusedLane = (int) (std::find (lanes.begin(), lanes.end(), param) - lanes.begin());
+
+    const auto lane = Session::automation (track, param);
+    const auto count = (int) Session::points (lane).size();
+    return Result::good (automationName (track, param) + " lane on " + trackList ({ trackIndex })
+                         + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet: [ ] or pt <value>"))
+                         + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 learn maps a knob to it")));
+}
+
+// A lane off the track, its points and controller with it (undo brings it back).
+Result App::removeLane (int trackIndex, const juce::String& param)
+{
+    auto track = session->track (trackIndex);
+    const auto lane = Session::automation (track, param);
+
+    if (! lane.isValid())
+        return Result::fail ("no " + automationName (track, param) + " lane");
+
+    const auto name = automationName (track, param);
+    beginEdit ("remove lane");
+    track.removeChild (lane, um());
+    return Result::good ("removed the " + name + L" lane \x00b7 ctrl+z brings it back");
+}
+
+// shift+A: the focused track's automation lanes, open under it or closed.
+Result App::toggleLanes()
+{
+    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+        return Result::fail (L"shift+A opens a track's automation lanes \x2014 \x2193 to one");
+
+    auto track = session->track (focused);
+    const bool open = ! (bool) track[ids::lanes];
+    track.setProperty (ids::lanes, open, nullptr); // a view, not an edit
+
+    if (! open)
+    {
+        focusedLane = -1;
+        return Result::good (trackList ({ focused }) + L" lanes closed \x00b7 shift+A opens them");
+    }
+
+    const auto lanes = lanesShown (focused);
+    return Result::good (trackList ({ focused }) + (lanes.size() == 1 ? " has 1 lane" : " has " + juce::String ((int) lanes.size()) + " lanes")
+                         + L" \x00b7 \x2193 onto one \x00b7 auto adds more \x00b7 shift+A closes them");
 }
 
 //==============================================================================
@@ -572,8 +613,8 @@ Result App::openAutoPanel()
     buildAutoPanelRows();
     autoPanelVisible = true;
 
-    // Start on what the track shows now.
-    const auto view = viewOf (focused);
+    // Start on the lane you're on.
+    const auto view = focusedLaneParam();
     autoPanelIndex = 0;
 
     for (int i = 0; i < (int) autoPanelRows.size(); ++i)
@@ -710,15 +751,20 @@ bool App::handleAutoPanelKey (const Key& k)
         case Key::Enter:
             if (autoPanelIndex >= 0 && autoPanelIndex < n && ! autoPanelRows[(size_t) autoPanelIndex].header)
             {
-                const auto param = autoPanelRows[(size_t) autoPanelIndex].param;
-                auto track = session->track (autoPanelTrack);
-                track.setProperty (ids::view, param, nullptr); // a view, not an edit
                 autoPanelVisible = false;
-                const auto lane = Session::automation (track, param);
-                const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
-                say (Result::good (trackList ({ autoPanelTrack }) + " shows " + automationName (track, param)
-                                   + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet"))
-                                   + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 learn maps a knob to it"))));
+                say (showLane (autoPanelTrack, autoPanelRows[(size_t) autoPanelIndex].param));
+            }
+            return true;
+        case Key::Delete:
+            // A lane the track has: off it (points, controller and all).
+            if (autoPanelIndex >= 0 && autoPanelIndex < n && ! autoPanelRows[(size_t) autoPanelIndex].header
+                && Session::automation (session->track (autoPanelTrack), autoPanelRows[(size_t) autoPanelIndex].param).isValid())
+            {
+                say (removeLane (autoPanelTrack, autoPanelRows[(size_t) autoPanelIndex].param));
+                const auto keep = autoPanelIndex;
+                buildAutoPanelRows();
+                autoPanelIndex = juce::jlimit (0, juce::jmax (0, (int) autoPanelRows.size() - 1), keep);
+                step (+1, autoPanelIndex < (int) autoPanelRows.size() && autoPanelRows[(size_t) autoPanelIndex].header ? 1 : 0);
             }
             return true;
         case Key::Char:
@@ -1068,10 +1114,6 @@ Result App::unmapControl()
     const auto was = controlText (lane);
     lane.removeProperty (ids::num, um());
     lane.removeProperty (ids::ch, um());
-
-    if (Session::points (lane).empty())
-        owner.removeChild (lane, um());
-
     return Result::good (was + " no longer moves " + automationName (owner, param));
 }
 

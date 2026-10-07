@@ -673,12 +673,20 @@ private:
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
     void writeLane (const juce::ValueTree& owner, const juce::String& param, std::vector<std::pair<double, double>> points);
-    Result automationTrack (int& track, juce::String& param) const; // the focused track and the parameter it shows
+    Result automationTrack (int& track, juce::String& param); // the focused track and the lane you're on
 
 public:
     // Automation (AutomationEdit.cpp). An owner is a track, or the session for the mix (-1).
     juce::ValueTree automationOwner (int track) const;
-    juce::String viewOf (int track) const; // what its lane shows: empty = clips, else a param
+    // Lanes: a track's AUTO lanes show under it while it's open (ids::lanes); focusedLane is
+    // the one you're on under the focused track (-1: the track's own row).
+    int focusedLane = -1;
+    std::vector<juce::String> lanesShown (int track) const; // params, in order (empty: closed)
+    juce::String focusedLaneParam();
+    Result showLane (int track, const juce::String& param);
+    Result removeLane (int track, const juce::String& param);
+    Result laneByName (int track, const juce::String& what); // "lane cutoff"
+    Result toggleLanes();                                    // shift+A
     // load false (drawing): a plugin not loaded yet isn't loaded for this; names and values fall back.
     PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
     double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
@@ -687,8 +695,6 @@ public:
     juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
     Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
     bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
-    Result setView (const std::vector<int>& tracks, const juce::String& what);
-    Result cycleView();                              // shift+A
     Result setAutomation (const juce::String& value); // pt <value>
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one

@@ -105,6 +105,32 @@ double App::staticValue (const juce::ValueTree& owner, const juce::String& param
     }
 }
 
+// The value right now, for the readouts: a controller moving it, else its automation where
+// you are (what you hear while playing, the cursor when stopped), else its setting.
+double App::currentValue (const juce::ValueTree& owner, const juce::String& param)
+{
+    if (session == nullptr)
+        return 0.0;
+
+    if (const auto lane = Session::automation (owner, param); lane.isValid())
+    {
+        for (const auto& t : touches)
+            if (t.lane == lane)
+                return t.live->value.load();
+
+        if (lane.getNumChildren() > 0)
+            return automationValue (owner, param, engine.isRolling() ? heardPlayhead() : cursor);
+    }
+
+    return staticValue (owner, param, false);
+}
+
+bool App::isAutomated (const juce::ValueTree& owner, const juce::String& param) const
+{
+    const auto lane = Session::automation (owner, param);
+    return lane.isValid() && (lane.getNumChildren() > 0 || isTouched (lane));
+}
+
 double App::automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos)
 {
     const auto lane = Session::automation (owner, param);

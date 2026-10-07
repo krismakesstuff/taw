@@ -1262,7 +1262,7 @@ void Ui::drawTimeline (App& app)
         }
 
         flag (flagX + 2, t[ids::solo], L'S', colour::play);
-        flag (flagX + 3, t[ids::mute], L'M', colour::meterYellow);
+        flag (flagX + 3, app.currentValue (t, "mute") >= 0.5, L'M', app.isAutomated (t, "mute") ? colour::note : colour::meterYellow);
 
         const bool sampleTrack = Session::isSampleTrack (t);
         const bool instrumentTrack = Session::isInstrumentTrack (t);
@@ -1541,10 +1541,13 @@ void Ui::drawTimeline (App& app)
                     // The level under the name; pre-fader sends in the accent colour.
                     if (rowsPerTrack > 2)
                     {
-                        const double db = send[ids::db];
-                        const auto level = db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
+                        const auto sendParam = "send " + Session::slotName (k).toLowerCase();
+                        const double db = app.currentValue (t, sendParam);
+                        const auto level = db <= -95.9 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
                         canvas.fill (x - 1, y + 2, ioSlotW, L' ', -1, cbg);
-                        canvas.text (x, y + 2, level, off ? colour::faint : (bool) send[ids::pre] ? colour::accent : colour::dim, cbg, false, ioSlotW - 1);
+                        canvas.text (x, y + 2, level,
+                                     off ? colour::faint : app.isAutomated (t, sendParam) ? colour::note : (bool) send[ids::pre] ? colour::accent : colour::dim,
+                                     cbg, false, ioSlotW - 1);
                     }
                 }
 
@@ -1558,14 +1561,15 @@ void Ui::drawTimeline (App& app)
         // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
         // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
-        drawVolume (meterX, y, t[ids::gainDb], bg);
+        drawVolume (meterX, y, app.currentValue (t, "vol"), bg, app.isAutomated (t, "vol"));
         drawDb (meterX + 12, y, m.hold, m.clipped, bg);
 
         // Pan under the volume (centre dim, like unity); "st" marks a stereo track.
         if (rowsPerTrack > 1)
         {
-            const double pan = t[ids::pan];
-            canvas.text (meterX, y + 1, App::panText (pan).paddedLeft (' ', 5), std::abs (pan) < 0.005 ? colour::dim : colour::text, bg);
+            const double pan = app.currentValue (t, "pan");
+            canvas.text (meterX, y + 1, App::panText (pan).paddedLeft (' ', 5),
+                         app.isAutomated (t, "pan") ? colour::note : std::abs (pan) < 0.005 ? colour::dim : colour::text, bg);
 
             if (app.trackIsStereo (t))
                 canvas.text (meterX + 12, y + 1, "   st", colour::faint, bg);
@@ -1710,7 +1714,7 @@ void Ui::drawTimeline (App& app)
                 canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
             canvas.text (4, y, "Mix", colour::text, bg, true);
-            drawVolume (meterX, y, s.tree()[ids::mixDb], bg);
+            drawVolume (meterX, y, app.currentValue (s.tree(), "vol"), bg, app.isAutomated (s.tree(), "vol"));
         }
 
         canvas.text (leftW - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
@@ -1730,11 +1734,11 @@ void Ui::drawTimeline (App& app)
     }
 }
 
-void Ui::drawVolume (int x, int y, double db, int bg)
+void Ui::drawVolume (int x, int y, double db, int bg, bool automated)
 {
-    // Unity is dim so a changed fader stands out.
+    // Unity is dim so a changed fader stands out; automation (or a knob) moving it, its colour.
     const auto text = formatDb (db).paddedLeft (' ', 5);
-    canvas.text (x, y, text, std::abs (db) < 0.05 ? colour::dim : colour::text, bg, std::abs (db) >= 0.05);
+    canvas.text (x, y, text, automated ? colour::note : std::abs (db) < 0.05 ? colour::dim : colour::text, bg, automated || std::abs (db) >= 0.05);
 }
 
 void Ui::drawBottom (App& app)

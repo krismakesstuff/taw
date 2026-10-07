@@ -694,6 +694,8 @@ public:
     PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
     double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
     double automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos);
+    double currentValue (const juce::ValueTree& owner, const juce::String& param); // what it is now (readouts)
+    bool isAutomated (const juce::ValueTree& owner, const juce::String& param) const; // points, or a knob moving it
     juce::String automationName (const juce::ValueTree& owner, const juce::String& param, bool load = true);
     juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
     Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples

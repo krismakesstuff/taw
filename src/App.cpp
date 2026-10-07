@@ -2377,9 +2377,10 @@ void App::focusUp (bool extendSelection)
 
 void App::focusDown (bool extendSelection)
 {
-    // Down from a track's row through its open lanes, then on to the next track.
-    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused < session->numTracks()
-        && focusedLane + 1 < (int) lanesShown (focused).size())
+    // Down from a track's row through its open lanes, then on to the next track (the Mix row:
+    // through the mix's lanes under it).
+    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused <= session->numTracks()
+        && focusedLane + 1 < (int) lanesShown (ioTrack()).size())
     {
         ++focusedLane;
         trackAnchor = -1;
@@ -3262,7 +3263,7 @@ void App::handleMainKey (const Key& k)
         // Alt moves the selected (or focused) tracks up or down a place (on a lane, its points).
         case Key::Up:
         case Key::Down:
-            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
+            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
             {
                 // On a lane: its points up or down (the selection's, or the one at the cursor).
                 beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
@@ -3300,7 +3301,7 @@ void App::handleMainKey (const Key& k)
     // Delete clears the time selection on the selected (or focused) tracks. So does backspace
     // with nothing typed (a Mac keyboard's delete key sends backspace).
     // On a track showing automation, delete removes the selection's points instead.
-    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
+    const bool onAutomation = session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
 
     if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection() && onAutomation)
     {

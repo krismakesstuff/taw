@@ -748,8 +748,17 @@ Result App::execute (const juce::String& line)
     if (onMix && (v == "fx" || v == "ins"))
         return editInserts ({ -1 }, p.args);
 
+    // mix lane / mix lane ceiling / mix auto: the mix's automation, under the Mix row.
+    if (p.mix && (v == "lane" || v == "auto"))
+    {
+        if (! mixFocused())
+            focusTrack (session->numTracks());
+
+        return v == "auto" ? openAutoPanel() : laneByName (-1, p.rest);
+    }
+
     if (p.mix)
-        return Result::fail ("the mix takes v and fx, e.g. mix v -3, mix fx limiter");
+        return Result::fail ("the mix takes v, fx, lane and auto, e.g. mix v -3, mix fx limiter, mix lane vol");
 
     // Global verbs ------------------------------------------------------------
     // rec records the armed tracks (ctrl+space does the same); "1 rec" arms exactly track 1

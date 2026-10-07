@@ -526,6 +526,8 @@ Stereo one. Typed names pick the same way.
   tracks' delay compensation; the mix volume's automation is read where the audio entering
   the mix is, and the inserts' parameter automation (`fx a/<id>` lanes on the session) the
   same. Always stereo. In code, track index -1 means the mix (`ioTrack`, as `automationOwner`).
+  The mix has automation lanes too, under the Mix row (shift+A there, `mix lane`, `mix auto`):
+  its volume and its inserts' parameters. The Mix row moves up to make room for them.
 - **Low latency mode** (`lowlat`, off by default, not saved): inserts with more latency than the
   session's limit (`lowlat 256`, in samples; also in `project`) sit out, so the mix stops
   running late while you record. They're drawn yellow and the transport shows `LOW LAT`.

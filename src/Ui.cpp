@@ -850,14 +850,18 @@ void Ui::drawTimeline (App& app)
     }
 
     // Tracks --------------------------------------------------------------------
-    const int tracksTop = rulerY + 1 + (videoY >= 0 ? 1 : 0), masterY = h - 6, tracksBottom = masterY - 1; // exclusive
     const int n = s.numTracks();
     // Fill view (f): the focused track takes all the rows; the others are an arrow away.
     const bool fill = app.fillView && ! app.onTopLane() && ! app.mixFocused() && n > 0;
-    const int rowsPerTrack = fill ? std::max (1, tracksBottom - tracksTop) : s.trackHeight(); // "height", per session
 
     // Open automation lanes go under their track, two rows each on tall tracks (fill hides them).
+    // The mix's go under the Mix row, which moves up to make room (leaving the tracks a few rows).
     const int laneRows = s.trackHeight() > 1 ? 2 : 1;
+    const int tracksTop = rulerY + 1 + (videoY >= 0 ? 1 : 0);
+    auto mixLanes = fill ? std::vector<juce::String>() : app.lanesShown (-1);
+    mixLanes.resize (std::min (mixLanes.size(), (size_t) std::max (0, (h - 6 - tracksTop - 4) / laneRows)));
+    const int masterY = h - 6 - (int) mixLanes.size() * laneRows, tracksBottom = masterY - 1; // exclusive
+    const int rowsPerTrack = fill ? std::max (1, tracksBottom - tracksTop) : s.trackHeight(); // "height", per session
     auto lanesOf = [&] (int track) { return fill ? std::vector<juce::String>() : app.lanesShown (track); };
     auto blockRows = [&] (int track) { return rowsPerTrack + (int) lanesOf (track).size() * laneRows; };
 
@@ -1582,23 +1586,17 @@ void Ui::drawTimeline (App& app)
     // Automation lanes, under the tracks that have them open: the curve as a filled graph (8
     // steps a row), points in the accent colour, a lane with no points its setting as a faint
     // level; on the left its name, value at the cursor (or playhead), and controller.
-    for (size_t row = 0; row < trackY.size(); ++row)
+    // i: the track (-1: the mix, its lanes under the Mix row); top: the first lane's row.
+    const auto at = rolling ? playhead : app.cursor;
+
+    auto drawLanes = [&] (int i, const juce::ValueTree& t, const std::vector<juce::String>& lanes, int top, bool selectedRow)
     {
-        const int i = app.trackScroll + (int) row;
-        const auto lanes = lanesOf (i);
-
-        if (lanes.empty())
-            continue;
-
-        const auto t = s.track (i);
-        const bool selectedRow = std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end();
-        const auto at = rolling ? playhead : app.cursor;
-
         for (int k = 0; k < (int) lanes.size(); ++k)
         {
             const auto& param = lanes[(size_t) k];
-            const int y = trackY[row] + rowsPerTrack + k * laneRows;
-            const bool focusedLane = i == app.focused && app.focusedLane == k && ! app.onTopLane() && ! app.mixFocused();
+            const int y = top + k * laneRows;
+            const bool onOwner = i < 0 ? app.mixFocused() : i == app.focused && ! app.mixFocused();
+            const bool focusedLane = onOwner && app.focusedLane == k && ! app.onTopLane();
             const int bg = focusedLane ? colour::focusBg : -1;
             const int laneBg = focusedLane ? colour::laneFocusBg : selectedRow ? colour::laneSelBg : -1;
             // The selection lights the lane you're on (a selection's edits go to it).
@@ -1695,6 +1693,14 @@ void Ui::drawTimeline (App& app)
             if (curve.pos.empty() && ! touched && focusedLane)
                 canvas.text (laneX + 1, y, L"no points: alt+\x2191\x2193 or pt <value> \x00b7 map: a knob runs it", colour::dim, canvas.at (laneX + 1, y).bg, false, laneW - 2);
         }
+    };
+
+    for (size_t row = 0; row < trackY.size(); ++row)
+    {
+        const int i = app.trackScroll + (int) row;
+
+        if (const auto lanes = lanesOf (i); ! lanes.empty())
+            drawLanes (i, s.track (i), lanes, trackY[row] + rowsPerTrack, std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end());
     }
 
     // The cursor's handle sits under the last track, clear of the ruler's numbers.
@@ -1761,6 +1767,8 @@ void Ui::drawTimeline (App& app)
         drawMeter (meterX + 6, y, 5, m.level, colour::meterBg);
         drawDb (meterX + 12, y, m.hold, m.clipped, bg);
     }
+
+    drawLanes (-1, s.tree(), mixLanes, masterY + 2, false);
 }
 
 void Ui::drawVolume (int x, int y, double db, int bg, bool automated)
@@ -1990,7 +1998,7 @@ void Ui::drawHelp (App&)
         { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
         { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
         { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
-        { Pair, L"shift+A", L"automation lanes under a track", L"auto", L"its parameters: enter adds a lane" },
+        { Pair, L"shift+A", L"automation lanes (on Mix: its own)", L"auto", L"its parameters: enter adds a lane" },
         { Pair, L"| on a lane", L"change what the lane shows", L"lane cutoff", L"...by name (on the track: adds)" },
         { Pair, L"pt -6", L"a point (selection: a level)", L"alt+\x2191\x2193  del", L"on a lane: move / remove points" },
         { Pair, L"map", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },
@@ -2222,14 +2230,14 @@ void Ui::drawAutoPanel (App& app)
     for (int y = 0; y < boxH; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
-    if (app.autoPanelTrack < 0 || app.autoPanelTrack >= app.session->numTracks())
+    if (app.autoPanelTrack < -1 || app.autoPanelTrack >= app.session->numTracks())
         return;
 
-    const auto track = app.session->track (app.autoPanelTrack);
+    const auto track = app.automationOwner (app.autoPanelTrack); // -1: the mix
     const auto shownLanes = app.lanesShown (app.autoPanelTrack);
     int x = canvas.text (x0 + 2, y0 + 1, "AUTOMATION", colour::text, bg, true);
     const auto laneNow = app.autoPanelLane >= 0 && app.autoPanelLane < (int) shownLanes.size() ? shownLanes[(size_t) app.autoPanelLane] : juce::String();
-    canvas.text (x + 1, y0 + 1, "track " + juce::String (app.autoPanelTrack + 1) + " " + track[ids::name].toString()
+    canvas.text (x + 1, y0 + 1, (app.autoPanelTrack < 0 ? juce::String ("the mix") : "track " + juce::String (app.autoPanelTrack + 1) + " " + track[ids::name].toString())
                                     + (laneNow.isNotEmpty() ? L" \x00b7 lane " + juce::String (app.autoPanelLane + 1) + " shows " + app.automationName (track, laneNow, false) : juce::String()),
                  colour::dim, bg, false, boxW - 16);
 

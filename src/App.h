@@ -715,6 +715,7 @@ public:
     Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
     bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
     Result setAutomation (const juce::String& value); // pt <value>
+    Result setAutomationValue (int track, const juce::String& param, double value);
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one
 

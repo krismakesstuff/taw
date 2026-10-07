@@ -700,6 +700,21 @@ public:
     Result unmapControl();                         // the shown lane's controller off
     Result setWrite (const juce::String& arg);     // aw | aw on | aw off (shift+W)
     bool writeOn = false; // not saved: arming automation is for now
+
+    // The automation list ("auto"): everything the focused track can automate, with what's
+    // automated and mapped already; typing filters, enter shows it on the track.
+    struct AutoRow
+    {
+        juce::String param, name; // a header row: name only
+        bool header = false;
+    };
+    bool autoPanelVisible = false;
+    int autoPanelTrack = -1, autoPanelIndex = 0;
+    juce::String autoPanelFilter;
+    std::vector<AutoRow> autoPanelRows; // as filtered
+    Result openAutoPanel();
+    void buildAutoPanelRows();
+    bool handleAutoPanelKey (const Key&);
     bool isTouched (const juce::ValueTree& lane) const;
     juce::String controlText (const juce::ValueTree& lane) const; // "CC 74", "CC 74 ch 2"
 

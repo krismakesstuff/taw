@@ -313,7 +313,8 @@ void Ui::drawMain (App& app)
     drawBottom (app);
 
     // A box over the timeline takes the clicks out of it.
-    if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.midiPanelVisible || app.settingsVisible)
+    if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
+        || app.settingsVisible)
         laneMap.valid = false;
 
     if (app.helpVisible)
@@ -324,6 +325,8 @@ void Ui::drawMain (App& app)
         drawBusPicker (app);
     else if (app.trackMenuVisible && app.session != nullptr)
         drawTrackMenu (app);
+    else if (app.autoPanelVisible && app.session != nullptr)
+        drawAutoPanel (app);
     else if (app.midiPanelVisible && app.midiInputs != nullptr)
         drawMidiPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
@@ -2071,6 +2074,91 @@ void Ui::drawTrackMenu (App& app)
     }
 
     canvas.text (x0 + 2, y0 + boxH - 2, L"a letter, or \x2191\x2193 enter \x00b7 esc", colour::dim, bg, false, boxW - 4);
+}
+
+// The automation list: a track's parameters by section (what's automated, the mixer, each
+// plugin), each with its value at the cursor, its points and its controller; the filter typed
+// so far on top. Scrolls to keep the chosen row in view.
+void Ui::drawAutoPanel (App& app)
+{
+    const auto& rows = app.autoPanelRows;
+    const int w = canvas.width(), h = canvas.height();
+    const int boxW = std::min (w - 4, 78), boxH = std::max (8, h - 2);
+    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+    const int listTop = y0 + 4, listRows = boxH - 7;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    if (app.autoPanelTrack < 0 || app.autoPanelTrack >= app.session->numTracks())
+        return;
+
+    const auto track = app.session->track (app.autoPanelTrack);
+    const auto view = track[ids::view].toString();
+    int x = canvas.text (x0 + 2, y0 + 1, "AUTOMATION", colour::text, bg, true);
+    canvas.text (x + 1, y0 + 1, "track " + juce::String (app.autoPanelTrack + 1) + " " + track[ids::name].toString(), colour::dim, bg, false, boxW - 16);
+
+    // The filter, like a command line.
+    x = canvas.text (x0 + 2, y0 + 2, "find: ", colour::dim, bg);
+    x = canvas.text (x, y0 + 2, app.autoPanelFilter, colour::text, bg);
+    canvas.put (x, y0 + 2, L' ', -1, colour::text);
+
+    if (rows.empty())
+        canvas.text (x0 + 3, listTop, app.autoPanelFilter.isEmpty() ? juce::String ("nothing to automate") : "nothing matches " + app.autoPanelFilter, colour::dim, bg);
+
+    // Keep the chosen row in view, with its section's header when there's room.
+    static int scroll = 0;
+    scroll = juce::jlimit (0, juce::jmax (0, (int) rows.size() - listRows), scroll);
+
+    if (app.autoPanelIndex < scroll + 1)
+        scroll = juce::jmax (0, app.autoPanelIndex - 1);
+    if (app.autoPanelIndex >= scroll + listRows)
+        scroll = app.autoPanelIndex - listRows + 1;
+
+    const auto at = app.engine.isRolling() ? app.heardPlayhead() : app.cursor;
+
+    for (int r = 0; r < listRows && scroll + r < (int) rows.size(); ++r)
+    {
+        const auto& row = rows[(size_t) (scroll + r)];
+        const int y = listTop + r;
+
+        if (row.header)
+        {
+            canvas.text (x0 + 2, y, row.name, colour::accent, bg, true, boxW - 4);
+            continue;
+        }
+
+        const bool chosen = scroll + r == app.autoPanelIndex;
+        const int rowBg = chosen ? colour::selBg : bg;
+        canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+
+        if (chosen)
+            canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+
+        // Shown on the track now: a dot.
+        if (row.param == view)
+            canvas.put (x0 + 3, y, L'\x25cf', colour::accent, rowBg);
+
+        canvas.text (x0 + 5, y, row.name, colour::text, rowBg, chosen, 30);
+
+        const auto lane = Session::automation (track, row.param);
+        const auto points = lane.isValid() ? (int) Session::points (lane).size() : 0;
+        const auto value = app.automationText (track, row.param, app.automationValue (track, row.param, at), false);
+        canvas.text (x0 + 36, y, value, colour::dim, rowBg, false, 16);
+
+        if (points > 0)
+            canvas.text (x0 + 53, y, juce::String (points) + (points == 1 ? " pt" : " pts"), colour::note, rowBg, false, 9);
+
+        if (lane.hasProperty (ids::num))
+            canvas.text (x0 + 63, y, app.controlText (lane), colour::accent, rowBg, false, boxW - 65);
+    }
+
+    if ((int) rows.size() > listRows)
+        canvas.text (x0 + boxW - 12, y0 + 1, juce::String (scroll + 1) + "-" + juce::String (juce::jmin ((int) rows.size(), scroll + listRows)) + "/"
+                                                 + juce::String ((int) rows.size()), colour::faint, bg);
+
+    canvas.text (x0 + 2, y0 + boxH - 2, L"type to find \x00b7 \x2191\x2193 pgup pgdn \x00b7 enter shows it on the track (then learn maps a knob) \x00b7 esc",
+                 colour::dim, bg, false, boxW - 4);
 }
 
 // Every MIDI input: on or off, whether it opened, and what it last sent (lit while it's sending).

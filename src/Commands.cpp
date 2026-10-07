@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "view", "pt", "learn", "unmap", "aw" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "view", "pt", "learn", "unmap", "aw", "auto" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -777,6 +777,14 @@ Result App::execute (const juce::String& line)
     // Controllers: "learn" maps the next knob moved to the parameter the track shows ("learn 74"
     // names it); "unmap" lets it go; "aw" (shift+W) records mapped controllers while playing
     // (touch). Not "write": w is a hotkey on an empty line.
+    if (v == "auto")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            focusTrack (p.tracks.front());
+
+        return openAutoPanel();
+    }
+
     if (v == "learn")  return learnControl (p.rest.trim());
     if (v == "unmap")  return unmapControl();
     if (v == "aw")     return setWrite (p.rest.trim());

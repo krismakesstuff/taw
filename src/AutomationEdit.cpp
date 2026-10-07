@@ -560,6 +560,180 @@ Result App::cycleView()
 }
 
 //==============================================================================
+// The automation list
+
+Result App::openAutoPanel()
+{
+    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+        return Result::fail (L"auto lists a track's parameters \x2014 \x2193 to one");
+
+    autoPanelTrack = focused;
+    autoPanelFilter.clear();
+    buildAutoPanelRows();
+    autoPanelVisible = true;
+
+    // Start on what the track shows now.
+    const auto view = viewOf (focused);
+    autoPanelIndex = 0;
+
+    for (int i = 0; i < (int) autoPanelRows.size(); ++i)
+        if (! autoPanelRows[(size_t) i].header && autoPanelRows[(size_t) i].param == view)
+        {
+            autoPanelIndex = i;
+            break;
+        }
+
+    while (autoPanelIndex < (int) autoPanelRows.size() && autoPanelRows[(size_t) autoPanelIndex].header)
+        ++autoPanelIndex;
+
+    return Result::good();
+}
+
+void App::buildAutoPanelRows()
+{
+    autoPanelRows.clear();
+
+    if (session == nullptr || autoPanelTrack < 0 || autoPanelTrack >= session->numTracks())
+        return;
+
+    const auto track = session->track (autoPanelTrack);
+    const auto filter = autoPanelFilter.trim().toLowerCase();
+    auto matches = [&] (const juce::String& name, const juce::String& group)
+    {
+        return filter.isEmpty() || name.toLowerCase().contains (filter) || group.toLowerCase().contains (filter);
+    };
+
+    auto section = [&] (const juce::String& title, const std::vector<std::pair<juce::String, juce::String>>& params)
+    {
+        std::vector<AutoRow> rows;
+
+        for (const auto& [param, name] : params)
+            if (matches (name, title))
+                rows.push_back ({ param, name, false });
+
+        if (rows.empty())
+            return;
+
+        autoPanelRows.push_back ({ {}, title, true });
+        autoPanelRows.insert (autoPanelRows.end(), rows.begin(), rows.end());
+    };
+
+    // What already has points or a controller, first.
+    {
+        std::vector<std::pair<juce::String, juce::String>> automated;
+
+        for (const auto& lane : Session::automations (track))
+            automated.push_back ({ lane[ids::param].toString(), automationName (track, lane[ids::param].toString()) });
+
+        section ("ON THIS TRACK", automated);
+    }
+
+    std::vector<std::pair<juce::String, juce::String>> mixer { { "vol", "volume" }, { "pan", "pan" }, { "mute", "mute" } };
+
+    for (int s = 0; s < Session::numSends; ++s)
+        if (Session::send (track, s).isValid())
+            mixer.push_back ({ "send " + Session::slotName (s).toLowerCase(), "send " + Session::slotName (s) });
+
+    section ("MIXER", mixer);
+
+    auto pluginSection = [&] (const juce::String& prefix, const juce::String& title, const AutomationTarget& target)
+    {
+        if (auto* plugin = automationPlugin (track, target))
+        {
+            std::vector<std::pair<juce::String, juce::String>> params;
+
+            for (const auto& p : plugin->parameters())
+                params.push_back ({ prefix + p.id, p.name });
+
+            section (title + " " + plugin->name().toUpperCase(), params);
+        }
+    };
+
+    if (Session::isInstrumentTrack (track))
+        pluginSection ("inst/", "INSTRUMENT", AutomationTarget::parse ("inst/x"));
+
+    for (int s = 0; s < Session::numSends; ++s)
+        if (Session::insert (track, s).isValid())
+        {
+            const auto letter = Session::slotName (s).toLowerCase();
+            pluginSection ("fx " + letter + "/", "FX " + Session::slotName (s), AutomationTarget::parse ("fx " + letter + "/x"));
+        }
+}
+
+bool App::handleAutoPanelKey (const Key& k)
+{
+    if (! autoPanelVisible)
+        return false;
+
+    const auto n = (int) autoPanelRows.size();
+
+    // Up and down skip the headers.
+    auto step = [&] (int direction, int times)
+    {
+        for (int t = 0; t < times; ++t)
+        {
+            auto i = autoPanelIndex + direction;
+
+            while (i >= 0 && i < n && autoPanelRows[(size_t) i].header)
+                i += direction;
+
+            if (i < 0 || i >= n)
+                break;
+
+            autoPanelIndex = i;
+        }
+    };
+
+    auto refilter = [&]
+    {
+        buildAutoPanelRows();
+        autoPanelIndex = 0;
+        step (+1, autoPanelRows.empty() || ! autoPanelRows.front().header ? 0 : 1);
+    };
+
+    switch (k.code)
+    {
+        case Key::Up:       step (-1, 1); return true;
+        case Key::Down:     step (+1, 1); return true;
+        case Key::PageUp:   step (-1, 10); return true;
+        case Key::PageDown: step (+1, 10); return true;
+        case Key::Escape:
+            if (autoPanelFilter.isNotEmpty())
+                autoPanelFilter.clear(), refilter();
+            else
+                autoPanelVisible = false;
+            return true;
+        case Key::Backspace:
+            autoPanelFilter = autoPanelFilter.dropLastCharacters (1);
+            refilter();
+            return true;
+        case Key::Enter:
+            if (autoPanelIndex >= 0 && autoPanelIndex < n && ! autoPanelRows[(size_t) autoPanelIndex].header)
+            {
+                const auto param = autoPanelRows[(size_t) autoPanelIndex].param;
+                auto track = session->track (autoPanelTrack);
+                track.setProperty (ids::view, param, nullptr); // a view, not an edit
+                autoPanelVisible = false;
+                const auto lane = Session::automation (track, param);
+                const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
+                say (Result::good (trackList ({ autoPanelTrack }) + " shows " + automationName (track, param)
+                                   + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet"))
+                                   + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 learn maps a knob to it"))));
+            }
+            return true;
+        case Key::Char:
+            if (k.ctrl || k.alt || k.ch < 32)
+                return false;
+
+            autoPanelFilter += juce::String::charToString ((juce::juce_wchar) k.ch);
+            refilter();
+            return true;
+        default:
+            return true;
+    }
+}
+
+//==============================================================================
 // Controllers
 
 namespace

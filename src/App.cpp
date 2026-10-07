@@ -3165,7 +3165,8 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
+    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
+        || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.

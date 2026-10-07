@@ -3520,6 +3520,9 @@ void App::handleMainKey (const Key& k)
                 }
             }
             // | (shift+\): open or close the plugin under the cursor, playing or not.
+            // On an automation lane: the parameters, to change what it shows.
+            else if (lineEmpty && k.ch == '|' && session != nullptr && focusedLaneParam().isNotEmpty())
+                say (openAutoPanel());
             else if (lineEmpty && k.ch == '|' && session != nullptr)
                 say (togglePluginHere());
             // f: the focused track fills the track area (a piano roll on instrument tracks).

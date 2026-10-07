@@ -1955,6 +1955,7 @@ void Ui::drawHelp (App&)
         { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
         { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
         { Pair, L"shift+A", L"automation lanes under a track", L"auto", L"its parameters: enter adds a lane" },
+        { Pair, L"| on a lane", L"change what the lane shows", L"lane cutoff", L"...by name (on the track: adds)" },
         { Pair, L"pt -6", L"a point (selection: a level)", L"[ ]  del", L"on a lane: move / remove points" },
         { Pair, L"learn", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
@@ -2190,7 +2191,10 @@ void Ui::drawAutoPanel (App& app)
     const auto track = app.session->track (app.autoPanelTrack);
     const auto shownLanes = app.lanesShown (app.autoPanelTrack);
     int x = canvas.text (x0 + 2, y0 + 1, "AUTOMATION", colour::text, bg, true);
-    canvas.text (x + 1, y0 + 1, "track " + juce::String (app.autoPanelTrack + 1) + " " + track[ids::name].toString(), colour::dim, bg, false, boxW - 16);
+    const auto laneNow = app.autoPanelLane >= 0 && app.autoPanelLane < (int) shownLanes.size() ? shownLanes[(size_t) app.autoPanelLane] : juce::String();
+    canvas.text (x + 1, y0 + 1, "track " + juce::String (app.autoPanelTrack + 1) + " " + track[ids::name].toString()
+                                    + (laneNow.isNotEmpty() ? L" \x00b7 lane " + juce::String (app.autoPanelLane + 1) + " shows " + app.automationName (track, laneNow, false) : juce::String()),
+                 colour::dim, bg, false, boxW - 16);
 
     // The filter, like a command line.
     x = canvas.text (x0 + 2, y0 + 2, "find: ", colour::dim, bg);
@@ -2251,7 +2255,8 @@ void Ui::drawAutoPanel (App& app)
         canvas.text (x0 + boxW - 12, y0 + 1, juce::String (scroll + 1) + "-" + juce::String (juce::jmin ((int) rows.size(), scroll + listRows)) + "/"
                                                  + juce::String ((int) rows.size()), colour::faint, bg);
 
-    canvas.text (x0 + 2, y0 + boxH - 2, L"type to find \x00b7 \x2191\x2193 pgup pgdn \x00b7 enter: a lane for it under the track \x00b7 del removes a lane \x00b7 esc",
+    canvas.text (x0 + 2, y0 + boxH - 2, laneNow.isNotEmpty() ? juce::String (L"type to find \x00b7 \x2191\x2193 pgup pgdn \x00b7 enter: the lane shows it \x00b7 del removes a lane \x00b7 esc")
+                                                             : juce::String (L"type to find \x00b7 \x2191\x2193 pgup pgdn \x00b7 enter: a lane for it under the track \x00b7 del removes a lane \x00b7 esc"),
                  colour::dim, bg, false, boxW - 4);
 }
 

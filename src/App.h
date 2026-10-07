@@ -682,6 +682,9 @@ public:
     // the one you're on under the focused track (-1: the track's own row).
     int focusedLane = -1;
     std::vector<juce::String> lanesShown (int track) const; // params, in order (empty: closed)
+    std::vector<juce::String> laneList (const juce::ValueTree& track) const; // ...open or not
+    void setLaneList (juce::ValueTree track, const std::vector<juce::String>&);
+    Result changeLane (int track, int index, const juce::String& param); // that lane shows param instead
     juce::String focusedLaneParam();
     Result showLane (int track, const juce::String& param);
     Result removeLane (int track, const juce::String& param);
@@ -716,6 +719,7 @@ public:
     };
     bool autoPanelVisible = false;
     int autoPanelTrack = -1, autoPanelIndex = 0;
+    int autoPanelLane = -1; // opened from this lane: enter changes what it shows (-1: adds a lane)
     juce::String autoPanelFilter;
     std::vector<AutoRow> autoPanelRows; // as filtered
     Result openAutoPanel();

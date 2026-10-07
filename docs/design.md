@@ -744,6 +744,12 @@ can change over time.
   down move through them (`focusedLane`); a click lands on one. Tracks are as tall as their
   lanes make them, so the layout keeps a row map (`LaneMap::rows`) for the mouse. A lane stays
   when its points are cleared, until it's removed (`auto`, delete).
+- **Lanes are views:** what a track's lanes show is its own list (`laneParams`, kept once a
+  lane is added or changed; before that, its AUTO lanes), apart from the automation itself.
+  On a lane, `|` (or `auto`) opens the list and enter makes that lane show another parameter
+  (`changeLane`; a lane already showing it swaps places); the old parameter's automation keeps
+  playing and stays in the list. `lane cutoff` does the same by name; from the track's row
+  both add a lane instead.
 - **Editing:** on a lane, `pt <value>` puts a point at the cursor (with a selection, the
   selection becomes that level and the curve outside it stays), `[ ]` moves the selection's
   points (or the point at the cursor; makes one if needed), and delete removes the

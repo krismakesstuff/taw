@@ -16,6 +16,7 @@ int busColour, chipText, busText; // buses' own colour (dark green); text on a t
 int gridBar; // bar lines; beats and finer use faint
 int laneFocusBg, laneSelBg; // empty lane cells on the focused / selected tracks (apart from clips)
 int clipBg, wave, liveWave, marker;
+int videoBg, videoText; // the video row's bar
 int note, blackKeyBg; // instrument notes; piano-roll rows of the black keys
 int ok, error, meterGreen, meterYellow, meterRed, meterBg;
 bool lightScreen = false; // light and grey: darker kind colours
@@ -76,6 +77,7 @@ void apply (const juce::String& theme)
         gridBar = 241;
         laneFocusBg = 248, laneSelBg = 146;
         clipBg = 245, wave = 18, liveWave = 124, marker = 90;
+        videoBg = 103, videoText = 231;
         note = 23, blackKeyBg = 247;
         ok = 22, error = 124, meterGreen = 28, meterYellow = 136, meterRed = 160, meterBg = 246;
     }
@@ -91,6 +93,7 @@ void apply (const juce::String& theme)
         gridBar = 245;
         laneFocusBg = 254, laneSelBg = 189;
         clipBg = 251, wave = 25, liveWave = 160, marker = 133;
+        videoBg = 146, videoText = 235;
         note = 30, blackKeyBg = 253;
         ok = 28, error = 160, meterGreen = 34, meterYellow = 172, meterRed = 160, meterBg = 252;
     }
@@ -106,6 +109,7 @@ void apply (const juce::String& theme)
         gridBar = 241;
         laneFocusBg = 234, laneSelBg = 17;
         clipBg = 236, wave = 110, liveWave = 210, marker = 170;
+        videoBg = 60, videoText = 189;
         note = 79, blackKeyBg = 233;
         ok = 114, error = 203, meterGreen = 35, meterYellow = 178, meterRed = 196, meterBg = 234;
     }
@@ -730,8 +734,113 @@ void Ui::drawTimeline (App& app)
         }
     }
 
+    // Video row ---------------------------------------------------------------------
+    // Under the ruler while there's a video: its length as a bar, with the video's own time
+    // along it (frame ticks once a frame is wide enough), and the timecode at the cursor.
+    const int videoY = app.videoLane() ? rulerY + 1 : -1;
+
+    if (videoY >= 0)
+    {
+        const bool focusedLane = app.topLane == App::TopLane::video;
+        const int bg = focusedLane ? colour::focusBg : -1;
+        const auto start = (double) app.videoStartPos(), end = start + (double) app.videoLength();
+        const auto spf = app.samplesPerFrame();
+        const auto fps = app.sampleRate() / spf;
+
+        canvas.fill (0, videoY, leftW, L' ', -1, bg);
+
+        if (focusedLane)
+            canvas.put (0, videoY, L'\x25b8', colour::accent, bg);
+
+        canvas.text (1, videoY, "video", focusedLane ? colour::dim : colour::faint, bg);
+        const auto tc = app.videoTimecode (rolling ? playhead : app.cursor);
+        canvas.text (leftW - 1 - tc.length(), videoY, tc, focusedLane ? colour::text : colour::dim, bg);
+        borders (videoY);
+
+        for (int c = 0; c < laneW; ++c)
+        {
+            const auto t0 = origin + c * spc, t1 = t0 + spc;
+            const bool inVideo = t1 > start && t0 < end;
+            const bool selected = focusedLane && inTimeSelection (t0, t1);
+            const int cellBg = selected ? (inVideo ? colour::selClipBg : colour::selBg) : inVideo ? colour::videoBg : focusedLane ? colour::laneFocusBg : -1;
+            canvas.put (laneX + c, videoY, L' ', colour::videoText, cellBg);
+        }
+
+        // Labels every so many seconds of the video, as far apart as a label needs; frame
+        // ticks between them when a frame is two columns or more.
+        const auto columnsPerSecond = app.sampleRate() / spc;
+        double every = 1.0;
+
+        for (const double e : { 1.0, 2.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0 })
+            if ((every = e) * columnsPerSecond >= 10.0)
+                break;
+
+        if (spf / spc >= 2.0)
+            for (int c = 0; c < laneW; ++c)
+            {
+                const auto t0 = origin + c * spc, t1 = t0 + spc;
+                const auto k = std::ceil ((t0 - start) / spf - 1e-9);
+
+                if (start + k * spf < t1 && start + k * spf >= start && start + k * spf < end)
+                    canvas.put (laneX + c, videoY, gridMark, colour::videoText, canvas.at (laneX + c, videoY).bg);
+            }
+
+        // The name first, then the labels where they fit.
+        const int startCol = juce::jmax (0, columnOf ((juce::int64) start));
+        int videoFree = 0;
+
+        if (startCol < laneW && end > origin)
+        {
+            const auto name = app.videoFile().getFileNameWithoutExtension();
+            const int endCol = juce::jmin (laneW, columnOf ((juce::int64) end));
+            const int room = juce::jmin (endCol - startCol - 1, 24);
+
+            if (room > 2)
+            {
+                for (int j = 0; j < juce::jmin (room, name.length()); ++j)
+                    canvas.put (laneX + startCol + 1 + j, videoY, (wchar_t) name[j], colour::videoText, canvas.at (laneX + startCol + 1 + j, videoY).bg, true);
+
+                videoFree = startCol + 2 + juce::jmin (room, name.length());
+            }
+        }
+
+        const auto firstLabel = std::ceil (juce::jmax (0.0, (origin - start) / app.sampleRate()) / every) * every;
+
+        for (auto secs = firstLabel; start + secs * app.sampleRate() < juce::jmin (end, origin + laneW * spc); secs += every)
+        {
+            const int c = columnOf ((juce::int64) std::llround (start + secs * app.sampleRate()));
+            const auto whole = (int) std::llround (secs);
+            const auto label = juce::String (whole / 60) + ":" + juce::String (whole % 60).paddedLeft ('0', 2)
+                               + (fps > 0.0 && spf / spc >= 2.0 ? ":00" : "");
+
+            if (c < videoFree || c < 0 || c + label.length() >= laneW)
+                continue;
+
+            for (int j = 0; j < label.length(); ++j)
+                canvas.put (laneX + c + j, videoY, (wchar_t) label[j], colour::videoText, canvas.at (laneX + c + j, videoY).bg);
+
+            videoFree = c + label.length() + 1;
+        }
+
+        // The playhead and cursor, as on the lanes: a colour behind a label, a line in the clear.
+        auto mark = [&] (int c, int markBg, int markFg)
+        {
+            if (c < 0 || c >= laneW)
+                return;
+
+            auto& cell = canvas.at (laneX + c, videoY);
+            const bool clear = cell.ch == L' ' || cell.ch == gridMark;
+            canvas.put (laneX + c, videoY, clear ? cursorMark : cell.ch, clear ? markFg : cell.fg, markBg, cell.bold);
+        };
+
+        if (rolling)
+            mark (playCol, colour::playheadBg, app.recording ? colour::rec : colour::play);
+        else
+            mark (cursorCol, colour::cursorBg, colour::accent);
+    }
+
     // Tracks --------------------------------------------------------------------
-    const int tracksTop = rulerY + 1, masterY = h - 6, tracksBottom = masterY - 1; // exclusive
+    const int tracksTop = rulerY + 1 + (videoY >= 0 ? 1 : 0), masterY = h - 6, tracksBottom = masterY - 1; // exclusive
     const int n = s.numTracks();
     // Fill view (f): the focused track takes all the rows; the others are an arrow away.
     const bool fill = app.fillView && ! app.onTopLane() && ! app.mixFocused() && n > 0;
@@ -746,7 +855,7 @@ void Ui::drawTimeline (App& app)
         app.trackScroll = focusRow - visible + 1;
 
     // Where things were drawn, for the mouse.
-    laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, app.trackScroll, std::min (visible, n - app.trackScroll), origin, spc, true };
+    laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, app.trackScroll, std::min (visible, n - app.trackScroll), videoY, origin, spc, true };
 
     // Loudness as shade density; these four blocks exist in every console font.
     static const wchar_t levels[] = L" \x2591\x2592\x2593\x2588";
@@ -1589,6 +1698,8 @@ void Ui::drawBottom (App& app)
     else if (rolling)
         hints = app.hasTimeSelection() ? L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 ctrl+v pastes at the cursor \x00b7 l loop \x00b7 shift \x2190\x2192 extend \x00b7 space stop"
                                        : L"space stop \x00b7 type commands (2m 3s l c) + enter \x00b7 enter alone returns \x00b7 ctrl+space punch in \x00b7 ~ marker \x00b7 [ ] volume \x00b7 \x2190\x2192 cursor, shift selects \x00b7 @17 seeks";
+    else if (app.topLane == App::TopLane::video)
+        hints = L"VIDEO  \x2190\x2192 a frame (hold to scrub) \x00b7 ctrl a second \x00b7 alt a beat \x00b7 shift selects \x00b7 tab its start / end \x00b7 click or drag scrubs \x00b7 bv bounces with picture \x00b7 video at moves it";
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
@@ -1670,6 +1781,7 @@ void Ui::drawHelp (App&)
         { Pair, L"video f", L"picture window (or drop one)", L"video", L"show / hide it" },
         { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
         { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
+        { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };

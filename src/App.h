@@ -433,7 +433,7 @@ public:
     std::vector<int> selectedTracks() const; // empty when no track selection
     std::vector<int> defaultTargets() const; // selection, else the focused track; every track from a top lane
     // Rows above the tracks you can move onto with up: there, time selections cover every track.
-    enum class TopLane { none, ruler, markers };
+    enum class TopLane { none, ruler, markers, video }; // video: under the ruler, while there's a video
     TopLane topLane = TopLane::none;
     bool onTopLane() const { return topLane != TopLane::none; }
 
@@ -648,6 +648,14 @@ public:
     Result videoCommand (const juce::StringArray& args, const juce::String& rest);
     juce::File videoFile() const; // the session's, resolved; none: no video
     juce::String videoStartText() const;
+    bool videoLane() const { return video != nullptr; } // the video row shows (under the ruler)
+    juce::int64 videoStartPos() const;                 // where its first frame is, samples
+    juce::int64 videoLength() const;                   // how long it is, samples
+    double samplesPerFrame() const;
+    juce::String videoTimecode (juce::int64 pos) const; // the video's own time there: m:ss:ff ("-" before it starts)
+    juce::int64 frameStart (juce::int64 pos) const;     // the first sample showing the frame at pos
+    Result stepFrame (int direction, bool second, bool extendSelection); // the video row's arrows
+    bool scrubbing = false; // a click on the video row: dragging moves the cursor (and the picture)
 
 private:
     // What the decoder thread's clock reads (it can't touch the session): set each frame.

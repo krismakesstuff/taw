@@ -84,6 +84,7 @@ public:
     struct LaneMap
     {
         int laneX = 0, laneW = 0, rulerY = 0, tracksTop = 0, rowsPerTrack = 1, firstTrack = 0, tracks = 0;
+        int videoY = -1; // the video row (-1: none)
         double origin = 0.0, spc = 1.0; // column 0 starts at origin; a column is spc samples
         bool valid = false;
 

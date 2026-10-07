@@ -1914,6 +1914,10 @@ void App::syncVideo()
     {
         video.reset();
         videoFailed.clear();
+
+        if (topLane == TopLane::video) // its row went with it
+            topLane = TopLane::ruler;
+
         return;
     }
 
@@ -1964,6 +1968,75 @@ void App::syncVideo()
     // It's only a view: the keyboard stays with taw.
     if (video->hasKeyboard())
         console.focusTerminal();
+}
+
+juce::int64 App::videoStartPos() const
+{
+    return session != nullptr ? (juce::int64) session->tree()[ids::videoStart] : 0;
+}
+
+juce::int64 App::videoLength() const
+{
+    return video != nullptr ? (juce::int64) std::llround (video->info().duration * sampleRate()) : 0;
+}
+
+double App::samplesPerFrame() const
+{
+    return sampleRate() / (video != nullptr && video->info().fps > 0.0 ? video->info().fps : 30.0);
+}
+
+// Frame k starts at start + k frames; its first sample is the one at or after that (the decoder
+// shows a frame from its timestamp on, so that sample shows it).
+juce::int64 App::frameStart (juce::int64 pos) const
+{
+    const auto spf = samplesPerFrame();
+    const auto start = videoStartPos();
+    auto k = std::floor ((double) (pos - start) / spf + 1.0e-9);
+
+    // pos can sit before its frame's first sample when frames don't fall on whole samples.
+    if (start + (juce::int64) std::ceil (k * spf - 1.0e-6) > pos)
+        k -= 1.0;
+
+    return start + (juce::int64) std::ceil (k * spf - 1.0e-6);
+}
+
+juce::String App::videoTimecode (juce::int64 pos) const
+{
+    if (video == nullptr)
+        return {};
+
+    const auto fps = video->info().fps;
+    const auto nominal = juce::jmax (1, juce::roundToInt (fps)); // non-drop: 29.97 counts in 30s
+    const auto frames = (juce::int64) std::floor ((double) (frameStart (pos) - videoStartPos()) / samplesPerFrame() + 0.5);
+    const auto a = std::abs (frames);
+    const auto secs = a / nominal;
+    auto tc = juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) + ":" + juce::String (a % nominal).paddedLeft ('0', 2);
+
+    if (secs >= 3600)
+        tc = juce::String (secs / 3600) + ":" + juce::String ((secs / 60) % 60).paddedLeft ('0', 2) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) + ":"
+             + juce::String (a % nominal).paddedLeft ('0', 2);
+
+    return frames < 0 ? "-" + tc : tc;
+}
+
+// The video row: a frame at a time (a second with ctrl), from the cursor or the selection's
+// moving end. Left from inside a frame goes to its start first.
+Result App::stepFrame (int direction, bool second, bool extendSelection)
+{
+    if (video == nullptr)
+        return Result::fail ("no video");
+
+    const auto spf = samplesPerFrame();
+    const auto start = videoStartPos();
+    const auto from = extendSelection && timeAnchor >= 0 ? timeHead : cursor;
+    const auto here = frameStart (from);
+    const auto k = std::llround ((double) (here - start) / spf);
+    const auto step = second ? (juce::int64) juce::jmax (1, juce::roundToInt (video->info().fps)) : (juce::int64) 1;
+    const auto target = direction > 0 ? k + step : (from > here ? k - (step - 1) : k - step);
+    const auto pos = start + (juce::int64) std::ceil ((double) target * spf - 1.0e-6);
+
+    moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, pos))), extendSelection); // not before the session
+    return Result::good();
 }
 
 juce::String App::videoStartText() const
@@ -2195,14 +2268,16 @@ bool App::mixFocused() const
     return session != nullptr && ! onTopLane() && focused >= session->numTracks();
 }
 
-// Up from the first track: the bar row, then the markers row. Down comes back the same way.
-// Shift only ever selects tracks, so it stops at the first one.
+// Up from the first track: the video row (when there's a video), the bar row, then the markers
+// row. Down comes back the same way. Shift only ever selects tracks, so it stops at the first one.
 void App::focusUp (bool extendSelection)
 {
     if (topLane == TopLane::ruler)
         topLane = TopLane::markers;
+    else if (topLane == TopLane::video)
+        topLane = TopLane::ruler;
     else if (topLane == TopLane::none && focused == 0 && ! extendSelection)
-        topLane = TopLane::ruler, trackAnchor = -1;
+        topLane = videoLane() ? TopLane::video : TopLane::ruler, trackAnchor = -1;
     else if (topLane == TopLane::none)
         focusTrack (focused - 1, extendSelection);
 }
@@ -2211,7 +2286,9 @@ void App::focusDown (bool extendSelection)
 {
     if (topLane == TopLane::markers)
         topLane = TopLane::ruler, selectedMarker = {};
-    else if (topLane == TopLane::ruler)
+    else if (topLane == TopLane::ruler && videoLane())
+        topLane = TopLane::video;
+    else if (topLane == TopLane::ruler || topLane == TopLane::video)
         topLane = TopLane::none, focused = 0;
     else
         focusTrack (focused + 1, extendSelection);
@@ -2599,6 +2676,19 @@ Result App::moveToNextClipEdge (bool extendSelection)
     if (topLane == TopLane::markers)
         return stepMarker (+1, extendSelection);
 
+    // On the video row: its start and end.
+    if (topLane == TopLane::video && video != nullptr)
+    {
+        consider (juce::jmax<juce::int64> (0, videoStartPos()));
+        consider (videoStartPos() + videoLength());
+
+        if (next < 0)
+            return Result::fail ("past the end of the video");
+
+        moveTo (next, extendSelection);
+        return Result::good();
+    }
+
     // Clip starts and ends on audio tracks; each hit on sample tracks.
     for (auto t : defaultTargets())
     {
@@ -2668,6 +2758,14 @@ void App::handleKey (const Key& k)
 
     if (k.code == Key::Mouse)
     {
+        if (k.drag) // only scrubbing uses drags so far
+        {
+            if (mode == Mode::Main)
+                handleMouse (k);
+
+            return;
+        }
+
         if (mode == Mode::Main && ! handleBrowserKey (k)) // the docked browser has its own clicks
             handleMouse (k);
 
@@ -2689,6 +2787,30 @@ void App::handleMouse (const Key& k)
 {
     const auto& map = ui.lanes();
     const int track = map.trackAt (k.y);
+
+    // The video row: a click puts the cursor on that frame (the picture goes there); dragging
+    // from it scrubs, wherever the mouse goes up or down.
+    if (k.drag)
+    {
+        if (scrubbing && session != nullptr && map.valid)
+        {
+            const auto x = juce::jlimit (map.laneX, map.laneX + map.laneW - 1, k.x);
+            moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, map.positionAt (x)))), k.shift);
+        }
+
+        return;
+    }
+
+    scrubbing = session != nullptr && ! k.right && map.inLane (k.x) && k.y == map.videoY && videoLane();
+
+    if (scrubbing)
+    {
+        topLane = TopLane::video;
+        trackAnchor = -1;
+        selectedMarker = {};
+        moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, map.positionAt (k.x)))), k.shift);
+        return;
+    }
 
     if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
         return;
@@ -2976,6 +3098,13 @@ void App::handleMainKey (const Key& k)
     // instrument picker takes typing too (it filters).
     if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
+
+    // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.
+    if (topLane == TopLane::video && session != nullptr && (k.code == Key::Left || k.code == Key::Right) && ! k.alt)
+    {
+        say (stepFrame (k.code == Key::Right ? +1 : -1, k.ctrl, k.shift));
+        return;
+    }
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
     if (topLane == TopLane::markers && session != nullptr)

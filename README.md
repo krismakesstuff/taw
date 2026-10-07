@@ -125,7 +125,9 @@ slate) moves it. `video offset 2` shows the picture two frames late, for a scree
 `video` shows or hides the window; `video remove` takes it out. The picture allows for what the
 audio device and plugin delay compensation add, so it matches what you hear. `bv` bounces the
 selection (or, with nothing selected, the whole video) as an MP4: the picture, frame for frame,
-with the mix. Windows only for now.
+with the mix. The video gets a row under the ruler showing its length and its own timecode: up
+from the first track gets you there, where the arrows step a frame (ctrl a second; hold one to
+scrub) and clicking or dragging along it scrubs the picture. Windows only for now.
 
 ## Roadmap
 

@@ -757,6 +757,15 @@ own, it shows the frame for where the playhead is, so it can't drift.
   physical pixels so painting is a copy. Its close button hides it until `video` or the next
   open (not saved: Windows sends every window the same close on shutdown). Its place is saved
   in the session (`videoWindow`).
+- **Video row:** a top lane under the ruler (`TopLane::video`) while a player is open: the
+  video's extent as a bar with its name, labels of the video's own time, frame ticks when a
+  frame is two columns or more, and the timecode at the cursor (non-drop m:ss:ff, negative
+  before the video) in the header. Up from the first track reaches it. Arrows step frames
+  (ctrl: seconds; alt keeps the beat), landing on each frame's first sample (`frameStart`:
+  the first sample the decoder shows that frame at); tab hops to its start and end; a click
+  puts the cursor on a frame and a drag scrubs (the Windows console reports moves with the
+  left button held as `Key::drag`, once per cell). Selections made there cover every track,
+  like the other top lanes.
 - **Bounce with picture (`bv`):** `Bounce` with `Format::video` feeds the mix to `VideoMuxer`,
   which re-encodes the picture (x264, CRF 18, the source's size and frame rate) rather than
   copying it, so a bounce can start on any frame. Output frame n is the frame the window would

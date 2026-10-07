@@ -37,6 +37,7 @@ struct Key
     // double-click (the first arrives as an ordinary press).
     int x = 0, y = 0;
     bool right = false, doubleClick = false;
+    bool drag = false; // moved with the left button held (Windows only so far)
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.
@@ -90,6 +91,7 @@ private:
     unsigned long oldInMode = 0, oldOutMode = 0;
     std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
     unsigned long buttonsDown = 0;    // mouse buttons down at the last event, to spot presses
+    int dragX = -1, dragY = -1;       // the cell a press or drag last reported
     void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
     double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
     void* held_by = nullptr;          // a plugin window keeping the keyboard (keyboardHeldBy)

@@ -407,6 +407,9 @@ public:
     // A message straight to a track's instrument, armed or not, never recorded: the MIDI editor
     // auditioning a note. Its note-offs are the sender's to send.
     void audition (int trackIndex, MidiMsg m) noexcept { auditions.push ({ trackIndex, m }); }
+    // The typing keyboard's notes (keys mode), as if from one more controller: armed tracks
+    // play them, and recording writes them down. Message thread only.
+    void playTyped (MidiMsg m) noexcept { typedMidi.push (m); }
     // Bumped whenever the device (re)starts: plugins then get prepared for its rate and block.
     int deviceGeneration() const noexcept { return generation.load(); }
     double deviceSampleRate() const noexcept { return liveRate.load(); }
@@ -460,6 +463,7 @@ private:
     void renderPreview (float* const* out, int numOut, int n) noexcept;
 
     std::array<MidiQueue, MidiInputs::maxPorts> midiIn;
+    MidiQueue typedMidi; // keys mode's notes (playTyped)
     SpscQueue<TimedMidi, 4096> recordedMidi;
     std::array<MidiMsg, 512> liveMidi; // this block's controller messages, audio thread only
 

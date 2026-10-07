@@ -5,12 +5,14 @@
 #include "AudioEditor.h"
 #include "Import.h"
 #include "Library.h"
+#include "LiveKeys.h"
 #include "MidiEditor.h"
 #include "Plugins.h"
 #include "Console.h"
 #include "Session.h"
 #include "Timing.h"
 #include "Ui.h"
+#include "Video.h"
 
 #include <functional>
 #include <map>
@@ -135,7 +137,7 @@ public:
     Result setClick (const juce::String& arg); // "" toggle | on | off | rec | always | <dB>
     juce::String clickStatus() const;
     Result setLoop (const juce::String& arg); // "" = loop the selection, or toggle | on | off
-    Result startBounce (const juce::StringArray& args);
+    Result startBounce (const juce::StringArray& args, bool withVideo = false); // withVideo: bv, an MP4 with the picture
     // New track per file at the cursor; with target >= 0, onto that track instead (a clip, or for
     // samples, the track's new sample).
     enum class ImportAs { audio, sample, autoByLength };
@@ -253,7 +255,9 @@ public:
     std::vector<juce::String> browserKinds() const;     // "all", then the kinds the library has
     std::vector<int> browserShown() const;              // the samples the badge and filter leave, list order
     std::pair<float, float> browserPosition (int sample) const; // on the map now showing, 0..1
-    Result startIndexing (const juce::StringArray& folders);
+    Result startIndexing (const juce::StringArray& folders);    // index <folder>...; index remove <folder>...
+    Result removeFromLibrary (const juce::StringArray& folders); // index remove
+    Result describeLibrary();                                    // library: its folders and how many samples each
     void pollIndexing();
     bool browserVisible = false;
     BrowserFocus browserFocus = BrowserFocus::kinds;
@@ -323,6 +327,10 @@ public:
     void openPluginPicker (int targetTrack, int effectSlot = -1); // effectSlot >= 0: effects, for that insert
     PluginCatalog plugins;
     std::unique_ptr<MidiInputs> midiInputs;
+
+    // Keys mode (ctrl+k): the typing keyboard plays the armed instrument tracks (LiveKeys.h).
+    LiveKeys liveKeys { [this] (MidiMsg m) { engine.playTyped (m); }, [this] (wchar_t ch) { return console.keyDown (ch); } };
+    Result toggleLiveKeys();
 
     // While recording: notes whose key is still down, drawn from where they started to the
     // playhead. Written to the track as NOTEs when the key comes up.
@@ -425,7 +433,7 @@ public:
     std::vector<int> selectedTracks() const; // empty when no track selection
     std::vector<int> defaultTargets() const; // selection, else the focused track; every track from a top lane
     // Rows above the tracks you can move onto with up: there, time selections cover every track.
-    enum class TopLane { none, ruler, markers };
+    enum class TopLane { none, ruler, markers, video }; // video: under the ruler, while there's a video
     TopLane topLane = TopLane::none;
     bool onTopLane() const { return topLane != TopLane::none; }
 
@@ -633,7 +641,35 @@ public:
     Result newMidiClipForEditor(); // "edit new": an empty MIDI clip to draw into
     void* editorWindow() const;    // the open editor's window, which keeps the keyboard
 
+    // The picture (Video.h): the session's video in a window of its own, following the playhead.
+    // syncVideo keeps it in step with the session every frame (opens, swaps, closes, shows it),
+    // so undo and opening sessions need nothing else.
+    std::unique_ptr<VideoPlayer> video;
+    Result videoCommand (const juce::StringArray& args, const juce::String& rest);
+    juce::File videoFile() const; // the session's, resolved; none: no video
+    juce::String videoStartText() const;
+    bool videoLane() const { return video != nullptr; } // the video row shows (under the ruler)
+    juce::int64 videoStartPos() const;                 // where its first frame is, samples
+    juce::int64 videoLength() const;                   // how long it is, samples
+    double samplesPerFrame() const;
+    juce::String videoTimecode (juce::int64 pos) const; // the video's own time there: m:ss:ff ("-" before it starts)
+    juce::int64 frameStart (juce::int64 pos) const;     // the first sample showing the frame at pos
+    Result stepFrame (int direction, bool second, bool extendSelection); // the video row's arrows
+    bool scrubbing = false; // a click on the video row: dragging moves the cursor (and the picture)
+
 private:
+    // What the decoder thread's clock reads (it can't touch the session): set each frame.
+    struct VideoClock
+    {
+        std::atomic<juce::int64> start { 0 }, lateBy { 0 }, playFrom { 0 };
+        std::atomic<double> rate { 44100.0 }, offset { 0.0 }; // offset: seconds shown late
+    };
+    VideoClock videoClock;
+    juce::String videoFailed; // the file that wouldn't open, so it isn't tried every frame
+    bool videoClosed = false; // its close button hid it (until "video", or the next open)
+    void syncVideo();
+    double videoSeconds(); // where the picture is (the clock, on the decoder thread)
+
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
     bool cursorMovedWhileRolling = false;

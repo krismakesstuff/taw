@@ -1,8 +1,15 @@
 ﻿#include "Console.h"
 #include "Safety.h"
 
+#if defined(__APPLE__)
+#include "MacFocus.h"
+
+#include <CoreGraphics/CoreGraphics.h>
+#endif
+
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sys/ioctl.h>
@@ -18,8 +25,9 @@ termios oldMode {};
 // Keyboard enhancement (kitty protocol, "disambiguate"): terminals that support it (iTerm2,
 // Ghostty, kitty, WezTerm) report ctrl+[ apart from Escape and ctrl+m apart from Enter.
 // Terminal.app ignores it and keeps sending the classic sequences, which are decoded too.
-constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u";
-constexpr const char* leave = "\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
+// Mouse buttons are reported (1000) in SGR form (1006), so clicks come in as cells.
+constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u\x1b[?1000h\x1b[?1006h";
+constexpr const char* leave = "\x1b[?1006l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
 
 void writeAll (const char* data, size_t size)
 {
@@ -143,6 +151,35 @@ Key csiKey (const std::string& params, char final)
     return k;
 }
 
+// The last left or right press, to spot the second click of a double-click: terminals only
+// report presses, so it's the same button in the same cell soon after.
+struct LastClick { double at = -1.0e9; int x = -1, y = -1; bool right = false; } lastClick;
+
+// An SGR mouse report: "<b;x;y" then M (pressed) or m (released). b is the button (0 left,
+// 1 middle, 2 right) plus 4 shift, 8 alt, 16 ctrl, 32 moved, 64 wheel; x and y count from 1.
+// Only left and right presses become keys, as the Windows console reports them.
+Key mouseKey (const std::string& params, char final)
+{
+    const auto p = csiParams (params.substr (1));
+    Key k;
+
+    if (final != 'M' || p.size() < 3 || (p[0] & (32 | 64)) != 0 || (p[0] & 3) == 1 || (p[0] & 3) == 3)
+        return k;
+
+    k.code = Key::Mouse;
+    k.right = (p[0] & 3) == 2;
+    k.shift = (p[0] & 4) != 0;
+    k.alt = (p[0] & 8) != 0;
+    k.ctrl = (p[0] & 16) != 0;
+    k.x = std::max (0, p[1] - 1);
+    k.y = std::max (0, p[2] - 1);
+
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    k.doubleClick = now - lastClick.at < 500.0 && k.x == lastClick.x && k.y == lastClick.y && k.right == lastClick.right;
+    lastClick = k.doubleClick ? LastClick {} : LastClick { now, k.x, k.y, k.right }; // a third click starts over
+    return k;
+}
+
 // Bytes a UTF-8 sequence starting with c needs (1 for anything unexpected).
 int utf8Length (unsigned char c)
 {
@@ -193,7 +230,8 @@ size_t decodeOne (const std::string& s, size_t i, Key& k)
         if (j >= s.size())
             return 0;
 
-        k = csiKey (s.substr (i + 2, j - i - 2), s[j]);
+        const auto params = s.substr (i + 2, j - i - 2);
+        k = params.starts_with ('<') ? mouseKey (params, s[j]) : csiKey (params, s[j]);
         return j - i + 1;
     }
 
@@ -296,7 +334,13 @@ Console::~Console()
 }
 
 void Console::reclaimKeyboard (const std::vector<void*>&, void*) {}
-void Console::focusTerminal() {}
+void Console::focusTerminal()
+{
+#if defined(__APPLE__)
+    if (opened)
+        macFocus::activateTerminal();
+#endif
+}
 void* Console::keyboardHeldBy() const { return nullptr; }
 void Console::toggleKeyboardHold (void*) {}
 
@@ -318,7 +362,37 @@ std::vector<Key> Console::poll()
 
     // A key sequence split across reads waits a couple of polls (~30 ms) for the rest.
     pendingPolls = gotAny ? 0 : pendingPolls + 1;
-    return decode (pending, pendingPolls >= 2);
+    auto keys = decode (pending, pendingPolls >= 2);
+
+#if defined(__APPLE__)
+    // Terminal.app sends shift+return as a plain return; whether shift is down is read from the
+    // keyboard instead (shift+enter: a new sample track from the browser).
+    for (auto& k : keys)
+        if (k.code == Key::Enter && ! k.shift)
+            k.shift = (CGEventSourceFlagsState (kCGEventSourceStateHIDSystemState) & kCGEventFlagMaskShift) != 0;
+#endif
+
+    return keys;
+}
+
+int Console::keyDown (wchar_t ch) const
+{
+#if defined(__APPLE__)
+    // macOS key codes (kVK_ANSI_*) are places on the keyboard, named for a US layout.
+    static const std::pair<wchar_t, CGKeyCode> codes[] = {
+        { 'a', 0x00 }, { 's', 0x01 }, { 'd', 0x02 }, { 'f', 0x03 }, { 'h', 0x04 }, { 'g', 0x05 }, { 'z', 0x06 },
+        { 'x', 0x07 }, { 'c', 0x08 }, { 'v', 0x09 }, { 'b', 0x0b }, { 'q', 0x0c }, { 'w', 0x0d }, { 'e', 0x0e },
+        { 'r', 0x0f }, { 'y', 0x10 }, { 't', 0x11 }, { 'o', 0x1f }, { 'u', 0x20 }, { 'i', 0x22 }, { 'p', 0x23 },
+        { 'l', 0x25 }, { 'j', 0x26 }, { '\'', 0x27 }, { 'k', 0x28 }, { ';', 0x29 }, { 'n', 0x2d }, { 'm', 0x2e },
+    };
+
+    for (const auto& [c, code] : codes)
+        if (c == ch)
+            return CGEventSourceKeyState (kCGEventSourceStateHIDSystemState, code) ? 1 : 0;
+#else
+    (void) ch;
+#endif
+    return -1;
 }
 
 void Console::setClipboardText (const char* text)

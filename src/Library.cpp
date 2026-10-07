@@ -5,6 +5,7 @@
 
 #include <juce_dsp/juce_dsp.h>
 
+#include <algorithm>
 #include <atomic>
 #include <map>
 #include <numeric>
@@ -468,9 +469,15 @@ SampleInfo fromVar (const juce::var& v)
 
 Library::Library (juce::File file) : indexFile (std::move (file))
 {
-    if (const auto v = juce::JSON::parse (indexFile); v["samples"].isArray())
+    const auto v = juce::JSON::parse (indexFile);
+
+    if (v["samples"].isArray())
         for (const auto& s : *v["samples"].getArray())
             items.push_back (fromVar (s));
+
+    if (v["folders"].isArray())
+        for (const auto& f : *v["folders"].getArray())
+            folderList.add (f.toString());
 }
 
 bool Library::save() const
@@ -481,7 +488,13 @@ bool Library::save() const
         list.add (toVar (s));
 
     auto* root = new juce::DynamicObject();
+    juce::Array<juce::var> folderVars;
+
+    for (const auto& f : folderList)
+        folderVars.add (f);
+
     root->setProperty ("version", 1);
+    root->setProperty ("folders", folderVars);
     root->setProperty ("samples", list);
     indexFile.getParentDirectory().createDirectory();
     return indexFile.replaceWithText (juce::JSON::toString (juce::var (root), true));
@@ -576,6 +589,39 @@ void Library::scan (const juce::Array<juce::File>& folders, std::function<void (
             kept.push_back (std::move (results[i]));
 
     items = std::move (kept);
+
+    // The folder list: one already inside an indexed folder isn't listed again, and an indexed
+    // folder takes the place of the ones inside it.
+    for (const auto& folder : folders)
+    {
+        bool covered = false;
+
+        for (int i = folderList.size(); --i >= 0;)
+        {
+            const juce::File listed (folderList[i]);
+
+            if (listed == folder || folder.isAChildOf (listed))
+                covered = true;
+            else if (listed.isAChildOf (folder))
+                folderList.remove (i);
+        }
+
+        if (! covered)
+            folderList.add (folder.getFullPathName());
+    }
+}
+
+int Library::remove (const juce::File& folder)
+{
+    const auto before = items.size();
+    items.erase (std::remove_if (items.begin(), items.end(), [&] (const SampleInfo& s) { return juce::File (s.path).isAChildOf (folder); }),
+                 items.end());
+
+    for (int i = folderList.size(); --i >= 0;)
+        if (const juce::File listed (folderList[i]); listed == folder || listed.isAChildOf (folder))
+            folderList.remove (i);
+
+    return (int) (before - items.size());
 }
 
 //==============================================================================

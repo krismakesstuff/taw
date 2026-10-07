@@ -506,10 +506,11 @@ void PluginCatalog::startScan (bool retryFailed)
     if (retryFailed)
         list.clearBlacklistedFiles();
 
-    // Forget plugins that were uninstalled.
+    // Forget plugins that were uninstalled (files, and Audio Units, which are identifiers).
     for (const auto& d : list.getTypes())
-        if (juce::File::isAbsolutePath (d.fileOrIdentifier) && ! juce::File (d.fileOrIdentifier).exists())
-            list.removeType (d);
+        for (auto* format : formats.getFormats())
+            if (format->getName() == d.pluginFormatName && ! format->doesPluginStillExist (d))
+                list.removeType (d);
 
     pending.clear();
     failed.clear();
@@ -616,7 +617,7 @@ void PluginCatalog::finish (ScanJob& job, bool exited)
     if (! found)
     {
         list.addToBlacklist (job.plugin);
-        failed.add (juce::File::isAbsolutePath (job.plugin) ? juce::File (job.plugin).getFileNameWithoutExtension() : job.plugin);
+        failed.add (nameOf (job.plugin));
     }
 
     job.out.deleteFile();
@@ -626,7 +627,34 @@ void PluginCatalog::finish (ScanJob& job, bool exited)
 
 juce::String PluginCatalog::scanningName() const
 {
-    return jobs.empty() ? juce::String() : juce::File (jobs.front()->plugin).getFileNameWithoutExtension();
+    return jobs.empty() ? juce::String() : nameOf (jobs.front()->plugin);
+}
+
+juce::String PluginCatalog::nameOf (const juce::String& plugin) const
+{
+    if (juce::File::isAbsolutePath (plugin))
+        return juce::File (plugin).getFileNameWithoutExtension();
+
+    for (auto* format : formats.getFormats())
+        if (format->fileMightContainThisPluginType (plugin))
+            return format->getNameOfPluginFromIdentifier (plugin);
+
+    return plugin;
+}
+
+// Plugins that come as both (KrumSampler, Valhalla...) are listed once, as the VST3. A session
+// that chose the Audio Unit still finds it (byIdentifier).
+bool PluginCatalog::shadowed (const juce::PluginDescription& d) const
+{
+    if (d.pluginFormatName != "AudioUnit")
+        return false;
+
+    for (const auto& other : list.getTypes())
+        if (other.pluginFormatName == "VST3" && other.isInstrument == d.isInstrument && other.name.equalsIgnoreCase (d.name)
+            && other.manufacturerName.equalsIgnoreCase (d.manufacturerName))
+            return true;
+
+    return false;
 }
 
 float PluginCatalog::scanProgress() const
@@ -666,7 +694,7 @@ std::vector<juce::PluginDescription> PluginCatalog::instruments() const
     std::vector<juce::PluginDescription> out;
 
     for (const auto& d : list.getTypes())
-        if (d.isInstrument)
+        if (d.isInstrument && ! shadowed (d))
             out.push_back (d);
 
     std::sort (out.begin(), out.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });
@@ -678,7 +706,7 @@ std::vector<juce::PluginDescription> PluginCatalog::effects() const
     std::vector<juce::PluginDescription> out;
 
     for (const auto& d : list.getTypes())
-        if (! d.isInstrument)
+        if (! d.isInstrument && ! shadowed (d))
             out.push_back (d);
 
     std::sort (out.begin(), out.end(), [] (const auto& a, const auto& b) { return a.name.compareIgnoreCase (b.name) < 0; });

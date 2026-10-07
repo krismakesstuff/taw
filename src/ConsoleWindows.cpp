@@ -338,6 +338,22 @@ std::vector<Key> Console::poll()
                 k.ctrl = (m.dwControlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED)) != 0;
                 k.alt = (m.dwControlKeyState & (LEFT_ALT_PRESSED | RIGHT_ALT_PRESSED)) != 0;
                 keys.push_back (k);
+                dragX = m.dwMousePosition.X;
+                dragY = m.dwMousePosition.Y;
+            }
+            // Moving with the left button held: a drag, once per cell it reaches.
+            else if (m.dwEventFlags == MOUSE_MOVED && (buttonsDown & FROM_LEFT_1ST_BUTTON_PRESSED) != 0
+                     && (m.dwMousePosition.X != dragX || m.dwMousePosition.Y != dragY))
+            {
+                Key k;
+                k.code = Key::Mouse;
+                k.drag = true;
+                k.x = m.dwMousePosition.X;
+                k.y = m.dwMousePosition.Y;
+                k.shift = (m.dwControlKeyState & SHIFT_PRESSED) != 0;
+                keys.push_back (k);
+                dragX = m.dwMousePosition.X;
+                dragY = m.dwMousePosition.Y;
             }
 
             continue;
@@ -441,6 +457,16 @@ std::vector<Key> Console::poll()
     }
 
     return keys;
+}
+
+int Console::keyDown (wchar_t ch) const
+{
+    const auto scan = VkKeyScanW (ch);
+
+    if (scan == -1)
+        return -1;
+
+    return (GetAsyncKeyState (LOBYTE (scan)) & 0x8000) != 0 ? 1 : 0;
 }
 
 void Console::setClipboardText (const char* text)

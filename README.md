@@ -10,8 +10,8 @@ progress). Linux will follow; the engine, sessions and command language are plat
 
 ## Build (Windows)
 
-Needs Visual Studio 2022 (C++ workload) and CMake 3.24+. JUCE and the Steinberg ASIO SDK are
-downloaded automatically.
+Needs Visual Studio 2022 (C++ workload) and CMake 3.24+. JUCE, the Steinberg ASIO SDK and
+FFmpeg's libraries (for video, about 100 MB) are downloaded automatically.
 
 ```
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64
@@ -114,6 +114,21 @@ monitor skips the compensation, and `lowlat` sits out the high-latency plugins w
 Tracks are mono or stereo (`2 stereo`, `add Keys stereo`, `2 i 3-4` records a pair) and pan
 with `2 pan l30` or alt+[ ].
 
+## Video
+
+For scoring to picture: `video D:\cuts\reel1.mp4` (or type `video` and drop the file on the
+terminal) opens the video in a window of its own that
+follows the playhead: playing, stopped on the cursor, jumping, looping. It's a normal window
+(put it on another screen, maximise it) that never takes the keyboard from taw. The video
+starts at the session start; `video at 5` (or `video at 1:30`, or `video at -0:05` to skip a
+slate) moves it. `video offset 2` shows the picture two frames late, for a screen that lags;
+`video` shows or hides the window; `video remove` takes it out. The picture allows for what the
+audio device and plugin delay compensation add, so it matches what you hear. `bv` bounces the
+selection (or, with nothing selected, the whole video) as an MP4: the picture, frame for frame,
+with the mix. The video gets a row under the ruler showing its length and its own timecode: up
+from the first track gets you there, where the arrows step a frame (ctrl a second; hold one to
+scrub) and clicking or dragging along it scrubs the picture. Windows only for now.
+
 ## Roadmap
 
 Next up, roughly in order:
@@ -127,4 +142,5 @@ Next up, roughly in order:
 
 ## License
 
-AGPLv3. JUCE is used under the AGPLv3; the ASIO SDK under its GPLv3 option.
+AGPLv3. JUCE is used under the AGPLv3; the ASIO SDK under its GPLv3 option. FFmpeg (a GPL
+build, shipped as DLLs next to taw.exe with its licence) under the GPL.

@@ -1,4 +1,4 @@
-﻿// Instrument tracks: a hosted plugin (VST3) per track, played by the MIDI controller while the
+﻿// Instrument tracks: a hosted plugin (VST3, or an Audio Unit on macOS) per track, played by the MIDI controller while the
 // track is armed, and the notes recorded on it.
 
 #include "App.h"

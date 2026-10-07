@@ -53,6 +53,7 @@ Modelled on Tracktion Engine.
 | Audio (device callback) | The compiled playback graph | No allocation, no locks, no file I/O |
 | Disk writer | Take files | Fed by lock-free FIFOs (`AudioFormatWriter::ThreadedWriter`) |
 | MIDI input | Device callbacks | One lock-free queue per port into the audio thread |
+| Video | Decoding and scaling the picture | Reads the engine's playhead atomics and a few the message thread sets each frame; hands frames to the window under a lock |
 
 The message thread compiles the tree into an immutable **playback graph** and hands it to
 the audio thread through a lock-free queue. Retired graphs come back the same way and are
@@ -118,7 +119,7 @@ PLAYING / RECORDING label sits in front of the prompt. Changing the audio device
 | `{` / `}` or `Ctrl+[` / `Ctrl+]` | Mix volume −1 / +1 dB, from anywhere (`{ }` because macOS Terminal sends `Ctrl+[` as Escape) | same |
 | `r` / `t` (empty command line; also `-` / `+`) | zoom out / in (Pro Tools keys) | same |
 | `Ctrl+↑` / `Ctrl+↓` | first / last track; with Shift, selects every track from where you were to there | same |
-| `k` (empty command line) | to the markers row (ctrl+k adds a marker); `k` again returns to the track | same |
+| `` ` `` (empty command line) | to the markers row (`~` adds a marker); `` ` `` again returns to the track | same |
 | `f` (empty command line) | fill: the focused track takes every track row (a piano roll on instrument tracks); `f` again shows all tracks | same |
 | `q` / `w` (empty command line) | cursor to the selection's start / end, centred in the view; the selection stays (select, `snap`, `q`, play) | same |
 | `Tab` / `Shift+Tab` | cursor to the next clip start or end, or the next hit on sample tracks, on the selected or focused tracks / extend the selection to it | same |
@@ -145,8 +146,10 @@ ranges).
 
 ### Mouse
 
-The keyboard does everything; the mouse is a shortcut. Windows only so far (the console reports
-clicks by cell).
+The keyboard does everything; the mouse is a shortcut. Clicks arrive by cell: the Windows
+console's mouse events, and on macOS the terminal's SGR mouse reports (a double-click is the same
+cell clicked again within half a second). To select text in the terminal while taw runs, turn
+off View > Allow Mouse Reporting (Terminal.app).
 
 - Click a track's lane: that track gets the focus and the cursor goes there (as in Pro Tools).
   Shift-click stretches the time and track selections to it.
@@ -264,7 +267,7 @@ records the selected tracks, else whatever is armed.
 | `Space` / `Esc` (empty command line) | stop (cursor returns to where play started) |
 | `Enter` (empty command line) | back to where play started, still playing |
 | `Ctrl+Space` | punch: toggle recording on armed tracks without stopping (in, out, in again…) |
-| `Ctrl+K` (or `Ctrl+M`) | drop a marker at the playhead (stopped: at the cursor); `Ctrl+K` because macOS Terminal sends `Ctrl+M` as Enter |
+| `~` (shift+`` ` ``, empty command line) | drop a marker at the playhead (stopped: at the cursor) |
 | `Ctrl+C` / `X` / `D`, `Delete` | edit the selection, as when stopped |
 | `←` `→` (any modifier) | move the cursor / selection, not the playhead |
 | `Ctrl+V` | paste at the cursor |
@@ -358,7 +361,8 @@ half a sample of a grid line as on it.
 
 ## Instrument tracks
 
-A VST3 instrument per track, played from a MIDI controller and recorded as notes.
+A VST3 instrument per track (or an Audio Unit on macOS), played from a MIDI controller and
+recorded as notes. A plugin installed as both is listed once, as the VST3.
 
 ```
 TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
@@ -378,8 +382,8 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
 - `inst` opens the instrument picker (type to filter, enter loads); `inst vital` loads the best
   name match. Either makes a new instrument track, armed, so the controller plays it at once.
   `3 inst vital` puts it on track 3 (an empty or instrument track; the notes stay).
-- `scan` looks for new or changed plugins in the VST3 folders (opening the picker the first
-  time starts it). Finding out what a plugin is means loading it, and some crash or hang when
+- `scan` looks for new or changed plugins in the VST3 folders, and on macOS among the Audio
+  Units (opening the picker the first time starts it). Finding out what a plugin is means loading it, and some crash or hang when
   loaded cold, so each file is looked at in a child process (`taw --scan-plugin`, four at a
   time, 60 s each): one that crashes or hangs only takes its child down and is skipped from
   then on; `scan retry` tries those again. The list is cached in `plugins.xml` in the config
@@ -389,6 +393,16 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   while playing, so enter keeps its one job (back to the start). On a track that's its
   instrument, else its first insert, else the effects picker; in the routing column, the slot
   under the cursor. `ed` is the typed version.
+- **Keys mode** (`ctrl+k`, again or esc leaves): the typing keyboard is a MIDI keyboard, laid out
+  like Ableton's. `a s d f g h j k l ; '` are the white keys from C4, `w e t y u o p` the black
+  ones; `z`/`x` shift an octave, `c`/`v` step the velocity (1 20 40 ... 127). Its notes go in as
+  one more controller (`AudioEngine::playTyped`), so armed instrument tracks play them and
+  recording writes them down. Other characters are swallowed (letters are notes, not
+  commands); space, arrows and ctrl keys work as usual. Terminals report presses but not
+  releases, so a note ends when its key is seen to be up, read from the keyboard each frame
+  (`Console::keyDown`: `GetAsyncKeyState` on Windows, `CGEventSourceKeyState` on macOS, by
+  the key's place on a US keyboard). Where that can't be read, a note ends once its key stops
+  auto-repeating.
 - **MIDI in.** Every input is opened at startup and as devices come and go (up to 32), unless
   switched off. `midi` opens the MIDI panel, like the audio device picker: each input on or off
   (kept by name in `settings.json`, for every session), whether it opened (Windows doesn't
@@ -631,7 +645,11 @@ are read as UTF-16 for the same reason.
 
 For finding the right sample among thousands: taw measures each one once, sorts them by kind
 and lays them out on a map where samples that sound alike sit together. `index <folder>` (on its
-own thread; `taw --index <folder> ...` from a shell prints a report) adds folders.
+own thread; `taw --index <folder> ...` from a shell prints a report) adds folders; typing
+`index` and dropping a folder on the input line does the same, as a drop alone imports.
+`index remove <folder>` (or `index remove` and a drop) takes a folder's samples out again, and
+`library` lists the indexed folders with how many samples each holds. The folders are kept in
+the index; one inside an indexed folder isn't listed twice.
 
 **The browser** docks in a column right of the timeline and its meters (about three tenths of
 the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
@@ -716,6 +734,49 @@ over the time selection, offline on its own thread, faster than real time. `Esc`
   by default; `bounces off` / `bounces on`). `bounces` opens the folder any time. Headless runs
   (`--exec`) never open it.
 - `taw --bouncetest <dir>` renders a synthetic mix to both formats without a device.
+
+## Video
+
+Picture for scoring (`Video.h`). The audio is the clock: the picture never runs a timer of its
+own, it shows the frame for where the playhead is, so it can't drift.
+
+- **Decoding:** FFmpeg's libraries (libavformat, libavcodec, libswscale), linked from Gyan's
+  pinned 9.0.2 shared build, which CMake downloads. The DLLs are delay-loaded, so taw starts
+  without loading them, and still runs without video if they're missing. FFmpeg rather than
+  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode.
+- **Exact frames:** the frame for a time is the last one whose timestamp is at or before it.
+  Moving forward decodes on from the current frame (it's always one frame ahead, so playback
+  only has to scale); a jump past a keyframe seeks to the keyframe before the target and decodes
+  up to it. `--videotest` checks frames against the ffmpeg command line's, pixel for pixel.
+- **Clock:** rolling, the playhead less the mix's delay compensation and the device's output
+  latency (what you hear); stopped, the cursor. Less the video's start (`videoStart`, samples,
+  negative to skip a slate), less `videoOffset` frames (for a screen that lags).
+- **Window:** a normal JUCE window with the native title bar, a view only: it ignores keys,
+  never activates (`WS_EX_NOACTIVATE`; set up before it goes on the desktop, because JUCE
+  activates a window when it remakes it), and the decoder thread scales frames to its size in
+  physical pixels so painting is a copy. Its close button hides it until `video` or the next
+  open (not saved: Windows sends every window the same close on shutdown). Its place is saved
+  in the session (`videoWindow`).
+- **Video row:** a top lane under the ruler (`TopLane::video`) while a player is open: the
+  video's extent as a bar with its name, labels of the video's own time, frame ticks when a
+  frame is two columns or more, and the timecode at the cursor (non-drop m:ss:ff, negative
+  before the video) in the header. Up from the first track reaches it. Arrows step frames
+  (ctrl: seconds; alt keeps the beat), landing on each frame's first sample (`frameStart`:
+  the first sample the decoder shows that frame at); tab hops to its start and end; a click
+  puts the cursor on a frame and a drag scrubs (the Windows console reports moves with the
+  left button held as `Key::drag`, once per cell). Selections made there cover every track,
+  like the other top lanes.
+- **Bounce with picture (`bv`):** `Bounce` with `Format::video` feeds the mix to `VideoMuxer`,
+  which re-encodes the picture (x264, CRF 18, the source's size and frame rate) rather than
+  copying it, so a bounce can start on any frame. Output frame n is the frame the window would
+  show at range start + n frames (black outside the video); the mix is AAC 320k. Frames are
+  encoded as the mix reaches them, so the file interleaves and the progress bar covers both.
+  The range is the selection, else the whole video (clipped to the session start). The video
+  offset isn't applied: it's for the screen. FFmpeg's log is silenced (it would draw over the
+  screen).
+- **Session:** `videoFile` (relative to the session if inside it), `videoStart`,
+  `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
+  undo and opening sessions need nothing else.
 
 ## Startup
 

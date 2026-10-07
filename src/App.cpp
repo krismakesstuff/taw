@@ -120,6 +120,15 @@ void App::releaseSession()
         midiPassClips.clear();
         fillView = pluginPickerVisible = false;
 
+        // The video window's place, for next time (not an edit).
+        if (video != nullptr)
+        {
+            session->tree().setProperty (ids::videoWindow, video->windowState(), nullptr);
+            video.reset();
+        }
+
+        videoFailed.clear();
+        videoClosed = false;
         session->tree().removeListener (this);
         session->save();
         session.reset();
@@ -266,7 +275,7 @@ int App::run()
         // on it once it has finished arriving.
         if (dropPending && keys.empty())
             finishDrop();
-        else if (mode == Mode::Main && (dropPending || chars >= 4))
+        else if (mode == Mode::Main && ! liveKeys.on() && (dropPending || chars >= 4)) // a chord in keys mode isn't a drop
         {
             for (const auto& k : keys)
                 if (k.code == Key::Char)
@@ -283,6 +292,12 @@ int App::run()
         // Keys the MIDI editor passed on (space, ctrl+z, ...).
         for (const auto& k : std::exchange (deferredKeys, {}))
             handleKey (k);
+
+        // Keys mode: notes end when their keys come up; it ends with the session.
+        if (liveKeys.on() && session == nullptr)
+            liveKeys.setOn (false);
+
+        liveKeys.poll (juce::Time::getMillisecondCounterHiRes());
 
         collectFinishedTakes();
         drainLiveOverviews();
@@ -322,6 +337,8 @@ int App::run()
             rebuildGraph();
             session->save();
         }
+
+        syncVideo();
 
         if (engine.isRolling())
         {
@@ -1692,6 +1709,16 @@ void App::finishDrop()
         return;
     }
 
+    // "index" (or "index remove") typed, then a folder dropped: indexed (or taken out) at once,
+    // as a drop alone imports. "video", then a file: that's the picture.
+    if (const auto line = commandLine.trim();
+        line.equalsIgnoreCase ("index") || line.equalsIgnoreCase ("index remove") || line.equalsIgnoreCase ("video"))
+    {
+        commandLine.clear();
+        say (execute (line + " " + text.trim()));
+        return;
+    }
+
     if (session != nullptr)
     {
         const auto paths = splitPaths (text);
@@ -1715,7 +1742,7 @@ void App::finishDrop()
 //==============================================================================
 // Bounce
 
-Result App::startBounce (const juce::StringArray& args)
+Result App::startBounce (const juce::StringArray& args, bool withVideo)
 {
     if (bounce != nullptr)
         return Result::fail (L"already bouncing \x00b7 esc cancels");
@@ -1723,16 +1750,47 @@ Result App::startBounce (const juce::StringArray& args)
     if (recording)
         return Result::fail ("stop recording first");
 
-    if (! hasTimeSelection())
-        return Result::fail (L"select a time range first (shift + \x2190 \x2192), then b");
-
     auto s = session->tree();
+    Bounce::Picture picture;
+    juce::Range<juce::int64> range;
+
+    if (withVideo)
+    {
+        // bv: the selection, else the whole video (from the session start, if it starts before).
+        picture.file = videoFile();
+        VideoDecoder probe;
+        juce::String error;
+
+        if (picture.file == juce::File())
+            return Result::fail (L"no video \x00b7 video <file> adds one, then bv");
+
+        if (! probe.open (picture.file, error))
+            return Result::fail (error);
+
+        const auto start = (juce::int64) s[ids::videoStart];
+        range = hasTimeSelection() ? timeSelection()
+                                   : juce::Range<juce::int64> (juce::jmax<juce::int64> (0, start), start + std::llround (probe.info().duration * sampleRate()));
+
+        if (range.isEmpty())
+            return Result::fail ("the video ends before the session starts");
+
+        picture.from = (double) (range.getStart() - start) / sampleRate();
+    }
+    else if (! hasTimeSelection())
+    {
+        return Result::fail (L"select a time range first (shift + \x2190 \x2192), then b");
+    }
+    else
+    {
+        range = timeSelection();
+    }
+
     juce::StringArray nameParts;
 
     // b | b mp3 | b wav D:\mixes | b mp3 "rough mix 3"  (format and folder are remembered)
     for (const auto& a : args)
     {
-        if (a.equalsIgnoreCase ("wav") || a.equalsIgnoreCase ("mp3"))
+        if (! withVideo && (a.equalsIgnoreCase ("wav") || a.equalsIgnoreCase ("mp3")))
             s.setProperty (ids::bounceFormat, a.toLowerCase(), nullptr);
         else if (a.containsAnyOf ("\\/:"))
             s.setProperty (ids::bounceFolder, expandHome (a.unquoted()), nullptr);
@@ -1740,7 +1798,9 @@ Result App::startBounce (const juce::StringArray& args)
             nameParts.add (a.unquoted());
     }
 
-    const auto format = s[ids::bounceFormat].toString() == "mp3" ? Bounce::Format::mp3 : Bounce::Format::wav;
+    const auto format = withVideo ? Bounce::Format::video
+                        : s[ids::bounceFormat].toString() == "mp3" ? Bounce::Format::mp3
+                                                                   : Bounce::Format::wav;
     const auto folder = session->folder().getChildFile (s[ids::bounceFolder].toString());
     const auto name = nameParts.isEmpty() ? session->name() + "-" + juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S")
                                           : nameParts.joinIntoString (" ");
@@ -1749,9 +1809,10 @@ Result App::startBounce (const juce::StringArray& args)
     if (file.exists())
         file = file.getNonexistentSibling (false);
 
-    bounce = std::make_unique<Bounce> (buildGraph (true), timeSelection(), sampleRate(), format, file);
+    bounce = std::make_unique<Bounce> (buildGraph (true), range, sampleRate(), format, file, picture);
     bounce->start();
-    return Result::good ("bouncing " + formatBars (timeSelection().getStart()) + L" \x2192 " + formatBars (timeSelection().getEnd()));
+    return Result::good ("bouncing " + juce::String (withVideo ? "with picture " : "") + formatBars (range.getStart()) + L" \x2192 "
+                         + formatBars (range.getEnd()));
 }
 
 void App::pollBounce()
@@ -1820,6 +1881,257 @@ Result App::revealBounces (const juce::String& arg)
         return Result::fail ("nothing bounced yet \x00b7 select a range, then b");
 
     return Result::good ("opened " + folder.getFullPathName());
+}
+
+//==============================================================================
+// Video: the picture, in its own window, following the playhead
+
+juce::File App::videoFile() const
+{
+    if (session == nullptr)
+        return {};
+
+    const auto path = session->tree()[ids::videoFile].toString();
+    return path.isEmpty() ? juce::File() : session->folder().getChildFile (path);
+}
+
+// Runs on the video's decoder thread: reads only the engine's atomics and videoClock. Rolling,
+// it's what you hear (the playhead less the mix's delay compensation and the device's output
+// latency); stopped, the cursor.
+double App::videoSeconds()
+{
+    const auto& c = videoClock;
+    const auto pos = engine.isRolling() ? juce::jmax (c.playFrom.load(), engine.playhead() - c.lateBy.load())
+                                        : engine.targetPosition();
+    return (double) (pos - c.start.load()) / c.rate.load() - c.offset.load();
+}
+
+void App::syncVideo()
+{
+    const auto want = opening == nullptr && closing == nullptr ? videoFile() : juce::File();
+
+    if (want == juce::File())
+    {
+        video.reset();
+        videoFailed.clear();
+
+        if (topLane == TopLane::video) // its row went with it
+            topLane = TopLane::ruler;
+
+        return;
+    }
+
+    auto s = session->tree();
+
+    if (video == nullptr || video->file() != want)
+    {
+        if (videoFailed == want.getFullPathName())
+            return;
+
+        auto player = std::make_unique<VideoPlayer> ([this] { return videoSeconds(); });
+        juce::String error;
+
+        if (! player->open (want, error))
+        {
+            videoFailed = want.getFullPathName();
+            video.reset();
+            say (Result::fail (error));
+            return;
+        }
+
+        player->restoreWindowState (s[ids::videoWindow].toString());
+        video = std::move (player);
+        videoFailed.clear();
+    }
+
+    auto& c = videoClock;
+    const auto fps = juce::jmax (1.0, video->info().fps);
+    int outputLatency = 0;
+
+    if (auto* d = engine.devices().getCurrentAudioDevice())
+        outputLatency = d->getOutputLatencyInSamples();
+
+    c.rate = sampleRate();
+    c.start = (juce::int64) s[ids::videoStart];
+    c.offset = (int) s[ids::videoOffset] / fps;
+    c.lateBy = mixLatency + outputLatency;
+    c.playFrom = playFrom;
+
+    // Its close button hides it until "video" or the next open. Not saved: Windows closes every
+    // window this way on shutdown (and taskkill), which mustn't turn the picture off for good.
+    if (video->takeCloseRequest())
+        videoClosed = true;
+
+    if (const bool shown = (bool) s[ids::videoShown] && ! videoClosed; video->isVisible() != shown)
+        video->setVisible (shown);
+
+    // It's only a view: the keyboard stays with taw.
+    if (video->hasKeyboard())
+        console.focusTerminal();
+}
+
+juce::int64 App::videoStartPos() const
+{
+    return session != nullptr ? (juce::int64) session->tree()[ids::videoStart] : 0;
+}
+
+juce::int64 App::videoLength() const
+{
+    return video != nullptr ? (juce::int64) std::llround (video->info().duration * sampleRate()) : 0;
+}
+
+double App::samplesPerFrame() const
+{
+    return sampleRate() / (video != nullptr && video->info().fps > 0.0 ? video->info().fps : 30.0);
+}
+
+// Frame k starts at start + k frames; its first sample is the one at or after that (the decoder
+// shows a frame from its timestamp on, so that sample shows it).
+juce::int64 App::frameStart (juce::int64 pos) const
+{
+    const auto spf = samplesPerFrame();
+    const auto start = videoStartPos();
+    auto k = std::floor ((double) (pos - start) / spf + 1.0e-9);
+
+    // pos can sit before its frame's first sample when frames don't fall on whole samples.
+    if (start + (juce::int64) std::ceil (k * spf - 1.0e-6) > pos)
+        k -= 1.0;
+
+    return start + (juce::int64) std::ceil (k * spf - 1.0e-6);
+}
+
+juce::String App::videoTimecode (juce::int64 pos) const
+{
+    if (video == nullptr)
+        return {};
+
+    const auto fps = video->info().fps;
+    const auto nominal = juce::jmax (1, juce::roundToInt (fps)); // non-drop: 29.97 counts in 30s
+    const auto frames = (juce::int64) std::floor ((double) (frameStart (pos) - videoStartPos()) / samplesPerFrame() + 0.5);
+    const auto a = std::abs (frames);
+    const auto secs = a / nominal;
+    auto tc = juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) + ":" + juce::String (a % nominal).paddedLeft ('0', 2);
+
+    if (secs >= 3600)
+        tc = juce::String (secs / 3600) + ":" + juce::String ((secs / 60) % 60).paddedLeft ('0', 2) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) + ":"
+             + juce::String (a % nominal).paddedLeft ('0', 2);
+
+    return frames < 0 ? "-" + tc : tc;
+}
+
+// The video row: a frame at a time (a second with ctrl), from the cursor or the selection's
+// moving end. Left from inside a frame goes to its start first.
+Result App::stepFrame (int direction, bool second, bool extendSelection)
+{
+    if (video == nullptr)
+        return Result::fail ("no video");
+
+    const auto spf = samplesPerFrame();
+    const auto start = videoStartPos();
+    const auto from = extendSelection && timeAnchor >= 0 ? timeHead : cursor;
+    const auto here = frameStart (from);
+    const auto k = std::llround ((double) (here - start) / spf);
+    const auto step = second ? (juce::int64) juce::jmax (1, juce::roundToInt (video->info().fps)) : (juce::int64) 1;
+    const auto target = direction > 0 ? k + step : (from > here ? k - (step - 1) : k - step);
+    const auto pos = start + (juce::int64) std::ceil ((double) target * spf - 1.0e-6);
+
+    moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, pos))), extendSelection); // not before the session
+    return Result::good();
+}
+
+juce::String App::videoStartText() const
+{
+    const auto start = (juce::int64) session->tree()[ids::videoStart];
+
+    if (start == 0)
+        return "the session start";
+
+    if (start < 0)
+        return "-" + formatTime (-start) + " (before the session start)";
+
+    return formatTime (start) + " (bar " + formatBars (start) + ")";
+}
+
+// video <file> | video (show/hide) | video at <position> | video offset <frames> | video remove
+Result App::videoCommand (const juce::StringArray& args, const juce::String& rest)
+{
+    auto s = session->tree();
+    const auto first = args[0].toLowerCase();
+    const bool have = videoFile() != juce::File();
+
+    if (rest.isEmpty())
+    {
+        if (! have)
+            return Result::fail (L"no video \x00b7 video <file> adds one (mp4)");
+
+        const bool show = video != nullptr ? ! video->isVisible() : ! (bool) s[ids::videoShown];
+        s.setProperty (ids::videoShown, show, nullptr); // a window, not an edit
+        videoClosed = false;
+        return Result::good (show ? juce::String ("video shown") : juce::String (L"video hidden \x00b7 video shows it"));
+    }
+
+    if (first == "remove" || first == "rm")
+    {
+        if (! have)
+            return Result::fail ("no video");
+
+        const auto name = videoFile().getFileName();
+        s.removeProperty (ids::videoFile, um());
+        return Result::good (L"removed the video " + name + L" \x00b7 undo puts it back");
+    }
+
+    if (first == "at")
+    {
+        if (! have)
+            return Result::fail (L"no video \x00b7 video <file> adds one (mp4)");
+
+        // video at 5 | video at 1:30 | video at -0:05 (before the session: skips a slate)
+        auto spec = rest.fromFirstOccurrenceOf (args[0], false, true).trim();
+        const bool before = spec.startsWithChar ('-');
+        juce::int64 pos = 0;
+
+        if (before)
+            spec = spec.substring (1).trim();
+
+        if (auto r = parsePosition (spec, pos); r.failed())
+            return Result::fail (L"video at 5 \x00b7 video at 1:30 \x00b7 video at -0:05");
+
+        s.setProperty (ids::videoStart, before ? -pos : pos, um());
+        return Result::good ("the video starts at " + videoStartText());
+    }
+
+    if (first == "offset")
+    {
+        if (args[1].isEmpty() || ! args[1].trimCharactersAtStart ("+-").containsOnly ("0123456789"))
+            return Result::fail (L"video offset 2 shows the picture 2 frames late \x00b7 -2 early");
+
+        const auto frames = juce::jlimit (-100, 100, args[1].getIntValue());
+        s.setProperty (ids::videoOffset, frames, um());
+        return Result::good (frames == 0 ? juce::String ("the picture is on time")
+                                         : "the picture is shown " + juce::String (std::abs (frames)) + (std::abs (frames) == 1 ? " frame " : " frames ")
+                                               + (frames > 0 ? "late" : "early"));
+    }
+
+    // A file: it replaces any video, starting at the session start.
+    const auto file = Import::resolve (rest, session->folder());
+    VideoDecoder probe;
+    juce::String error;
+
+    if (! probe.open (file, error))
+        return Result::fail (error);
+
+    const auto& info = probe.info();
+    const auto path = file.isAChildOf (session->folder()) ? file.getRelativePathFrom (session->folder()) : file.getFullPathName();
+    s.setProperty (ids::videoFile, path, um());
+    s.setProperty (ids::videoStart, (juce::int64) 0, um());
+    s.setProperty (ids::videoShown, true, nullptr);
+    videoFailed.clear();
+
+    const auto mins = (int) (info.duration / 60.0);
+    const auto secs = juce::roundToInt (info.duration - mins * 60.0);
+    return Result::good ("video " + file.getFileName() + L" \x00b7 " + juce::String (info.width) + "x" + juce::String (info.height) + " "
+                         + juce::String (info.fps, info.fps == std::round (info.fps) ? 0 : 3) + " fps " + juce::String (mins) + ":"
+                         + juce::String (secs).paddedLeft ('0', 2) + L" \x00b7 starts at the session start (video at <bar> moves it)");
 }
 
 //==============================================================================
@@ -1956,14 +2268,16 @@ bool App::mixFocused() const
     return session != nullptr && ! onTopLane() && focused >= session->numTracks();
 }
 
-// Up from the first track: the bar row, then the markers row. Down comes back the same way.
-// Shift only ever selects tracks, so it stops at the first one.
+// Up from the first track: the video row (when there's a video), the bar row, then the markers
+// row. Down comes back the same way. Shift only ever selects tracks, so it stops at the first one.
 void App::focusUp (bool extendSelection)
 {
     if (topLane == TopLane::ruler)
         topLane = TopLane::markers;
+    else if (topLane == TopLane::video)
+        topLane = TopLane::ruler;
     else if (topLane == TopLane::none && focused == 0 && ! extendSelection)
-        topLane = TopLane::ruler, trackAnchor = -1;
+        topLane = videoLane() ? TopLane::video : TopLane::ruler, trackAnchor = -1;
     else if (topLane == TopLane::none)
         focusTrack (focused - 1, extendSelection);
 }
@@ -1972,7 +2286,9 @@ void App::focusDown (bool extendSelection)
 {
     if (topLane == TopLane::markers)
         topLane = TopLane::ruler, selectedMarker = {};
-    else if (topLane == TopLane::ruler)
+    else if (topLane == TopLane::ruler && videoLane())
+        topLane = TopLane::video;
+    else if (topLane == TopLane::ruler || topLane == TopLane::video)
         topLane = TopLane::none, focused = 0;
     else
         focusTrack (focused + 1, extendSelection);
@@ -2360,6 +2676,19 @@ Result App::moveToNextClipEdge (bool extendSelection)
     if (topLane == TopLane::markers)
         return stepMarker (+1, extendSelection);
 
+    // On the video row: its start and end.
+    if (topLane == TopLane::video && video != nullptr)
+    {
+        consider (juce::jmax<juce::int64> (0, videoStartPos()));
+        consider (videoStartPos() + videoLength());
+
+        if (next < 0)
+            return Result::fail ("past the end of the video");
+
+        moveTo (next, extendSelection);
+        return Result::good();
+    }
+
     // Clip starts and ends on audio tracks; each hit on sample tracks.
     for (auto t : defaultTargets())
     {
@@ -2429,6 +2758,14 @@ void App::handleKey (const Key& k)
 
     if (k.code == Key::Mouse)
     {
+        if (k.drag) // only scrubbing uses drags so far
+        {
+            if (mode == Mode::Main)
+                handleMouse (k);
+
+            return;
+        }
+
         if (mode == Mode::Main && ! handleBrowserKey (k)) // the docked browser has its own clicks
             handleMouse (k);
 
@@ -2450,6 +2787,30 @@ void App::handleMouse (const Key& k)
 {
     const auto& map = ui.lanes();
     const int track = map.trackAt (k.y);
+
+    // The video row: a click puts the cursor on that frame (the picture goes there); dragging
+    // from it scrubs, wherever the mouse goes up or down.
+    if (k.drag)
+    {
+        if (scrubbing && session != nullptr && map.valid)
+        {
+            const auto x = juce::jlimit (map.laneX, map.laneX + map.laneW - 1, k.x);
+            moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, map.positionAt (x)))), k.shift);
+        }
+
+        return;
+    }
+
+    scrubbing = session != nullptr && ! k.right && map.inLane (k.x) && k.y == map.videoY && videoLane();
+
+    if (scrubbing)
+    {
+        topLane = TopLane::video;
+        trackAnchor = -1;
+        selectedMarker = {};
+        moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, map.positionAt (k.x)))), k.shift);
+        return;
+    }
 
     if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
         return;
@@ -2651,11 +3012,45 @@ juce::ValueTree App::midiClipAt (int track, double from, double to) const
     return {};
 }
 
+Result App::toggleLiveKeys()
+{
+    if (liveKeys.on())
+    {
+        liveKeys.setOn (false);
+        return Result::good ("keys mode off");
+    }
+
+    if (session == nullptr)
+        return Result::fail ("open a session first, then ctrl+k plays the armed instrument from the keyboard");
+
+    liveKeys.setOn (true);
+    bool armed = false;
+
+    for (int i = 0; i < session->numTracks(); ++i)
+        armed = armed || (Session::isInstrumentTrack (session->track (i)) && (bool) session->track (i)[ids::armed]);
+
+    return Result::good (L"keys mode: the keyboard plays " + liveKeys.range()
+                         + (armed ? juce::String() : juce::String (L" \x00b7 arm an instrument track (shift+R) to hear it")));
+}
+
 void App::handleMainKey (const Key& k)
 {
     // Arrows: plain = bar, ctrl = 4 bars, alt = 1 step, ctrl+alt = 4 steps. Shift never changes
     // the distance; it extends the selection (time with left/right, tracks with up/down).
     const auto step = k.alt ? (k.ctrl ? Step::FineLarge : Step::Fine) : (k.ctrl ? Step::Large : Step::Normal);
+
+    // Keys mode: typing plays notes (space, arrows and ctrl keys still work); esc leaves it.
+    if (liveKeys.on())
+    {
+        if (k.code == Key::Escape)
+        {
+            say (toggleLiveKeys());
+            return;
+        }
+
+        if (liveKeys.handle (k, juce::Time::getMillisecondCounterHiRes()))
+            return;
+    }
 
     // Naming a new marker: the command line is its name field. Enter keeps the name, esc keeps
     // the number; any other key (arrows, ctrl+...) leaves the number and does its usual job.
@@ -2703,6 +3098,13 @@ void App::handleMainKey (const Key& k)
     // instrument picker takes typing too (it filters).
     if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleMidiPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
+
+    // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.
+    if (topLane == TopLane::video && session != nullptr && (k.code == Key::Left || k.code == Key::Right) && ! k.alt)
+    {
+        say (stepFrame (k.code == Key::Right ? +1 : -1, k.ctrl, k.shift));
+        return;
+    }
 
     // The markers row: arrows pick markers; the picked one is renamed with enter, removed with del.
     if (topLane == TopLane::markers && session != nullptr)
@@ -2866,6 +3268,8 @@ void App::handleMainKey (const Key& k)
             say (execute ("close")); // saves, then back to the sessions
         else if (k.ch == '\\' && session != nullptr)
             say (execute ("ed close")); // every plugin window, from anywhere
+        else if (k.ch == 'k')
+            say (toggleLiveKeys());
         else if (k.ch == 'b') // into the sample browser (showing it); from inside it, hides it
             say (browserVisible && browserActive ? showBrowser (false) : focusBrowser());
         else if (k.ch == 'z')
@@ -2891,11 +3295,6 @@ void App::handleMainKey (const Key& k)
         {
             beginEdit ("duplicate");
             say (duplicateSelection (defaultTargets()));
-        }
-        else if (k.ch == 'k' || k.ch == 'm') // k: macOS Terminal sends ctrl+m as Enter
-        {
-            beginEdit ("marker");
-            say (addMarker (engine.isRolling() ? heardPlayhead() : cursor));
         }
 
 
@@ -2968,9 +3367,15 @@ void App::handleMainKey (const Key& k)
                 zoom (-1);
             else if (lineEmpty && (k.ch == 'q' || k.ch == 'w'))
                 showSelectionEdge (k.ch == 'w');
-            // k: to the markers row (pairs with ctrl+k, add a marker); again: back to the track.
-            // (m would block typing mark, mute, mon and mix.)
-            else if (lineEmpty && k.ch == 'k' && session != nullptr)
+            // ~ (shift+`): a marker here (the playhead while rolling). No ctrl+` for it: macOS
+            // Terminal sends nothing for that.
+            else if (lineEmpty && k.ch == '~' && session != nullptr)
+            {
+                beginEdit ("marker");
+                say (addMarker (engine.isRolling() ? heardPlayhead() : cursor));
+            }
+            // `: to the markers row (pairs with ~, add a marker); again: back to the track.
+            else if (lineEmpty && k.ch == '`' && session != nullptr)
             {
                 if (topLane == TopLane::markers)
                     focusTrack (focused);

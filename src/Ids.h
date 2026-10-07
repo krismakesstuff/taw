@@ -44,6 +44,11 @@ TAW_ID (loopEnd)
 TAW_ID (bounceFormat) // "wav" | "mp3"
 TAW_ID (bounceFolder) // relative to the session folder, or absolute
 TAW_ID (bounceReveal) // open the file explorer on a finished bounce
+TAW_ID (videoFile)    // the picture: relative to the session folder, or absolute; absent = no video
+TAW_ID (videoStart)   // ...where its first frame is on the timeline, samples (negative: it starts before the session)
+TAW_ID (videoOffset)  // ...frames it's shown late (negative: early), for a screen that lags
+TAW_ID (videoShown)   // ...its window is open
+TAW_ID (videoWindow)  // ...where the window was (JUCE's window state string)
 
 TAW_ID (kind)         // TRACK: "audio" (default) | "sample" | "instrument" | "bus". Never "type": that key is the node type in JSON.
 TAW_ID (busId)        // bus track: what outputs and sends call it (stays put when tracks move or get renamed)

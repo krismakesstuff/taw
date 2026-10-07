@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -346,6 +346,12 @@ std::vector<App::Setting> App::projectSettings() const
         { "Bounce format", s[ids::bounceFormat].toString(), {} },
         { "Bounce folder", s[ids::bounceFolder].toString() + L"  (b wav <folder> changes it)", {}, false },
         { "Show bounces in " + fileExplorer(), onOff (s[ids::bounceReveal]) + L"  (bounces opens it any time)", {} },
+        { "Video", videoFile() == juce::File() ? juce::String ("none  (video <file> adds one)")
+                                               : videoFile().getFileName() + ((bool) s[ids::videoShown] ? "" : "  (hidden)"), "video " },
+        { "Video start", videoFile() == juce::File() ? juce::String ("-") : videoStartText(), "video at " },
+        { "Video offset", (int) s[ids::videoOffset] == 0 ? juce::String ("0 frames")
+                                                         : juce::String ((int) s[ids::videoOffset]) + ((int) s[ids::videoOffset] > 0 ? " frames (picture late)" : " frames (picture early)"),
+          "video offset " },
         { "Sample rate", juce::String (sampleRate() / 1000.0, 1) + L" kHz  (set when the session was made)", {}, false },
         { "Theme (all sessions)", theme, {} },
         { "New session rate", juce::String (newRate / 1000.0, newRate == 44100.0 || newRate == 88200.0 ? 1 : 0) + L" kHz  (all sessions)", {} },
@@ -402,6 +408,22 @@ Result App::stepSetting (int index, int direction)
     }
 
     if (name.startsWith ("Show bounces")) return execute ((bool) s[ids::bounceReveal] ? "bounces off" : "bounces on");
+
+    // The video: left/right shows or hides it, moves its start a frame, or its offset a frame.
+    if (name == "Video") return execute ("video");
+    if (name == "Video offset") return execute ("video offset " + juce::String (juce::jlimit (-100, 100, (int) s[ids::videoOffset] + direction)));
+
+    if (name == "Video start")
+    {
+        if (video == nullptr)
+            return Result::fail (L"no video \x00b7 video <file> adds one");
+
+        beginEdit ("video start");
+        const auto frame = sampleRate() / juce::jmax (1.0, video->info().fps);
+        const auto frames = std::round ((double) (juce::int64) s[ids::videoStart] / frame) + direction; // onto a frame, then one more
+        session->tree().setProperty (ids::videoStart, (juce::int64) std::llround (frames * frame), um());
+        return Result::good ("the video starts at " + videoStartText());
+    }
 
     if (name == "Bounce format")
     {
@@ -737,7 +759,9 @@ Result App::execute (const juce::String& line)
     if (v == "lowlat")             return setLowLatency (p.args[0]);
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
+    if (v == "bv")                 return startBounce (p.args, true);
     if (v == "bounces")            return revealBounces (p.args[0].toLowerCase());
+    if (v == "video")              return videoCommand (p.args, p.rest.trim());
     if (v == "import" || v == "imp")
         return startImport (splitPaths (p.rest), p.hasSelector && ! p.tracks.empty() ? p.tracks.front() : -1);
     if (v == "undo")               return undoEdit();
@@ -767,6 +791,7 @@ Result App::execute (const juce::String& line)
         return p.args[1].isEmpty() ? Result::fail ("browse vol -6 sets the audition level") : setAuditionDb (p.args[1].getDoubleValue());
     if (v == "browse")             return showBrowser (p.args[0].isEmpty() ? ! browserVisible : ! p.args[0].equalsIgnoreCase ("hide"));
     if (v == "index")              return startIndexing (splitPaths (p.rest));
+    if (v == "library")            return describeLibrary();
 
     // edit (shift+E): the focused track's clip at the cursor (or the nearest) in its editor;
     // "9 edit" on track 9; "edit new" an empty MIDI clip to draw into.

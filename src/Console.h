@@ -25,7 +25,7 @@ struct Key
         PageDown,
         Delete,
         F1,
-        Mouse // a button pressed in the terminal (Windows only so far)
+        Mouse // a button pressed in the terminal
     };
 
     Code code = None;
@@ -37,6 +37,7 @@ struct Key
     // double-click (the first arrives as an ordinary press).
     int x = 0, y = 0;
     bool right = false, doubleClick = false;
+    bool drag = false; // moved with the left button held (Windows only so far)
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.
@@ -72,6 +73,11 @@ public:
     void* keyboardHeldBy() const;
     void toggleKeyboardHold (void* pluginWindow);
 
+    // Whether the key that types ch (unshifted) is held down right now: 1 down, 0 up, -1 can't
+    // tell. Read from the keyboard itself, for keys mode (LiveKeys), since terminals don't
+    // report releases. macOS reads it by the key's place on a US keyboard.
+    int keyDown (wchar_t ch) const;
+
     // Puts text on the system clipboard.
     static void setClipboardText (const char* text);
     int height() const;
@@ -85,6 +91,7 @@ private:
     unsigned long oldInMode = 0, oldOutMode = 0;
     std::vector<unsigned short> held; // keys down now (virtual key codes), to spot auto-repeat
     unsigned long buttonsDown = 0;    // mouse buttons down at the last event, to spot presses
+    int dragX = -1, dragY = -1;       // the cell a press or drag last reported
     void* terminal = nullptr;         // the terminal's window (conhost's, or Windows Terminal's)
     double readySince = 0.0;          // when a plugin window last had the keyboard and the mouse let go
     void* held_by = nullptr;          // a plugin window keeping the keyboard (keyboardHeldBy)

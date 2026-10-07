@@ -122,6 +122,9 @@ static void applyDefaults (juce::ValueTree& s)
     def (ids::bounceFormat, "wav");
     def (ids::bounceFolder, "bounces");
     def (ids::bounceReveal, true);
+    def (ids::videoStart, (juce::int64) 0);
+    def (ids::videoOffset, 0);
+    def (ids::videoShown, true);
 
     for (auto t : s)
     {

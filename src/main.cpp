@@ -5,6 +5,7 @@
 #include "Plugins.h"
 #include "Safety.h"
 #include "Ui.h"
+#include "Video.h"
 
 #include <juce_events/juce_events.h>
 
@@ -217,6 +218,198 @@ int main (int argc, char** argv)
         std::puts (ok ? "ok" : "FAILED");
         return ok ? 0 : 1;
     }
+
+#if TAW_VIDEO
+    // taw --videotest <video> [out.png]   the picture: frames land exactly (each one's number from
+    // its timestamp, and its pixels against the ffmpeg command line's), how fast playing and
+    // seeking are, and the window (follows a clock, never takes the keyboard). Saves what it
+    // showed as out.png.
+    if (args[0] == "--videotest" && args.size() >= 2)
+    {
+        const auto file = juce::File::getCurrentWorkingDirectory().getChildFile (args[1].unquoted());
+        taw::VideoDecoder dec;
+        juce::String error;
+
+        if (! dec.open (file, error))
+        {
+            std::printf ("%s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        const auto& info = dec.info();
+        std::printf ("%s  %dx%d  %.3f fps  %.2f s\n", info.codec.toRawUTF8(), info.width, info.height, info.fps, info.duration);
+        bool ok = true;
+        auto now = [] { return juce::Time::getMillisecondCounterHiRes(); };
+
+        // Playing: every frame in turn, asked for mid-frame and right at its start.
+        const int playFrames = juce::jmin (300, (int) (info.duration * info.fps) - 1);
+        auto t0 = now();
+        juce::Image img;
+
+        for (int i = 0; i < playFrames; ++i)
+        {
+            const auto got = dec.seek ((i + 0.5) / info.fps);
+            const auto atStart = dec.seek (i / info.fps);
+
+            if (got != i || atStart != i)
+            {
+                std::printf ("FAILED: frame %d came back as %lld (at its start: %lld)\n", i, (long long) got, (long long) atStart);
+                ok = false;
+                break;
+            }
+
+            dec.render (img, 1280, 720);
+        }
+
+        const auto playMs = (now() - t0) / juce::jmax (1, playFrames);
+        std::printf ("playing: %.2f ms a frame (decode + scale to 1280x720), %d seeks\n", playMs, dec.seeks);
+
+        // Jumping about: forward, back, far, near.
+        juce::Random rng (7);
+        double worst = 0.0, total = 0.0;
+        const int jumps = 40;
+
+        for (int j = 0; j < jumps; ++j)
+        {
+            const auto frame = (juce::int64) rng.nextInt ((int) (info.duration * info.fps) - 2);
+            const auto start = now();
+            const auto got = dec.seek ((frame + 0.25) / info.fps);
+            const auto ms = now() - start;
+            worst = juce::jmax (worst, ms);
+            total += ms;
+
+            if (got != frame)
+            {
+                std::printf ("FAILED: jump to frame %lld came back as %lld\n", (long long) frame, (long long) got);
+                ok = false;
+            }
+        }
+
+        std::printf ("jumping: %.1f ms on average, %.1f ms at worst\n", total / jumps, worst);
+
+        if (dec.seek (-0.01) != -1 || dec.seek (info.duration + 1.0) != -1)
+        {
+            std::puts ("FAILED: before the start or past the end isn't black");
+            ok = false;
+        }
+
+        // Pixels: each frame is nearer the ffmpeg command line's same frame than its neighbours.
+        const auto exe = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("ffmpeg.exe");
+        const auto cli = exe.existsAsFile() ? exe.getFullPathName() : juce::String ("ffmpeg");
+        const int w = 320, h = 180;
+        auto reference = [&] (juce::int64 frame, juce::MemoryBlock& out)
+        {
+            const auto raw = juce::File::createTempFile (".raw");
+            juce::ChildProcess p;
+            // By number (select's n counts frames from the start): no question which frame a time means.
+            juce::StringArray cmd { cli, "-v", "error", "-y", "-i", file.getFullPathName(), "-vf",
+                                    "select=eq(n\\," + juce::String (frame) + "),scale=320:180:flags=bilinear",
+                                    "-frames:v", "1", "-pix_fmt", "bgra", "-f", "rawvideo", raw.getFullPathName() };
+            const bool ran = p.start (cmd) && p.waitForProcessToFinish (30000) && raw.loadFileAsData (out);
+            raw.deleteFile();
+            return ran && out.getSize() == (size_t) (w * h * 4);
+        };
+        auto difference = [&] (const juce::Image& a, const juce::MemoryBlock& b)
+        {
+            const juce::Image::BitmapData px (a, juce::Image::BitmapData::readOnly);
+            const auto* ref = static_cast<const juce::uint8*> (b.getData());
+            double sum = 0.0;
+
+            for (int y = 0; y < h; ++y)
+                for (int x = 0; x < w * 4; ++x)
+                    if (x % 4 != 3)
+                        sum += std::abs ((int) px.getLinePointer (y)[x] - (int) ref[(y * w * 4) + x]);
+
+            return sum / (w * h * 3);
+        };
+
+        for (const auto at : { 0.26, 0.52, 0.78 })
+        {
+            const auto frame = (juce::int64) (info.duration * at * info.fps);
+            juce::MemoryBlock before, same, after;
+
+            if (! reference (frame - 1, before) || ! reference (frame, same) || ! reference (frame + 1, after))
+            {
+                std::puts ("no ffmpeg command line to compare pixels with (skipped)");
+                break;
+            }
+
+            dec.seek ((frame + 0.5) / info.fps);
+            juce::Image mine;
+            dec.render (mine, w, h);
+            const auto dSame = difference (mine, same), dBefore = difference (mine, before), dAfter = difference (mine, after);
+            const bool exact = dSame < dBefore && dSame < dAfter && dSame < 6.0;
+            std::printf ("frame %lld: off by %.2f from ffmpeg's (its neighbours: %.2f, %.2f) %s\n", (long long) frame, dSame, dBefore, dAfter,
+                         exact ? "ok" : dBefore == dSame || dAfter == dSame ? "FAILED (or the picture doesn't move there)" : "FAILED");
+            ok = ok && exact;
+        }
+
+        // The window, following a clock: no keyboard taken, the right frame on it.
+        std::atomic<double> clock { -1.0 };
+        taw::VideoPlayer player ([&clock] { return clock.load(); });
+
+        if (! player.open (file, error))
+        {
+            std::printf ("FAILED: %s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        const auto front = GetForegroundWindow();
+        player.setVisible (true);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+
+        if (player.shownFrame() != -1)
+        {
+            std::puts ("FAILED: the window isn't black before the video starts");
+            ok = false;
+        }
+
+        clock = 10.5 / info.fps;
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
+        const auto shown = player.shownFrame();
+        std::printf ("window: frame %lld for frame 10 %s\n", (long long) shown, shown == 10 ? "ok" : "FAILED");
+        ok = ok && shown == 10;
+
+        // Playing in real time for a second: frames shown in order, none late.
+        const auto playStart = now();
+        int changes = 0;
+        juce::int64 last = shown;
+
+        while (now() - playStart < 1000.0)
+        {
+            clock = 10.5 / info.fps + (now() - playStart) / 1000.0;
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+
+            if (const auto f = player.shownFrame(); f != last)
+            {
+                changes += f == last + 1 ? 1 : 0;
+                last = f;
+            }
+        }
+
+        std::printf ("played: %d of %d frames in a second, one after another\n", changes, juce::roundToInt (info.fps));
+
+        if (GetForegroundWindow() != front)
+        {
+            std::puts ("FAILED: showing the window took the keyboard");
+            ok = false;
+        }
+
+        if (args.size() >= 3)
+        {
+            const auto png = juce::File::getCurrentWorkingDirectory().getChildFile (args[2]);
+            png.deleteFile();
+            juce::FileOutputStream out (png);
+            juce::PNGImageFormat format;
+            const auto pic = player.snapshot();
+            std::printf ("saved %s %s\n", png.getFullPathName().toRawUTF8(), out.openedOk() && pic.isValid() && format.writeImageToStream (pic, out) ? "" : "(FAILED)");
+        }
+
+        player.setVisible (false);
+        std::puts (ok ? "ok" : "FAILED");
+        return ok ? 0 : 1;
+    }
+#endif
 
     // taw --miditest [output]   open every MIDI input the way taw does, send a note out of a
     // loopback port (LoopBe by default), and check it comes back in. Then lists what each sent.
@@ -868,12 +1061,14 @@ int main (int argc, char** argv)
         auto describe = [] (const std::vector<taw::Key>& keys)
         {
             static const char* names[] = { "None", "Char", "Enter", "Backspace", "Escape", "Tab", "Left", "Right", "Up",
-                                           "Down", "Home", "End", "PageUp", "PageDown", "Delete", "F1" };
+                                           "Down", "Home", "End", "PageUp", "PageDown", "Delete", "F1", "Mouse" };
             juce::StringArray out;
 
             for (const auto& k : keys)
                 out.add (juce::String (k.ctrl ? "ctrl+" : "") + (k.alt ? "alt+" : "") + (k.shift ? "shift+" : "")
-                         + (k.code == taw::Key::Char ? juce::String::charToString ((juce::juce_wchar) k.ch) : juce::String (names[k.code])));
+                         + (k.code == taw::Key::Char    ? juce::String::charToString ((juce::juce_wchar) k.ch)
+                            : k.code == taw::Key::Mouse ? juce::String (k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
+                                                        : juce::String (names[k.code])));
 
             return out.joinIntoString (" ");
         };
@@ -890,6 +1085,13 @@ int main (int argc, char** argv)
             // kitty keyboard protocol (iTerm2, Ghostty, kitty, WezTerm); cmd counts as alt
             { "\x1b[27u", "Escape" }, { "\x1b[91;5u", "ctrl+[" }, { "\x1b[109;5u", "ctrl+m" }, { "\x1b[32;5u", "ctrl+ " },
             { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
+            // kitty's shift+return; taw's Terminal profile: ctrl+up/down
+            { "\x1b[13;2u", "shift+Enter" }, { "\x1b[1;5A", "ctrl+Up" }, { "\x1b[1;5B", "ctrl+Down" },
+            // SGR mouse: presses only (not releases, moves, the wheel or the middle button), cells from 0
+            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<32;10;5M", "" },
+            { "\x1b[<1;10;5M", "" }, { "\x1b[<6;3;2M", "shift+right@2,1" }, { "\x1b[<16;3;2M", "ctrl+click@2,1" },
+            { "\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M", "click@19,6 click2@19,6 click@19,6" },
+            { "\x1b[<0;30;7M\x1b[<0;31;7M", "click@29,6 click@30,6" },
         };
 
         // Control bytes made readable: esc[1;5D, 0x1a.

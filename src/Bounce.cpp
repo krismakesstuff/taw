@@ -1,5 +1,6 @@
 ﻿#include "Bounce.h"
 #include "Plugins.h"
+#include "Video.h"
 
 #if JUCE_WINDOWS
  #define WIN32_LEAN_AND_MEAN
@@ -271,8 +272,8 @@ private:
 #endif
 } // namespace
 
-Bounce::Bounce (std::unique_ptr<Graph> g, juce::Range<juce::int64> r, double rate, Format f, juce::File file)
-    : juce::Thread ("taw bounce"), graph (std::move (g)), range (r), sampleRate (rate), format (f), target (std::move (file))
+Bounce::Bounce (std::unique_ptr<Graph> g, juce::Range<juce::int64> r, double rate, Format f, juce::File file, Picture pic)
+    : juce::Thread ("taw bounce"), graph (std::move (g)), range (r), sampleRate (rate), format (f), target (std::move (file)), picture (std::move (pic))
 {
     bus.setSize (2, blockSize);
     buses.setSize (juce::jmax (1, juce::jmin (graph->numBuses, Graph::maxBuses) * 2), blockSize);
@@ -357,8 +358,13 @@ void Bounce::run()
 
     std::unique_ptr<juce::AudioFormatWriter> wav;
     std::unique_ptr<Mp3Writer> mp3;
+    std::unique_ptr<VideoMuxer> mp4;
 
-    if (format == Format::wav)
+    if (format == Format::video)
+    {
+        mp4 = std::make_unique<VideoMuxer> (partial, picture.file, picture.from, range.getLength(), sampleRate, error);
+    }
+    else if (format == Format::wav)
     {
         std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (partial);
         wav = juce::WavAudioFormat().createWriterFor (stream, juce::AudioFormatWriterOptions{}
@@ -389,7 +395,9 @@ void Bounce::run()
         const auto n = (int) juce::jmin<juce::int64> (blockSize, range.getEnd() + graph->latency - pos);
         renderBlock (pos, n, block);
 
-        const bool ok = wav != nullptr ? wav->writeFromAudioSampleBuffer (block, 0, n) : mp3->write (block, n);
+        const bool ok = wav != nullptr ? wav->writeFromAudioSampleBuffer (block, 0, n)
+                        : mp4 != nullptr ? mp4->write (block, n)
+                                         : mp3->write (block, n);
 
         if (! ok)
             error = "write failed: " + target.getFullPathName();
@@ -400,8 +408,12 @@ void Bounce::run()
     if (mp3 != nullptr && error.isEmpty() && ! cancelled && ! mp3->finish())
         error = "MP3 encoder failed to finish";
 
+    if (mp4 != nullptr && error.isEmpty() && ! cancelled && ! mp4->finish())
+        error = "the video didn't finish writing";
+
     wav.reset();
     mp3.reset();
+    mp4.reset();
 
     // Only a complete file gets the real name.
     if (error.isEmpty() && ! cancelled)

@@ -800,7 +800,7 @@ Result App::showLane (int trackIndex, const juce::String& param)
     const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
     return Result::good (automationName (track, param) + " lane on " + trackList ({ trackIndex })
                          + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet: [ ] or pt <value>"))
-                         + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 learn maps a knob to it")));
+                         + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 map: a knob runs it")));
 }
 
 // A lane off the track, its points and controller with it (undo brings it back).
@@ -1135,7 +1135,7 @@ void App::handleControl (const ControlMsg& m)
         const auto owner = automationOwner (learning.track);
         auto lane = Session::automation (owner, learning.param);
         auto parent = owner;
-        beginEdit ("learn");
+        beginEdit ("map");
 
         if (! lane.isValid())
         {
@@ -1143,11 +1143,14 @@ void App::handleControl (const ControlMsg& m)
             parent.appendChild (lane, um());
         }
 
+        // A knob runs one parameter: learning it here takes it off the others.
+        const auto moved = freeControl (cc, channel, lane);
         lane.setProperty (ids::num, cc, um());
         lane.setProperty (ids::ch, channel, um());
         midiInputs->controlRouting().learning = false;
         say (Result::good ("CC " + juce::String (cc) + " ch " + juce::String (channel) + L" \x2192 " + automationName (owner, learning.param)
                            + (learning.track >= 0 ? " on track " + juce::String (learning.track + 1) : juce::String (" on the mix"))
+                           + (moved.isEmpty() ? juce::String() : " (was " + moved.joinIntoString (", ") + ")")
                            + L" \x00b7 shift+W arms writing, then play records it"));
         learning = {};
         syncControlMap(); // right away: the knob is probably still moving
@@ -1294,7 +1297,7 @@ void App::commitTouch (Touch& t)
                        + formatBars (t.written.back().first) + L" \x00b7 ctrl+z undoes"));
 }
 
-// learn: the next controller moved controls the parameter the focused track shows.
+// map: the next controller moved controls the parameter the focused track shows.
 Result App::learnControl (const juce::String& arg)
 {
     if (arg.equalsIgnoreCase ("off") || learning.track > -2)
@@ -1305,7 +1308,7 @@ Result App::learnControl (const juce::String& arg)
         if (midiInputs != nullptr)
             midiInputs->controlRouting().learning = false;
 
-        return Result::good (was ? "stopped learning" : "not learning");
+        return Result::good (was ? "stopped mapping" : "not mapping");
     }
 
     int track = -1;
@@ -1314,14 +1317,14 @@ Result App::learnControl (const juce::String& arg)
     if (auto r = automationTrack (track, param); ! r.ok)
         return r;
 
-    // learn 74 (or learn 74 2 for channel 2): that controller, without moving it.
+    // map 74 (or map 74 2 for channel 2): that controller, without moving it.
     if (arg.containsOnly ("0123456789 ") && arg.trim().isNotEmpty())
     {
         const auto parts = juce::StringArray::fromTokens (arg.trim(), " ", {});
         const auto cc = parts[0].getIntValue(), ch = parts.size() > 1 ? parts[1].getIntValue() : 0;
 
         if (cc < 0 || cc > 127 || ch < 0 || ch > 16)
-            return Result::fail ("learn 74 (controller 0-127), learn 74 2 (on channel 2)");
+            return Result::fail ("map 74 (controller 0-127), map 74 2 (on channel 2)");
 
         auto owner = automationOwner (track);
         auto lane = Session::automation (owner, param);
@@ -1332,6 +1335,7 @@ Result App::learnControl (const juce::String& arg)
             owner.appendChild (lane, um());
         }
 
+        const auto moved = freeControl (cc, ch, lane);
         lane.setProperty (ids::num, cc, um());
 
         if (ch > 0)
@@ -1339,19 +1343,76 @@ Result App::learnControl (const juce::String& arg)
         else
             lane.removeProperty (ids::ch, um());
 
-        return Result::good ("CC " + juce::String (cc) + (ch > 0 ? " ch " + juce::String (ch) : juce::String()) + L" \x2192 " + automationName (owner, param));
+        return Result::good ("CC " + juce::String (cc) + (ch > 0 ? " ch " + juce::String (ch) : juce::String()) + L" \x2192 " + automationName (owner, param)
+                             + (moved.isEmpty() ? juce::String() : " (was " + moved.joinIntoString (", ") + ")"));
     }
 
     if (midiInputs == nullptr)
-        return Result::fail ("no MIDI inputs here: learn 74 names the controller instead");
+        return Result::fail ("no MIDI inputs here: map 74 names the controller instead");
 
     learning = { track, param };
     midiInputs->controlRouting().learning = true;
-    return Result::good (L"move a knob or fader on your controller for " + automationName (automationOwner (track), param) + L" \x00b7 learn again cancels");
+    return Result::good (L"move a knob or fader on your controller for " + automationName (automationOwner (track), param) + L" \x00b7 map again cancels");
 }
 
-Result App::unmapControl()
+// A controller off every lane it runs but keep (ch 0: any channel; a lane on any channel
+// clashes with every channel). Returns what it ran: "pan on track 2".
+juce::StringArray App::freeControl (int cc, int ch, const juce::ValueTree& keep)
 {
+    juce::StringArray freed;
+
+    auto free = [&] (const juce::ValueTree& owner, const juce::String& where)
+    {
+        for (auto lane : Session::automations (owner))
+        {
+            const int laneCh = lane[ids::ch];
+
+            if (lane == keep || ! lane.hasProperty (ids::num) || (int) lane[ids::num] != cc || (ch > 0 && laneCh > 0 && laneCh != ch))
+                continue;
+
+            lane.removeProperty (ids::num, um());
+            lane.removeProperty (ids::ch, um());
+            freed.add (automationName (owner, lane[ids::param].toString(), false) + where);
+        }
+    };
+
+    free (session->tree(), " on the mix");
+
+    for (int t = 0; t < session->numTracks(); ++t)
+        free (session->track (t), " on track " + juce::String (t + 1));
+
+    return freed;
+}
+
+// unmap: every controller off every lane. unmap 74 (unmap 74 2): that controller, wherever
+// it's mapped. unmap lane: the lane you're on lets its controller go.
+Result App::unmapControl (const juce::String& argIn)
+{
+    const auto arg = argIn.trim();
+
+    if (session != nullptr && (arg.isEmpty() || arg.equalsIgnoreCase ("all")))
+    {
+        int n = 0;
+
+        for (int cc = 0; cc < 128; ++cc)
+            n += freeControl (cc, 0, {}).size();
+
+        return n == 0 ? Result::fail ("no controllers are mapped") : Result::good ("unmapped " + juce::String (n) + (n == 1 ? " lane" : " lanes"));
+    }
+
+    if (session != nullptr && ! arg.equalsIgnoreCase ("lane"))
+    {
+        const auto parts = juce::StringArray::fromTokens (arg, " ", {});
+        const auto cc = parts[0].getIntValue(), ch = parts.size() > 1 ? parts[1].getIntValue() : 0;
+
+        if (! arg.containsOnly ("0123456789 ") || cc < 0 || cc > 127 || ch < 0 || ch > 16)
+            return Result::fail ("unmap (every controller) | unmap 74 (that controller) | unmap lane (the lane you're on)");
+
+        const auto freed = freeControl (cc, ch, {});
+        return freed.isEmpty() ? Result::fail ("CC " + juce::String (cc) + " isn't mapped")
+                               : Result::good ("CC " + juce::String (cc) + " no longer moves " + freed.joinIntoString (", "));
+    }
+
     int track = -1;
     juce::String param;
 

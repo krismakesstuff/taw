@@ -726,8 +726,9 @@ public:
     // Controllers (MIDI CC) mapped to automation lanes: a lane's num (and ch, absent: any
     // channel) say which. A mapped controller always moves its parameter (touch: while it
     // moves, then back to the curve); with write on, playing, its moves are recorded.
-    Result learnControl (const juce::String& arg); // learn (the next controller moved) | learn 74 | learn off
-    Result unmapControl();                         // the shown lane's controller off
+    Result learnControl (const juce::String& arg); // map (the next controller moved) | map 74 | map off
+    Result unmapControl (const juce::String& arg); // unmap (all) | unmap 74 | unmap lane (the one you're on)
+    juce::StringArray freeControl (int cc, int ch, const juce::ValueTree& keep); // off every lane but keep
     Result setWrite (const juce::String& arg);     // aw | aw on | aw off (shift+W)
     bool writeOn = false; // not saved: arming automation is for now
 

@@ -758,8 +758,9 @@ can change over time.
   mixer, then each plugin's automatable parameters (instrument, then inserts), with each
   one's value, points and controller. Typing filters; enter adds (and goes to) a lane;
   delete removes one.
-- **Controllers:** `learn` maps the next CC moved to the lane you're on (`learn 74` names
-  it; `unmap`), saved on the lane (`num`, `ch`). The MIDI inputs send mapped CCs (all CCs
+- **Controllers:** `map` maps the next CC moved to the lane you're on (`map 74` names
+  it, and moves it off any other lane), saved on the lane (`num`, `ch`). `unmap` clears every
+  mapping, `unmap 74` one controller, `unmap lane` the lane you're on. The MIDI inputs send mapped CCs (all CCs
   while learning) to the message thread instead of the instruments (`ControlRouting`). A
   moving controller sets a `LiveValue` the lane's curve reads, so you hear it at once (touch);
   on a lane with no points a knob is a fader (where it's left becomes the setting). With write

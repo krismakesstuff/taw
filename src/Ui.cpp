@@ -1693,7 +1693,7 @@ void Ui::drawTimeline (App& app)
 
             // A lane with nothing on it yet says how to start.
             if (curve.pos.empty() && ! touched && focusedLane)
-                canvas.text (laneX + 1, y, L"no points: [ ] or pt <value> \x00b7 learn maps a knob", colour::dim, canvas.at (laneX + 1, y).bg, false, laneW - 2);
+                canvas.text (laneX + 1, y, L"no points: [ ] or pt <value> \x00b7 map: a knob runs it", colour::dim, canvas.at (laneX + 1, y).bg, false, laneW - 2);
         }
     }
 
@@ -1964,7 +1964,8 @@ void Ui::drawHelp (App&)
         { Pair, L"shift+A", L"automation lanes under a track", L"auto", L"its parameters: enter adds a lane" },
         { Pair, L"| on a lane", L"change what the lane shows", L"lane cutoff", L"...by name (on the track: adds)" },
         { Pair, L"pt -6", L"a point (selection: a level)", L"[ ]  del", L"on a lane: move / remove points" },
-        { Pair, L"learn", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },
+        { Pair, L"map", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },
+        { Pair, L"unmap", L"every knob off (unmap 74: one)", L"unmap lane", L"the knob on the lane you're on" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };

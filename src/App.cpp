@@ -1474,6 +1474,12 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         taw::setPan (tp, (float) (double) t[ids::pan]);
     }
 
+    // The mix bus's inserts (their latency joins delay compensation's in applyRouting).
+    addInserts (g->mixBus, session->tree(), offline);
+
+    for (const auto& fx : g->mixBus.inserts)
+        g->mixBus.latency += fx->latency();
+
     applyRouting (*g, offline);
 
     // Plugins that are gone (undo, a removed insert, a track no longer an instrument): state
@@ -1481,8 +1487,9 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
     if (! offline)
         for (auto it = hosted.begin(); it != hosted.end();)
         {
+            const auto owner = it->node.getParent(); // an insert's track, or the session (the mix's)
             const bool gone = it->node.hasType (ids::INSERT)
-                                  ? ! it->node.getParent().isValid() || ! it->node.getParent().getParent().isValid()
+                                  ? ! owner.isValid() || (! owner.hasType (ids::SESSION) && ! owner.getParent().isValid())
                                   : ! it->node.getParent().isValid() || ! Session::isInstrumentTrack (it->node);
 
             if (gone)
@@ -3506,15 +3513,15 @@ void App::handleMainKey (const Key& k)
             // \: into the routing column on the focused track (inserts, sends, then the output).
             else if (lineEmpty && k.ch == '\\' && session != nullptr)
             {
-                if (mixFocused() || onTopLane() || session->numTracks() == 0)
-                    say (Result::fail (L"\\ routes a track \x2014 \x2193 to one"));
+                if (onTopLane() || (session->numTracks() == 0 && ! mixFocused()))
+                    say (Result::fail (L"\\ routes a track or the mix \x2014 \x2193 to one"));
                 else
                 {
                     if (! ioVisible)
                         ioVisible = true, saveSettings();
 
                     ioCell = ioFirstInsert;
-                    say (Result::good (describeIoCell (focused, ioCell)));
+                    say (Result::good (describeIoCell (ioTrack(), ioCell)));
                 }
             }
             // | (shift+\): open or close the plugin under the cursor, playing or not.

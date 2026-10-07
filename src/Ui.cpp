@@ -1721,6 +1721,32 @@ void Ui::drawTimeline (App& app)
         }
 
         canvas.text (leftW - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
+
+        // The mix's inserts A-E in the routing column (after the mix volume, as on a master).
+        if (io && ch == 0)
+        {
+            const bool inColumn = mixFocused && app.ioCell >= 0;
+
+            for (int k = 0; k < Session::numSends; ++k)
+            {
+                const int x = ioX + ioSlots + k * ioSlotW;
+                const int cbg = inColumn && app.ioCell == App::ioFirstInsert + k ? colour::selBg : bg;
+                const auto insert = Session::insert (s.tree(), k);
+                canvas.fill (x - 1, y, ioSlotW, L' ', -1, cbg);
+
+                if (! insert.isValid())
+                    canvas.put (x, y, L'\x00b7', colour::faint, cbg);
+                else
+                    canvas.text (x, y, insert[ids::pluginName].toString(),
+                                 app.insertProblem (insert).isNotEmpty() ? colour::error
+                                 : (bool) insert[ids::bypass]           ? colour::faint
+                                 : app.pluginPending (insert)           ? colour::dim
+                                 : app.insertSittingOut (insert)        ? colour::meterYellow
+                                                                         : colour::note,
+                                 cbg, false, ioSlotW - 1);
+            }
+        }
+
         borders (y);
 
         if (ch == 0 && fill)
@@ -1881,7 +1907,9 @@ void Ui::drawBottom (App& app)
         hints = L"VIDEO  \x2190\x2192 a frame (hold to scrub) \x00b7 ctrl a second \x00b7 alt a beat \x00b7 shift selects \x00b7 tab its start / end \x00b7 click or drag scrubs \x00b7 bv bounces with picture \x00b7 video at moves it";
     else if (app.hasTimeSelection())
         hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
-    else if (app.ioCell >= 0 && app.session != nullptr && ! app.mixFocused() && ! app.onTopLane())
+    else if (app.ioCell >= 0 && app.session != nullptr && app.mixFocused())
+        hints = L"MIX INSERTS (after the mix volume) \x00b7 \x2190\x2192 A-E \x00b7 | opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves";
+    else if (app.ioCell >= 0 && app.session != nullptr && ! app.onTopLane())
         hints = app.ioCell < App::ioFirstSend
                     ? L"\x2190\x2192 inserts, sends, output \x00b7 \x2191\x2193 rows \x00b7 | opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves"
                 : app.ioCell == App::ioOutput
@@ -1942,6 +1970,7 @@ void Ui::drawHelp (App&)
         { Pair, L"ctrl+K", L"keys mode: type to play", L"", L"" },
         { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },
         { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"\\   io", L"inserts+sends column / hide" },
+        { Pair, L"mix fx lim", L"an effect on the mix bus", L"\\ on Mix", L"its inserts (after its fader)" },
         { Heading, L"SESSION", nullptr, nullptr, nullptr },
         { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
         { Pair, L"count 4", L"count-in clicks (off)", L"count always", L"...on play too (rec: not)" },
@@ -2062,7 +2091,7 @@ void Ui::drawPluginPicker (App& app)
 
     const bool effects = app.pluginPickSlot >= 0;
     canvas.text (x0 + 2, y0 + 1, effects ? "EFFECTS" : "INSTRUMENTS", colour::text, bg, true);
-    canvas.text (x0 + 15, y0 + 1, effects ? "insert " + Session::slotName (app.pluginPickSlot) + " on track " + juce::String (app.pluginPickTarget + 1)
+    canvas.text (x0 + 15, y0 + 1, effects ? "insert " + Session::slotName (app.pluginPickSlot) + " on " + app.insertOwnerName (app.pluginPickTarget)
                                   : app.pluginPickTarget >= 0 ? "onto track " + juce::String (app.pluginPickTarget + 1) : juce::String ("a new track"),
                  colour::dim, bg);
 

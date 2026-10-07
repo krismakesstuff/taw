@@ -301,6 +301,10 @@ public:
     bool ioVisible = true;
     int ioCell = -1; // -1: not in the column; else one of these
     static constexpr int ioFirstInsert = 0, ioFirstSend = 5, ioOutput = 10;
+    // Whose column you're in: the focused track, or -1 for the mix (its inserts only). Insert
+    // functions take -1 for the mix too.
+    int ioTrack() const { return mixFocused() ? -1 : focused; }
+    juce::String insertOwnerName (int track) const; // "track 2", "the mix"
 
     // The bus picker: where the output or a send goes. Type to filter (a new name makes a bus).
     struct BusChoice

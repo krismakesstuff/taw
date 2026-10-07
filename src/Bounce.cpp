@@ -344,7 +344,15 @@ bool Bounce::renderBlock (juce::int64 pos, int n, juce::AudioBuffer<float>& out)
         mixTrack (graph->tracks[(size_t) t], pos, bl, br, n, busPtrs.data(), numBuses, l, r);
     }
 
-    applyMixGain (*graph, pos - graph->latency, l, r, n); // what's heard is that late
+    // The mix volume, then the mix's inserts (as live: mixInserts in AudioEngine.h).
+    HostTransport transport;
+    transport.bpm = graph->bpm;
+    transport.sampleRate = sampleRate;
+    transport.timeSigNum = graph->timeSigNum;
+    transport.timeSigDen = graph->timeSigDen;
+    transport.pos = pos;
+    transport.rolling = true;
+    mixInserts (*graph, pos, transport, l, r, n);
 
     for (int ch = 0; ch < 2; ++ch)
         peakValue = juce::jmax (peakValue, out.getMagnitude (ch, 0, n));

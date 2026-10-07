@@ -62,7 +62,7 @@ juce::ValueTree App::automationOwner (int track) const
 // The plugin a lane's parameter belongs to (loading it if it isn't yet), or null.
 PluginSlot* App::automationPlugin (const juce::ValueTree& owner, const AutomationTarget& target, bool load)
 {
-    if (! owner.hasType (ids::TRACK))
+    if (! owner.hasType (ids::TRACK) && ! owner.hasType (ids::SESSION)) // the mix has inserts too
         return nullptr;
 
     const auto node = target.kind == Kind::instrument ? (Session::isInstrumentTrack (owner) ? owner : juce::ValueTree())

@@ -518,6 +518,14 @@ Stereo one. Typed names pick the same way.
   what you hear, so holding them back would only make you late. (What was already in a delay
   still comes out.) Their own plugins' latency, and a latent plugin on a bus they send to, still
   count.
+- **The mix bus has inserts too** (A to E, `INSERT`s on the `SESSION`): `mix fx limiter`,
+  `mix fx b`, `mix fx b off` and the rest work as `2 fx` does, and on the Mix row `\` steps
+  into its slots (one row, inserts only) and `|` opens one. They run after the mix volume, as
+  on a Pro Tools master fader, so a fade-out goes into the limiter rather than coming after
+  it (`mixInserts`, shared by playback and bounces). Their latency adds to the mix's after the
+  tracks' delay compensation; the mix volume's automation is read where the audio entering
+  the mix is, and the inserts' parameter automation (`fx a/<id>` lanes on the session) the
+  same. Always stereo. In code, track index -1 means the mix (`ioTrack`, as `automationOwner`).
 - **Low latency mode** (`lowlat`, off by default, not saved): inserts with more latency than the
   session's limit (`lowlat 256`, in samples; also in `project`) sit out, so the mix stops
   running late while you record. They're drawn yellow and the transport shows `LOW LAT`.

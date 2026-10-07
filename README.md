@@ -99,7 +99,8 @@ saved on the way down). Running them in their own process is planned.
 Every track has five insert slots for effect plugins and five sends. `bus Verb` adds a bus
 track; `2 send verb` sends track 2 to it (post-fader at 0 dB; `2 send a -12 pre` sets one up),
 and naming a bus that doesn't exist yet creates it. `3 fx valhalla` puts an effect on track 3
-(on a bus, that's your reverb return); `2 out drums` sends a whole track into a bus.
+(on a bus, that's your reverb return); `2 out drums` sends a whole track into a bus. The mix
+bus has five inserts too, after its fader: `mix fx limiter`, or `\` on the Mix row.
 
 The routing column sits left of the timeline, as in Pro Tools: inserts on a track's first row,
 sends and the output on its second (the R I S M flags sit under the track's name, and the

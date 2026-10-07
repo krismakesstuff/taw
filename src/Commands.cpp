@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "view", "pt" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -760,6 +760,27 @@ Result App::execute (const juce::String& line)
     if (v == "l" || v == "loop")   return setLoop (p.args[0]);
     if (v == "b" || v == "bounce") return startBounce (p.args);
     if (v == "bv")                 return startBounce (p.args, true);
+
+    // Automation: "2 view cutoff" shows a parameter on the track's lane ("view clips" goes
+    // back); "pt -6" puts a point at the cursor (or the selection at that level) on the lane.
+    if (v == "view")
+    {
+        if (p.hasSelector)
+            return setView (p.tracks, p.rest);
+
+        if (! selectedTracks().empty())
+            return setView (selectedTracks(), p.rest);
+
+        return onTopLane() || mixFocused() ? setView ({}, p.rest) : setView ({ focused }, p.rest);
+    }
+
+    if (v == "pt")
+    {
+        if (p.hasSelector && ! p.tracks.empty())
+            focusTrack (p.tracks.front());
+
+        return setAutomation (p.rest);
+    }
     if (v == "bounces")            return revealBounces (p.args[0].toLowerCase());
     if (v == "video")              return videoCommand (p.args, p.rest.trim());
     if (v == "import" || v == "imp")

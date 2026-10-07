@@ -719,6 +719,31 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
 - **The map** is a t-SNE of the same distances, scaled to 0..1 and kept in the index. It's the
   exact O(n²) form, fine to a few thousand samples; a whole drive will want Barnes-Hut.
 
+## Automation
+
+Volume, pan, mute, the sends, the mix volume and any plugin parameter (instrument or insert)
+can change over time.
+
+- **Model:** an `AUTO` lane per parameter on its track (on the `SESSION` for the mix), with
+  `POINT`s at beats (so they follow the tempo, like MIDI). `param` says what it controls
+  (`AutomationTarget`): `vol` and `send a`-`e` in dB, `pan` -1..1, `mute` 0/1 (held, not
+  ramped), `inst/<id>` and `fx a/<id>` a plugin parameter 0..1 by its VST3 ID. Straight lines
+  between points, flat before the first and after the last; a new lane starts at the session
+  start with the parameter's setting, so its first point ramps from where it was.
+- **Playback:** `buildGraph` turns lanes into `Curve`s (samples). The mixer's are applied by
+  `mixTrack` in steps of 32 samples, each at its start's value, so a ride is smooth whatever the
+  block size; plugin parameters are set before each block (`automatePlugins`, only when they
+  change; JUCE's hosted parameters take values from the audio thread). The mix volume is read
+  at the playhead less delay compensation, so it moves with what you hear. Bounces use the same
+  functions and 512-sample blocks, so they step like playback. Mute automation decides
+  muting where there is some (solo still applies).
+- **Seeing and editing:** a track's lane shows its clips or one parameter (`view`, shift+A
+  cycles): the curve as a filled graph up the track's rows, points in the accent colour, the
+  parameter and its value at the cursor over the lane. There, `pt <value>` puts a point at the
+  cursor (with a selection, the selection becomes that level and the curve outside it stays),
+  `[ ]` moves the selection's points (or the point at the cursor; makes one if needed), and
+  delete removes the selection's points. Each is one undo step.
+
 ## Bouncing
 
 `b` renders the mix bus (track volume, mute/solo, mix volume; never the click or live inputs)

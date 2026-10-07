@@ -47,6 +47,7 @@ target_sources(taw PRIVATE
     src/Instruments.cpp
     src/Routing.cpp
     src/Inserts.cpp
+    src/AutomationEdit.cpp
     src/TrackMenu.cpp
     src/Midi.cpp
     src/MidiEditor.cpp

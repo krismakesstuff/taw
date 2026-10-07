@@ -235,6 +235,70 @@ void PluginSlot::setState (const juce::MemoryBlock& state)
         plugin->setStateInformation (state.getData(), (int) state.getSize());
 }
 
+std::vector<PluginSlot::Parameter> PluginSlot::parameters() const
+{
+    std::vector<Parameter> out;
+    const auto& params = plugin->getParameters();
+
+    for (int i = 0; i < params.size(); ++i)
+    {
+        auto* p = params[i];
+
+        // Hidden ones (bypass, program changes some plugins expose) aren't worth a lane.
+        if (! p->isAutomatable())
+            continue;
+
+        const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (p);
+        out.push_back ({ i, hosted != nullptr ? hosted->getParameterID() : juce::String (i), p->getName (64) });
+    }
+
+    return out;
+}
+
+int PluginSlot::findParameter (const juce::String& id) const
+{
+    const auto& params = plugin->getParameters();
+
+    for (int i = 0; i < params.size(); ++i)
+        if (const auto* hosted = dynamic_cast<const juce::HostedAudioProcessorParameter*> (params[i]))
+        {
+            if (hosted->getParameterID() == id)
+                return i;
+        }
+        else if (juce::String (i) == id)
+        {
+            return i;
+        }
+
+    return -1;
+}
+
+float PluginSlot::getParameter (int index) const
+{
+    const auto& params = plugin->getParameters();
+    return juce::isPositiveAndBelow (index, params.size()) ? params[index]->getValue() : 0.0f;
+}
+
+void PluginSlot::setParameter (int index, float value)
+{
+    // JUCE's hosted plugins take this from any thread: the value goes with the next block.
+    const auto& params = plugin->getParameters();
+
+    if (juce::isPositiveAndBelow (index, params.size()))
+        params[index]->setValue (value);
+}
+
+juce::String PluginSlot::parameterText (int index, float value) const
+{
+    const auto& params = plugin->getParameters();
+
+    if (! juce::isPositiveAndBelow (index, params.size()))
+        return {};
+
+    const auto label = params[index]->getLabel();
+    return params[index]->getText (value, 16).trim() + (label.isNotEmpty() ? " " + label : juce::String());
+}
+
 bool PluginSlot::hasEditor() const { return plugin->hasEditor(); }
 bool PluginSlot::editorShowing() const { return window != nullptr && window->isVisible(); }
 bool PluginSlot::editorWantsToClose() const { return window != nullptr && window->closeRequested; }

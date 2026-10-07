@@ -672,6 +672,30 @@ private:
 
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
+    void writeLane (const juce::ValueTree& owner, const juce::String& param, std::vector<std::pair<double, double>> points);
+    Result automationTrack (int& track, juce::String& param) const; // the focused track and the parameter it shows
+
+public:
+    // Automation (AutomationEdit.cpp). An owner is a track, or the session for the mix (-1).
+    juce::ValueTree automationOwner (int track) const;
+    juce::String viewOf (int track) const; // what its lane shows: empty = clips, else a param
+    // load false (drawing): a plugin not loaded yet isn't loaded for this; names and values fall back.
+    PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
+    double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
+    double automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos);
+    juce::String automationName (const juce::ValueTree& owner, const juce::String& param, bool load = true);
+    juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
+    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
+    bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
+    Result setView (const std::vector<int>& tracks, const juce::String& what);
+    Result cycleView();                              // shift+A
+    Result setAutomation (const juce::String& value); // pt <value>
+    Result nudgeAutomation (int direction);          // [ ] on a track showing automation
+    Result clearAutomation();                        // delete on one
+
+private:
+    // The automated parameters of a plugin on the track: its "inst/" or "fx a/" lanes (prefix).
+    void addParameterCurves (TrackPlay&, const juce::ValueTree& track, const std::shared_ptr<PluginSlot>&, const juce::String& prefix) const;
     bool cursorMovedWhileRolling = false;
     double cursorMovedAt = 0.0; // ms; the view stops following the playhead briefly after
     void pollBounce();

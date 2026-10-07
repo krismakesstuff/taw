@@ -1267,6 +1267,45 @@ void App::rebuildGraph()
         engine.setGraph (buildGraph());
 }
 
+Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param) const
+{
+    Curve c;
+    const auto lane = Session::automation (owner, param);
+
+    if (! lane.isValid())
+        return c;
+
+    const auto target = AutomationTarget::parse (param);
+    const auto spb = session->samplesPerBeat();
+    c.steps = target.kind == AutomationTarget::Kind::mute;
+
+    for (const auto& p : Session::points (lane))
+    {
+        c.pos.push_back (std::llround ((double) p[ids::beat] * spb));
+        c.val.push_back (target.clamp ((float) (double) p[ids::val]));
+    }
+
+    return c;
+}
+
+void App::addParameterCurves (TrackPlay& tp, const juce::ValueTree& track, const std::shared_ptr<PluginSlot>& plugin, const juce::String& prefix) const
+{
+    if (plugin == nullptr)
+        return;
+
+    for (const auto& lane : Session::automations (track))
+    {
+        const auto param = lane[ids::param].toString();
+
+        if (! param.startsWith (prefix))
+            continue;
+
+        if (const auto index = plugin->findParameter (param.substring (prefix.length())); index >= 0)
+            if (auto curve = automationCurve (track, param); ! curve.empty())
+                tp.parameterCurves.push_back ({ plugin, index, std::move (curve) });
+    }
+}
+
 std::unique_ptr<Graph> App::buildGraph (bool offline)
 {
     auto g = std::make_unique<Graph>();
@@ -1283,8 +1322,12 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         tp.inputChannel = (int) t[ids::input] - 1;
         tp.armed = t[ids::armed];
         tp.inputOnly = t[ids::monitor]; // "mon": hear the input during playback too
-        tp.audible = ! (bool) t[ids::mute] && (! anySolo || (bool) t[ids::solo]);
+        tp.soloAudible = ! anySolo || (bool) t[ids::solo];
+        tp.audible = ! (bool) t[ids::mute] && tp.soloAudible;
         tp.gain = juce::Decibels::decibelsToGain ((float) (double) t[ids::gainDb], -96.0f);
+        tp.volumeCurve = automationCurve (t, "vol");
+        tp.panCurve = automationCurve (t, "pan");
+        tp.muteCurve = automationCurve (t, "mute");
 
         if (Session::isInstrumentTrack (t))
         {
@@ -1315,6 +1358,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
                 }
             }
 
+            addParameterCurves (tp, t, tp.plugin, "inst/");
             g->tracks.push_back (std::move (tp));
             continue;
         }
@@ -1434,6 +1478,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
 
     const auto& s = session->tree();
     g->mixGain = juce::Decibels::decibelsToGain ((float) (double) s[ids::mixDb], -96.0f);
+    g->mixCurve = automationCurve (s, "vol");
     g->bpm = session->bpm();
     g->timeSigNum = session->beatsPerBar();
     g->timeSigDen = juce::jmax (1, (int) s[ids::timeSigDen]);
@@ -3181,6 +3226,16 @@ void App::handleMainKey (const Key& k)
 
     // Delete clears the time selection on the selected (or focused) tracks. So does backspace
     // with nothing typed (a Mac keyboard's delete key sends backspace).
+    // On a track showing automation, delete removes the selection's points instead.
+    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && viewOf (focused).isNotEmpty();
+
+    if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection() && onAutomation)
+    {
+        beginEdit ("delete points");
+        say (clearAutomation());
+        return;
+    }
+
     if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection())
     {
         beginEdit ("delete");
@@ -3244,6 +3299,14 @@ void App::handleMainKey (const Key& k)
         if (onTopLane() && ! mixKey)
         {
             say (Result::fail (L"[ ] ride a track \x2014 \x2193 to one (or { } for the mix)"));
+            return;
+        }
+
+        // A track showing automation: [ ] move its points (or make one at the cursor).
+        if (onAutomation && ! mixKey)
+        {
+            beginEdit ("automation", "auto:" + juce::String (focused) + ":" + viewOf (focused));
+            say (nudgeAutomation (k.ch == ']' ? +1 : -1));
             return;
         }
 
@@ -3408,6 +3471,9 @@ void App::handleMainKey (const Key& k)
             // shift+E: the focused track in its editor, MIDI or audio (or closes it).
             else if (lineEmpty && k.ch == 'E' && session != nullptr)
                 say (toggleEditor());
+            // shift+A: the focused track's lane shows its clips, then each automation parameter.
+            else if (lineEmpty && k.ch == 'A' && session != nullptr)
+                say (cycleView());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

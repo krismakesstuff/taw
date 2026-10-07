@@ -1275,7 +1275,70 @@ void Ui::drawTimeline (App& app)
             if (l.recorder->trackIndex == i && l.start >= 0)
                 liveTake = &l;
 
-        if (instrumentTrack)
+        const auto view = t[ids::view].toString();
+
+        if (view.isNotEmpty())
+        {
+            // Automation: the curve as a filled graph up the track's rows (8 steps a row), points
+            // in the accent colour; a lane with no points shows the setting as a faint level.
+            const auto target = AutomationTarget::parse (view);
+            const auto curve = app.automationCurve (t, view);
+            const auto setting = curve.empty() ? app.staticValue (t, view, false) : 0.0;
+            const int steps = rowsPerTrack * 8;
+
+            auto height = [&] (double v)
+            {
+                if (target.isDecibels())
+                    return v <= -95.9 ? 0.0 : juce::jlimit (0.0, 1.0, (v + 60.0) / 72.0); // -60 to +12 dB, like a fader
+                if (target.kind == AutomationTarget::Kind::pan)
+                    return (v + 1.0) / 2.0;
+                return juce::jlimit (0.0, 1.0, v);
+            };
+
+            for (int c = 0; c < laneW; ++c)
+            {
+                const auto t0 = origin + c * spc, t1 = t0 + spc;
+                const auto mid = (juce::int64) std::llround ((t0 + t1) * 0.5);
+                const auto value = curve.empty() ? setting : (double) curve.at (juce::jmax<juce::int64> (0, mid));
+                const auto filled = juce::roundToInt (height (value) * steps);
+                const auto firstPoint = std::lower_bound (curve.pos.begin(), curve.pos.end(), (juce::int64) std::ceil (t0));
+                const bool point = firstPoint != curve.pos.end() && (double) *firstPoint < t1;
+                const auto line = gridLevel (t0, t1);
+                int cellBg = rowInTimeSelection && inTimeSelection (t0, t1) ? colour::selBg : laneBg;
+                const bool playheadHere = rolling && c == playCol;
+                const bool cursorHere = c == cursorCol && ! playheadHere;
+
+                if (playheadHere)
+                    cellBg = colour::playheadBg;
+                else if (cursorHere && ! rolling)
+                    cellBg = colour::cursorBg;
+
+                for (int r = 0; r < rowsPerTrack; ++r)
+                {
+                    const int part = juce::jlimit (0, 8, filled - (rowsPerTrack - 1 - r) * 8);
+                    wchar_t ch = part == 0 ? (line > 0 && r == rowsPerTrack - 1 ? gridMark : L' ') : (wchar_t) (0x2580 + part);
+                    int fg = curve.empty() ? colour::faint : point ? colour::accent : colour::note;
+
+                    if (part == 0 && line > 0)
+                        fg = line == 2 ? colour::gridBar : colour::faint;
+
+                    if (part == 0 && (playheadHere || (cursorHere && ! rolling)))
+                        ch = cursorMark, fg = playheadHere ? (app.recording ? colour::rec : colour::play) : colour::accent;
+
+                    canvas.put (laneX + c, y + r, ch, fg, cellBg);
+                }
+            }
+
+            // What it is and its value where you are, over the start of the lane.
+            const auto at = rolling ? playhead : app.cursor;
+            const auto label = app.automationName (t, view, false) + "  "
+                               + app.automationText (t, view, curve.empty() ? setting : (double) curve.at (at), false)
+                               + (curve.empty() ? juce::String (L"  \x00b7 no points: [ ] or pt <value>") : juce::String());
+
+            for (int j = 0; j < label.length() && j + 1 < laneW; ++j)
+                canvas.put (laneX + 1 + j, y, (wchar_t) label[j], colour::text, canvas.at (laneX + 1 + j, y).bg);
+        }
+        else if (instrumentTrack)
             drawNotes (i, t, y, laneBg, bg, rowInTimeSelection);
         else
         {
@@ -1422,7 +1485,7 @@ void Ui::drawTimeline (App& app)
         }
 
         // A bus lane says what feeds it.
-        if (busTrack)
+        if (busTrack && view.isEmpty())
         {
             juce::StringArray from;
 
@@ -1782,6 +1845,8 @@ void Ui::drawHelp (App&)
         { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
         { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
         { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
+        { Pair, L"shift+A", L"track shows automation (cycles)", L"view cutoff", L"a plugin parameter (view ?)" },
+        { Pair, L"pt -6", L"a point (selection: a level)", L"[ ]  del", L"on it: move / remove points" },
         { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
         { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
     };

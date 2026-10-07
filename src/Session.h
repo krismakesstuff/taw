@@ -79,6 +79,13 @@ public:
     static juce::ValueTree send (const juce::ValueTree& track, int slot); // invalid when the slot is empty
     static juce::ValueTree insert (const juce::ValueTree& track, int slot); // the effect in slot a-e, or invalid
     static juce::String slotName (int slot) { return juce::String::charToString ((juce::juce_wchar) ('A' + slot)); }
+
+    // Automation: AUTO lanes on a track (or the session, for the mix), each a param and its
+    // POINTs (beat, val), in any order on disk; points() sorts them by beat.
+    static juce::ValueTree automation (const juce::ValueTree& owner, const juce::String& param); // invalid when none
+    static std::vector<juce::ValueTree> automations (const juce::ValueTree& owner);
+    static std::vector<juce::ValueTree> points (const juce::ValueTree& lane);
+    static juce::ValueTree makePoint (double beat, double value);
     static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);
     static juce::ValueTree makeControl (double beat, int num, int val, int channel = 1);
 

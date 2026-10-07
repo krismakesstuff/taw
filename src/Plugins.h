@@ -42,6 +42,21 @@ public:
     juce::MemoryBlock getState() const;
     void setState (const juce::MemoryBlock&);
 
+    // Its parameters, for automation: the ones it lets a host automate, by index, with the ID
+    // that stays put across versions (VST3) and the name it shows.
+    struct Parameter
+    {
+        int index;
+        juce::String id, name;
+    };
+    std::vector<Parameter> parameters() const;
+    int findParameter (const juce::String& id) const; // its index, or -1
+    float getParameter (int index) const;             // 0 to 1
+    juce::String parameterText (int index, float value) const; // as the plugin shows it ("1.2 kHz")
+
+    // Any thread (automation sets it from the audio thread): goes with the next block.
+    void setParameter (int index, float value);
+
     const juce::PluginDescription& description() const { return desc; }
     int latency() const { return plugin->getLatencySamples(); } // samples it delays its output by
     int numOutputs() const { return plugin->getTotalNumOutputChannels(); }

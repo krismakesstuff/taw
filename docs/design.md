@@ -751,9 +751,9 @@ can change over time.
   playing and stays in the list. `lane cutoff` does the same by name; from the track's row
   both add a lane instead.
 - **Editing:** on a lane, `pt <value>` puts a point at the cursor (with a selection, the
-  selection becomes that level and the curve outside it stays), `[ ]` moves the selection's
+  selection becomes that level and the curve outside it stays), alt+up/down moves the selection's
   points (or the point at the cursor; makes one if needed), and delete removes the
-  selection's points. Each is one undo step. `lane cutoff` adds a lane by name.
+  selection's points. Each is one undo step. `[ ]` still ride the track's volume. `lane cutoff` adds a lane by name.
 - **The list (`auto`):** everything the focused track can automate: its lanes first, the
   mixer, then each plugin's automatable parameters (instrument, then inserts), with each
   one's value, points and controller. Typing filters; enter adds (and goes to) a lane;

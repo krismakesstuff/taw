@@ -3252,10 +3252,16 @@ void App::handleMainKey (const Key& k)
         case Key::Left:  nudge (-1, step, k.shift); return;
         case Key::Right: nudge (+1, step, k.shift); return;
         // Ctrl jumps to the first / last track; with shift it selects every track on the way.
-        // Alt moves the selected (or focused) tracks up or down a place.
+        // Alt moves the selected (or focused) tracks up or down a place (on a lane, its points).
         case Key::Up:
         case Key::Down:
-            if (k.alt && ! k.ctrl)
+            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
+            {
+                // On a lane: its points up or down (the selection's, or the one at the cursor).
+                beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
+                say (nudgeAutomation (k.code == Key::Up ? +1 : -1));
+            }
+            else if (k.alt && ! k.ctrl)
             {
                 say (moveTracks (k.code == Key::Up ? -1 : +1));
             }
@@ -3359,14 +3365,6 @@ void App::handleMainKey (const Key& k)
         if (onTopLane() && ! mixKey)
         {
             say (Result::fail (L"[ ] ride a track \x2014 \x2193 to one (or { } for the mix)"));
-            return;
-        }
-
-        // A track showing automation: [ ] move its points (or make one at the cursor).
-        if (onAutomation && ! mixKey)
-        {
-            beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
-            say (nudgeAutomation (k.ch == ']' ? +1 : -1));
             return;
         }
 

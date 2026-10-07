@@ -361,7 +361,7 @@ Result App::setAutomation (const juce::String& valueText)
     return Result::good (automationName (owner, param) + " " + automationText (owner, param, value) + " at " + formatBars (cursor));
 }
 
-// [ ] on a track showing automation: the points in the selection up or down (no points there:
+// alt+up/down on a lane: the points in the selection up or down (no points there:
 // the selection becomes one level, a step from where it was); no selection, the point at the
 // cursor (made there if there isn't one).
 Result App::nudgeAutomation (int direction)
@@ -799,7 +799,7 @@ Result App::showLane (int trackIndex, const juce::String& param)
     const auto lane = Session::automation (track, param);
     const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
     return Result::good (automationName (track, param) + " lane on " + trackList ({ trackIndex })
-                         + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet: [ ] or pt <value>"))
+                         + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet: alt+\x2191\x2193 or pt <value>"))
                          + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 map: a knob runs it")));
 }
 

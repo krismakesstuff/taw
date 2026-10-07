@@ -1658,7 +1658,10 @@ void Ui::drawTimeline (App& app)
             {
                 const auto t0 = origin + c * spc, t1 = t0 + spc;
                 const auto mid = (juce::int64) std::llround ((t0 + t1) * 0.5);
-                const auto v = curve.pos.empty() && ! touched ? setting : (double) curve.at (juce::jmax<juce::int64> (0, mid));
+                // Writing: what's been recorded this pass, up to the playhead, in the record colour.
+                double written = 0.0;
+                const bool wrote = touched && app.writtenValue (node, mid, written);
+                const auto v = wrote ? written : curve.pos.empty() && ! touched ? setting : (double) curve.at (juce::jmax<juce::int64> (0, mid));
                 const auto filled = juce::roundToInt (height (v) * steps);
                 const auto firstPoint = std::lower_bound (curve.pos.begin(), curve.pos.end(), (juce::int64) std::ceil (t0));
                 const bool point = firstPoint != curve.pos.end() && (double) *firstPoint < t1;
@@ -1676,7 +1679,7 @@ void Ui::drawTimeline (App& app)
                 {
                     const int part = juce::jlimit (0, 8, filled - (laneRows - 1 - r) * 8);
                     wchar_t ch = part == 0 ? (line > 0 && r == laneRows - 1 ? gridMark : L' ') : (wchar_t) (0x2580 + part);
-                    int fg = curve.pos.empty() ? colour::faint : point ? colour::accent : colour::note;
+                    int fg = wrote ? colour::rec : curve.pos.empty() ? colour::faint : point ? colour::accent : colour::note;
 
                     if (part == 0 && line > 0)
                         fg = line == 2 ? colour::gridBar : colour::faint;

@@ -67,13 +67,22 @@ double newSessionRate();
 Sequence buildSequence (const juce::ValueTree& track, double samplesPerBeat); // an instrument track's notes, in samples
 
 // What ctrl+c holds: per track, its clips (audio, MIDI or hits), trimmed to the copied range
-// and positioned relative to its start.
+// and positioned relative to its start, and the automation under them.
 struct Clipboard
 {
+    // A lane's curve over the range: its points, with its values at both ends.
+    struct Automation
+    {
+        juce::String param;
+        juce::String plugin; // a plugin parameter's plugin (it pastes only onto the same plugin)
+        std::vector<std::pair<double, double>> points; // beats from the range start, values
+    };
+
     struct Lane
     {
         bool sample = false, instrument = false;
         std::vector<juce::ValueTree> items; // CLIPs (start in samples), or MIDICLIPs / HITCLIPs (beat in beats)
+        std::vector<Automation> automation;
     };
 
     juce::int64 length = 0; // samples
@@ -611,6 +620,7 @@ private:
     bool hitInRange (double beat, double from, double to) const;
     Clipboard gather (const std::vector<int>& tracks, juce::Range<juce::int64>) const;
     int clearRange (int track, juce::Range<juce::int64>); // returns how many clips/hits it touched
+    int clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64>); // ...and their automation there
     Result pasteAt (const Clipboard&, const std::vector<int>& destTracks, juce::int64 at);
     Result checkEditable (const std::vector<int>& tracks, bool needsRange) const;
     juce::Result parsePosition (const juce::String& spec, juce::int64& pos) const; // "17", "17.3", "1:30"
@@ -703,6 +713,15 @@ public:
     Result setAutomation (const juce::String& value); // pt <value>
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one
+
+    // Automation follows clip edits: copied, cut, pasted and moved with the clips over it
+    // (ranges in beats). Clearing keeps the curve outside the range as it was.
+    std::vector<Clipboard::Automation> gatherAutomation (const juce::ValueTree& track, double from, double to) const;
+    void clearAutomationRange (const juce::ValueTree& track, double from, double to);
+    void pasteAutomation (const juce::ValueTree& track, const std::vector<Clipboard::Automation>&, double at, double length);
+    void moveAutomation (const juce::ValueTree& track, double from, double length, double to); // a dragged clip's
+    // While writing, what a controller has written this pass on the lane at pos (false: nothing there).
+    bool writtenValue (const juce::ValueTree& lane, juce::int64 pos, double& value);
 
     // Controllers (MIDI CC) mapped to automation lanes: a lane's num (and ch, absent: any
     // channel) say which. A mapped controller always moves its parameter (touch: while it

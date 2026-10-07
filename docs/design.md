@@ -765,7 +765,17 @@ can change over time.
   on a lane with no points a knob is a fader (where it's left becomes the setting). With write
   on (shift+W, `aw`) and playing, its moves are recorded; 0.6 s after it stops moving, the
   touch releases: its points replace that stretch (one undo step) and the curve glides back
-  over 0.25 s. A stop releases everything.
+  over 0.25 s. A stop releases everything. While it writes, the lane draws what's been
+  written so far, from the touch's first point to the playhead, in the record colour
+  (`writtenValue`).
+- **Follows the clips:** automation goes where the clips over it go. Copy (and so cut,
+  duplicate) takes each automated lane's curve over the range with the clips: its value at
+  each end and the points between (`gatherAutomation`). Paste puts it down at the cursor,
+  replacing what the lane had there and keeping the curve either side (`pasteAutomation`;
+  a plugin parameter only onto the same plugin). Cut and delete clear it from the range,
+  joining the curve across the gap (`clearAutomationRange`). Dragging a clip in the audio
+  editor moves the automation under it when it's let go (`moveAutomation`, the same undo
+  step). Consolidate leaves automation alone.
 
 ## Bouncing
 

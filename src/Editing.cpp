@@ -69,6 +69,8 @@ Clipboard App::gather (const std::vector<int>& tracks, juce::Range<juce::int64> 
             }
         }
 
+        // The automation over the range goes with the clips.
+        lane.automation = gatherAutomation (track, from, to);
         c.lanes.push_back (std::move (lane));
     }
 
@@ -210,6 +212,7 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
             }
         }
 
+        pasteAutomation (track, lane.automation, atBeats, c.beats);
         pasted.add (juce::String (t + 1));
     }
 
@@ -222,6 +225,20 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
         return Result::fail (msg + L" \x00b7 skipped " + skipped.joinIntoString ("; "));
 
     return Result::good (msg);
+}
+
+// Cut and delete: the clips in the range, and the automation under them.
+int App::clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64> range)
+{
+    int n = 0;
+
+    for (auto t : tracks)
+    {
+        n += clearRange (t, range);
+        clearAutomationRange (session->track (t), snapBeats (range.getStart()), snapBeats (range.getEnd()));
+    }
+
+    return n;
 }
 
 Result App::checkEditable (const std::vector<int>& tracks, bool needsRange) const
@@ -264,8 +281,7 @@ Result App::cutSelection (const std::vector<int>& tracks)
     if (auto r = copySelection (tracks); ! r.ok)
         return r;
 
-    for (auto t : tracks)
-        clearRange (t, timeSelection());
+    clearTracks (tracks, timeSelection());
 
     return Result::good ("cut " + formatBars (timeSelection().getStart()) + L" \x2192 " + formatBars (timeSelection().getEnd())
                          + " from " + trackList (tracks) + L" \x00b7 ctrl+v pastes it");
@@ -276,10 +292,7 @@ Result App::deleteSelection (const std::vector<int>& tracks)
     if (auto r = checkEditable (tracks, true); ! r.ok)
         return r;
 
-    int n = 0;
-
-    for (auto t : tracks)
-        n += clearRange (t, timeSelection());
+    const auto n = clearTracks (tracks, timeSelection());
 
     return Result::good ("cleared " + formatBars (timeSelection().getStart()) + L" \x2192 " + formatBars (timeSelection().getEnd())
                          + " on " + trackList (tracks) + (n == 0 ? juce::String (" (it was empty)") : juce::String()));

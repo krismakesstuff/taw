@@ -462,6 +462,157 @@ Result App::clearAutomation()
                          + (out.empty() ? juce::String (L" \x00b7 no automation left: it's back to its setting") : juce::String()));
 }
 
+namespace
+{
+// The plugin a plugin parameter's lane belongs to on this track ("" for the mixer's).
+juce::String pluginOf (const juce::ValueTree& track, const AutomationTarget& target)
+{
+    if (target.kind == Kind::instrument)
+        return track[ids::plugin].toString();
+
+    if (target.kind == Kind::effect)
+        return Session::insert (track, target.slot)[ids::plugin].toString();
+
+    return {};
+}
+} // namespace
+
+// Each automated lane's curve from one beat to another: its value at the start, the points in
+// between and its value at the end, relative to the start.
+std::vector<Clipboard::Automation> App::gatherAutomation (const juce::ValueTree& track, double from, double to) const
+{
+    std::vector<Clipboard::Automation> out;
+
+    for (const auto& lane : Session::automations (track))
+    {
+        const auto pts = readPoints (lane);
+
+        if (pts.empty() || to - from <= sameBeat)
+            continue;
+
+        const auto param = lane[ids::param].toString();
+        const auto target = AutomationTarget::parse (param);
+        const auto steps = target.kind == Kind::mute;
+        Clipboard::Automation a { param, pluginOf (track, target), {} };
+        a.points.push_back ({ 0.0, valueIn (pts, from, steps, 0.0) });
+
+        for (const auto& p : pts)
+            if (p.beat > from + sameBeat && p.beat < to - sameBeat)
+                a.points.push_back ({ p.beat - from, p.val });
+
+        a.points.push_back ({ to - from, valueIn (pts, to - sameBeat, steps, 0.0) });
+        out.push_back (std::move (a));
+    }
+
+    return out;
+}
+
+// The points from one beat to another gone; the curve either side stays as it was, joined
+// across the gap.
+void App::clearAutomationRange (const juce::ValueTree& track, double from, double to)
+{
+    for (const auto& lane : Session::automations (track))
+    {
+        const auto pts = readPoints (lane);
+
+        if (std::none_of (pts.begin(), pts.end(), [&] (const Point& p) { return p.beat > from - sameBeat && p.beat < to + sameBeat; }))
+            continue;
+
+        const auto param = lane[ids::param].toString();
+        const auto steps = AutomationTarget::parse (param).kind == Kind::mute;
+        const auto before = valueIn (pts, from - sameBeat, steps, 0.0), after = valueIn (pts, to, steps, 0.0);
+        std::vector<std::pair<double, double>> out;
+
+        for (const auto& p : pts)
+            if (p.beat <= from - sameBeat || p.beat >= to + sameBeat)
+                out.push_back ({ p.beat, p.val });
+
+        out.push_back ({ from, before });
+        out.push_back ({ to, after });
+        writeLane (track, param, out);
+    }
+}
+
+// Copied curves put down at a beat, replacing what the lanes had there (and making lanes for
+// them where there were none). The curve either side of the paste stays as it was.
+void App::pasteAutomation (const juce::ValueTree& track, const std::vector<Clipboard::Automation>& autos, double at, double length)
+{
+    for (const auto& a : autos)
+    {
+        const auto target = AutomationTarget::parse (a.param);
+
+        if (a.points.empty() || (target.isPlugin() && pluginOf (track, target) != a.plugin))
+            continue;
+
+        const auto steps = target.kind == Kind::mute;
+        const auto old = readPoints (Session::automation (track, a.param));
+        const auto outside = old.empty() ? staticValue (track, a.param) : 0.0;
+        const auto before = valueIn (old, at - sameBeat, steps, outside), after = valueIn (old, at + length, steps, outside);
+        std::vector<std::pair<double, double>> out;
+
+        for (const auto& p : old)
+            if (p.beat <= at - sameBeat || p.beat >= at + length + sameBeat)
+                out.push_back ({ p.beat, p.val });
+
+        // Ties keep this order: the old value up to the paste, the pasted curve, the old value after.
+        if (at > sameBeat && std::abs (before - a.points.front().second) > 1.0e-4)
+            out.push_back ({ at, before });
+
+        for (const auto& [beat, val] : a.points)
+            out.push_back ({ at + beat, val });
+
+        if (std::abs (after - a.points.back().second) > 1.0e-4)
+            out.push_back ({ at + length, after });
+
+        writeLane (track, a.param, out);
+    }
+}
+
+void App::moveAutomation (const juce::ValueTree& track, double from, double length, double to)
+{
+    if (std::abs (to - from) <= sameBeat)
+        return;
+
+    const auto autos = gatherAutomation (track, from, from + length);
+    clearAutomationRange (track, from, from + length);
+    pasteAutomation (track, autos, to, length);
+}
+
+// What's been written so far this pass, from its first point to the playhead (the controller
+// holds its last value until it moves again), so the lane draws it as it records.
+bool App::writtenValue (const juce::ValueTree& lane, juce::int64 pos, double& value)
+{
+    for (const auto& t : touches)
+    {
+        if (t.lane != lane || t.written.empty())
+            continue;
+
+        const auto& w = t.written;
+        const auto end = writeOn && engine.isRolling() ? juce::jmax (w.back().first, heardPlayhead()) : w.back().first;
+
+        if (pos < w.front().first || pos > end)
+            return false;
+
+        const auto it = std::upper_bound (w.begin(), w.end(), pos, [] (juce::int64 p, const auto& e) { return p < e.first; });
+
+        if (it == w.end())
+            value = w.back().second;
+        else if (it == w.begin())
+            value = w.front().second;
+        else
+        {
+            const auto& [p0, v0] = *(it - 1);
+            const auto& [p1, v1] = *it;
+            const bool steps = AutomationTarget::parse (lane[ids::param].toString()).kind == Kind::mute;
+            value = p1 == p0 || steps ? v0 : v0 + (v1 - v0) * (double) (pos - p0) / (double) (p1 - p0);
+        }
+
+        return true;
+    }
+
+    return false;
+}
+
 // lane vol | pan | mute | send a | <plugin parameter name>: a lane for it under the track
 // (opened, and focused); "lane ?" lists the plugins' parameters.
 Result App::laneByName (int trackIndex, const juce::String& whatIn)

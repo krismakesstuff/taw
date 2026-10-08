@@ -299,7 +299,9 @@ void App::pollPlugins()
     // Tweaks made in a plugin's window don't touch the session, so save states now and then.
     const auto now = juce::Time::getMillisecondCounterHiRes();
 
-    if (now - lastStateSave > 15000.0)
+    // Not while playing: building a big plugin's state (a ZENOLOGY's is 200 KB) can hold up its
+    // audio and click. Stopping saves them.
+    if (now - lastStateSave > 15000.0 && ! engine.isRolling())
     {
         lastStateSave = now;
         savePluginStates();

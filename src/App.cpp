@@ -1,4 +1,5 @@
 ﻿#include "App.h"
+#include "AlsImport.h"
 #include "Safety.h"
 #include "Timing.h"
 
@@ -229,6 +230,13 @@ Result App::finishClosing()
     newSessionName.clear();
     pendingTemplate.clear();
     safety::markRunning ({});
+
+    // Closed to open another (an imported Live set).
+    if (const auto next = std::exchange (openAfterClose, juce::File{}); next != juce::File())
+    {
+        startOpening (next);
+        return Result::good (std::exchange (openAfterCloseNote, juce::String{}));
+    }
 
     proceedToSession(); // no session, so: the recent sessions and templates
     return Result::good ("closed " + name + " (saved)");
@@ -764,6 +772,15 @@ Result App::stop()
     // Back to where play started, unless you moved the cursor during playback.
     setCursor (cursorMovedWhileRolling ? cursor : playStart);
     cursorMovedWhileRolling = false;
+
+    // Blocks taw rendered too slowly this pass: each was a dropout (a click). None while you
+    // heard clicks means they came from further down the chain (the driver, Voicemeeter).
+    if (const auto late = engine.lateBlockCount(); late > 0)
+        return Result::fail ((wasRecording ? juce::String (L"stopped \x00b7 saving take \x00b7 ") : juce::String ("stopped "))
+                             + juce::String (late) + (late == 1 ? " dropout" : " dropouts") + L" \x2014 taw's audio ran late (worst block "
+                             + juce::String (juce::roundToInt (engine.worstBlockLoad() * 100.0f))
+                             + L"% of its time) \x00b7 a bigger buffer in dev, or fewer plugins, helps");
+
     return Result::good (wasRecording ? juce::String (L"stopped \x00b7 saving take") : juce::String());
 }
 
@@ -1628,6 +1645,58 @@ juce::StringArray App::splitPaths (const juce::String& text)
     return out;
 }
 
+// import set.als: the set read (never changed), a new session made from it beside the open one
+// (named after the set), then this one closed and that one opened. What didn't come across is
+// in its import-report.txt.
+Result App::importAbletonSet (const juce::File& als)
+{
+    if (! als.existsAsFile())
+        return Result::fail ("no such file: " + als.getFullPathName());
+
+    if (bounce != nullptr || recording)
+        return Result::fail ("stop recording or bouncing first");
+
+    const auto rate = newSessionRate();
+    const auto set = readAbletonSet (als, rate);
+
+    if (set.error.isNotEmpty())
+        return Result::fail (set.error);
+
+    const auto parent = session != nullptr ? session->folder().getParentDirectory() : newSessionParent;
+    const auto base = juce::File::createLegalFileName (als.getFileNameWithoutExtension());
+    auto dir = parent.getChildFile (base);
+
+    for (int n = 2; dir.exists(); ++n)
+        dir = parent.getChildFile (base + " " + juce::String (n));
+
+    juce::String error;
+
+    if (! writeAbletonSession (set, dir, rate, error))
+        return Result::fail (error);
+
+    const auto summary = "imported " + als.getFileName() + " as " + dir.getFileName()
+                         + (set.report.isEmpty() ? juce::String (L" \x00b7 everything came across")
+                                                 : L" \x00b7 " + juce::String (set.report.size()) + L" notes in import-report.txt (what didn't come across)");
+
+    if (session == nullptr)
+    {
+        startOpening (dir);
+        return Result::good (summary);
+    }
+
+    openAfterClose = dir;
+    openAfterCloseNote = summary;
+
+    if (auto r = closeSession(); ! r.ok)
+    {
+        openAfterClose = {};
+        openAfterCloseNote.clear();
+        return Result::fail (summary + L" \x00b7 couldn't close this session to open it: " + r.message);
+    }
+
+    return Result::good (summary);
+}
+
 Result App::startImport (const juce::StringArray& paths, int targetTrack, ImportAs as)
 {
     if (import != nullptr)
@@ -1645,6 +1714,11 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
 
     if (targetTrack >= 0 && targetTrack < session->numTracks() && Session::isBusTrack (session->track (targetTrack)))
         return Result::fail ("track " + juce::String (targetTrack + 1) + L" is a bus \x2014 import alone makes new tracks");
+
+    // A Live set is a whole session of its own.
+    for (const auto& path : paths)
+        if (const auto f = juce::File::getCurrentWorkingDirectory().getChildFile (path.unquoted()); f.hasFileExtension (".als"))
+            return paths.size() == 1 ? importAbletonSet (f) : Result::fail ("import a Live set on its own: it makes a new session");
 
     // MIDI files become instrument tracks straight away; the rest is audio for the importer.
     juce::StringArray audioPaths;

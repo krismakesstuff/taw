@@ -469,6 +469,19 @@ void Ui::drawTransport (App& app)
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
     }
 
+    // How hard the audio is working this pass: the slowest block's share of its time. Over 100%
+    // is a dropout, counted in red.
+    if (const auto load = app.engine.worstBlockLoad(); load > 0.0f)
+    {
+        gap();
+        const auto late = app.engine.lateBlockCount();
+        add ("load " + juce::String (juce::roundToInt (load * 100.0f)) + "%",
+             late > 0 ? colour::error : load > 0.7f ? colour::meterYellow : colour::faint);
+
+        if (late > 0)
+            add (" " + juce::String (late) + (late == 1 ? " dropout" : " dropouts"), colour::error, bg, true);
+    }
+
     // Automation write armed: mapped controllers moved while playing are recorded.
     if (app.writeOn)
     {
@@ -2039,6 +2052,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"index f", L"add a sample folder", L"video offset", L"2: picture 2 frames late" },
             { Pair, L"library", L"folders and samples", L"\x2191 video row", L"\x2190\x2192 frame, ctrl second" },
             { Pair, L"index remove", L"f: take a folder out", L"click / drag", L"on it: scrubs picture" },
+            { Pair, L"import x.als", L"Live set: a new session", L"", L"" },
         } },
     };
 

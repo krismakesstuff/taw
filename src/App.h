@@ -212,6 +212,10 @@ public:
     };
     std::unique_ptr<Opening> opening;
     void startOpening (const juce::File& dir);
+    // import set.als: a new session from an Ableton Live set, beside this one, then opened.
+    Result importAbletonSet (const juce::File& als);
+    juce::File openAfterClose;      // closing, then opening this (the session an import made)
+    juce::String openAfterCloseNote; // ...and what to say when it does
     void stepOpening();
 
     // Closing (close, or quitting with a session open), likewise.

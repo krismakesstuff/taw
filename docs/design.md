@@ -654,6 +654,45 @@ are read as UTF-16 for the same reason.
 
 `taw --importtest <dest> <files...>` imports without a device, for testing.
 
+### Ableton Live sets
+
+`import song.als` (or dropping one) makes a **new session** from the set, beside the open one
+and named after it, then closes this one and opens that (`AlsImport.cpp`). The set and its
+files are only read. What didn't come across is listed in the new session's
+`import-report.txt` (the message line says how many notes it has).
+
+- **Comes across:**
+  - tempo and time signature, locators as markers, the loop
+  - MIDI tracks as instrument tracks: the first device is the instrument, later plugins are
+    inserts
+  - audio tracks: files copied into `audio/`
+  - returns as buses, with every track's sends (Live's pre/post per return), and groups as
+    buses their tracks play into
+  - the master's volume, and its plugins on the mix
+  - volume, pan, mute and sends
+  - automation as lanes: mixer controls, plugin parameters (Live keeps them in the plugin's
+    own units: normalised by the range Live saved), the master's volume. Live's opening
+    event becomes the point at beat 0.
+- **MIDI clips:** a clip is a window onto its content, as in taw: `CurrentStart` and `End`
+  on the timeline, from `LoopStart + StartRelative` in its content. Content can start
+  before 0. A looped clip becomes a clip per pass. Disabled notes are left out.
+- **Plugins:** found by name. A VST3's saved state is Live's `ProcessorState` and
+  `ControllerState`. Those are the plugin's own bytes as hex, re-wrapped as JUCE's
+  `VST3PluginState` and written to `plugins/`, so patches come across exactly. Checked: a
+  ZENOLOGY saves back the same bytes it was given. A VST2 or AU starts from its default
+  settings.
+- **Left out, and said so:**
+  - Live's own devices (EQ Three, Compressor, racks…); ones switched off aren't mentioned
+  - their automation
+  - clip envelopes, muted clips, Session View clips
+  - tempo and time signature changes (a single value isn't a change)
+  - clip gain and fades
+- **Time-stretched audio:** warped to a tempo other than the set's, it can't play right
+  without time-stretching. Its clips are left out and the report says to export the track
+  from Live and import it at bar 1. That track's fader is set to 0 dB and its volume
+  automation is imported but off (shift+O), because the export has them.
+- `taw --alsimport <set.als> <new session folder>` does it without a device, for testing.
+
 ## The sample library
 
 For finding the right sample among thousands: taw measures each one once, sorts them by kind

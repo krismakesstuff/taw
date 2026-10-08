@@ -1,4 +1,5 @@
 ﻿#include "App.h"
+#include "AlsImport.h"
 #include "Bounce.h"
 #include "Import.h"
 #include "Library.h"
@@ -459,6 +460,33 @@ int main (int argc, char** argv)
 
         std::puts (got >= 2 ? "ok" : "FAILED (sent a note, nothing came back)");
         return got >= 2 ? 0 : 1;
+    }
+
+    // taw --alsimport <set.als> <new session folder>   an Ableton Live set into a taw session (no
+    // device; plugins aren't loaded). Prints the report.
+    if (args[0] == "--alsimport" && args.size() >= 3)
+    {
+        const auto cwd = juce::File::getCurrentWorkingDirectory();
+        const auto set = taw::readAbletonSet (cwd.getChildFile (args[1]), taw::newSessionRate());
+
+        if (set.error.isNotEmpty())
+        {
+            std::printf ("%s\n", set.error.toRawUTF8());
+            return 1;
+        }
+
+        juce::String error;
+
+        if (! taw::writeAbletonSession (set, cwd.getChildFile (args[2]), taw::newSessionRate(), error))
+        {
+            std::printf ("%s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        for (const auto& line : set.report)
+            std::printf ("%s\n", line.toRawUTF8());
+
+        return 0;
     }
 
     // taw --bouncetest <folder>   render a synthetic two-track mix to WAV and MP3 (no device needed)

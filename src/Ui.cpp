@@ -2039,6 +2039,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"index f", L"add a sample folder", L"video offset", L"2: picture 2 frames late" },
             { Pair, L"library", L"folders and samples", L"\x2191 video row", L"\x2190\x2192 frame, ctrl second" },
             { Pair, L"index remove", L"f: take a folder out", L"click / drag", L"on it: scrubs picture" },
+            { Pair, L"import x.als", L"Live set: a new session", L"", L"" },
         } },
     };
 

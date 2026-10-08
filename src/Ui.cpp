@@ -2884,11 +2884,13 @@ void Ui::drawHubPage (App& app)
             if (chosen)
                 canvas.put (1, ry, L'\x25b8', colour::accent, rowBg);
 
-            const int fg = live ? colour::text : colour::faint;
-            canvas.text (3, ry, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, false, endW);
-            canvas.put (4 + endW, ry, L'\x2192', live ? colour::accent : colour::faint, rowBg);
-            canvas.text (6 + endW, ry, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, false, endW);
-            canvas.text (8 + 2 * endW, ry, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : colour::faint, rowBg);
+            // Faint is unreadable on the highlight: the chosen row goes no fainter than dim.
+            const int quiet = chosen ? colour::dim : colour::faint;
+            const int fg = live ? colour::text : quiet;
+            canvas.text (3, ry, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, chosen, endW);
+            canvas.put (4 + endW, ry, L'\x2192', live ? colour::accent : quiet, rowBg);
+            canvas.text (6 + endW, ry, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, chosen, endW);
+            canvas.text (8 + 2 * endW, ry, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : quiet, rowBg);
         }
     }
 
@@ -2939,16 +2941,21 @@ void Ui::drawDevicePicker (App& app)
 
         canvas.text (3, top + row, juce::String (i + 1).paddedLeft (' ', 2), colour::dim, bg);
         canvas.text (7, top + row, padRight (c.type, 18), c.type == "ASIO" ? colour::accent : colour::dim, bg);
-        canvas.text (26, top + row, c.output, colour::text, bg, sel);
+        int x = canvas.text (26, top + row, c.output, colour::text, bg, sel);
 
-        if (c.input != c.output && c.input.isNotEmpty())
-            canvas.text (27 + c.output.length(), top + row, "(in: " + c.input + ")", colour::faint, bg);
+        // Its input: the same device unless it says otherwise; ←→ on the chosen row change it.
+        const auto input = c.input.isEmpty() ? juce::String ("no input") : c.input == c.output ? juce::String ("its own input") : "in: " + c.input;
+
+        if (sel && ! c.inputs.isEmpty())
+            canvas.text (x + 2, top + row, L"\x2190 " + input + L" \x2192", colour::dim, bg);
+        else if (c.input != c.output)
+            canvas.text (x + 1, top + row, "(" + input + ")", colour::faint, bg);
     }
 
     drawBottom (app);
     canvas.fill (0, h - 2, w, L' ');
     canvas.fill (0, h - 1, w, L' ');
-    canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
+    canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 \x2190\x2192 input \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
 }
 
 // Opening or closing a session: what it's doing, and how far along.

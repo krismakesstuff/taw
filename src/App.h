@@ -57,6 +57,7 @@ struct LiveTake
 struct DeviceChoice
 {
     juce::String type, output, input;
+    juce::StringArray inputs; // the type's inputs, for ←→ ("" none); empty when it pairs them (ASIO)
 };
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
@@ -567,6 +568,10 @@ private:
     Result createSession (const Template&);
     void attachSession (std::unique_ptr<Session>);
     void matchDeviceSampleRate();
+
+    // A device that's both the input and the output and runs below 44.1 kHz: a Bluetooth
+    // headset with its mic open. Instruments can go silent at that rate. Empty when it isn't.
+    juce::String headsetWarning();
 
     Result startRecorders (const std::vector<int>& tracks);
     juce::int64 heardPosition (juce::int64 playhead); // minus output latency, when compensating

@@ -277,9 +277,9 @@ int main (int argc, char** argv)
         return 0;
     }
 
-    // taw --plugintest <file.vst3>   load one plugin and play it the way the engine does: a chord
-    // from the timeline, a stop, a key from the controller, a disarm. Checks its state round-trips.
-    // Leaves the plugin list alone.
+    // taw --plugintest <file.vst3> [rate]   load one plugin and play it the way the engine does: a
+    // chord from the timeline, a stop, a key from the controller, a disarm. Checks its state
+    // round-trips. At 48 kHz unless a rate is given. Leaves the plugin list alone.
     if (args[0] == "--plugintest")
     {
         juce::AudioPluginFormatManager formats;
@@ -296,7 +296,7 @@ int main (int argc, char** argv)
         }
 
         const auto desc = *found[0];
-        constexpr double rate = 48000.0;
+        const double rate = args[2].getDoubleValue() > 0.0 ? args[2].getDoubleValue() : 48000.0;
         constexpr int block = 512;
         juce::String error;
         auto instance = formats.createPluginInstance (desc, rate, block, error);

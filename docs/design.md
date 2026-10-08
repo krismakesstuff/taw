@@ -104,6 +104,13 @@ One mode, stopped or rolling: keystrokes build a command line and `Enter` runs i
 Space and Ctrl keys act immediately and never touch the command line. While rolling, a
 PLAYING / RECORDING label sits in front of the prompt. Changing the audio device needs a stop.
 
+**Device rates.** The engine and its plugins run at the device's rate. A Bluetooth headset
+whose own mic is open drops to 16 kHz mono, and some instruments are silent there (Roland's
+EARTH is; `taw --plugintest <file> 16000` shows it). In `dev`, ←→ gives an output another
+input (the Mac's mic, or none), which keeps the headset in stereo at 44.1/48 kHz. A device
+that's its own input and runs below 44.1 kHz gets a warning saying so. Planned: running the
+engine at the session's rate and converting to the device's, so any device works.
+
 ### Navigation keys (idle and rolling)
 
 | Key | Grid on | Grid off |
@@ -255,7 +262,7 @@ records the selected tracks, else whatever is armed.
 | `count always` / `count rec` | count in on plain playback too / only when recording starts (default) |
 | `height 3` | rows per track, 1-4 (default 2); saved with the session |
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
-| `dev` | choose audio device |
+| `dev` | choose audio device; ←→ on a row picks its input (CoreAudio: another device, or none) |
 | `panel` | open the ASIO driver control panel |
 | `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; save and go back to the sessions; save and quit (`q` alone is a view key) |
 | `close` | save and close the session, back to the recent sessions / new session screen |

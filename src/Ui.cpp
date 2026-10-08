@@ -1946,101 +1946,146 @@ void Ui::drawBottom (App& app)
     canvas.text (1, hintY, hints, colour::dim, -1, false, w - 2);
 }
 
-void Ui::drawHelp (App&)
+void Ui::drawHelp (App& app)
 {
-    // Two columns of "keys  what it does". Headings span a column; notes span the box.
-    enum Kind { Pair, Heading, Note, Blank };
+    // Pages of two columns of "keys  what it does", so it fits a small screen (80 x 24). The
+    // tabs run along the top; headings span a column, notes span the box.
+    enum Kind { Pair, Heading, Note };
     struct Row { Kind kind; const wchar_t *k1, *d1, *k2, *d2; };
+    struct Page { const wchar_t* name; std::vector<Row> rows; };
 
-    static const Row rows[] = {
-        { Heading, L"MOVE", nullptr, L"PLAY & RECORD", nullptr },
-        { Pair, L"\x2190 \x2192", L"next grid line (zoom)", L"space", L"play / stop" },
-        { Pair, L"ctrl \x2190 \x2192", L"4 bars", L"shift+R  1r", L"arm (+ hear input)" },
-        { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
-        { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...while playing: punch in/out" },
-        { Pair, L"home / end", L"start / end", L"shift+I 2mon", L"hear input on playback too" },
-        { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"~  `", L"add marker / markers row" },
-        { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
-        { Pair, L"r t   enter", L"zoom out, in / return", L"l", L"loop the selection / toggle loop" },
-        { Pair, L"q w", L"go to sel. start / end", L"tab", L"next clip edge / hit" },
-        { Heading, L"TRACKS", nullptr, L"VOLUME", nullptr },
-        { Note, L"Numbers first, spaces optional: 2m, 1-3m, 2i3, 2v-6. No number = selection or \x25b8 track." },
-        { Pair, L"add vox in2", L"new track on input 2", L"[  ]", L"track -1 / +1 dB" },
-        { Pair, L"shift+M S", L"mute / solo  (2m 2s)", L"{ } ctrl [ ]", L"mix -1 / +1 dB" },
-        { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
-        { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
-        { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
-        { Pair, L"alt \x2191 \x2193", L"move tracks up / down", L"ctrl+\\  ed close", L"close plugin windows" },
-        { Pair, L"shift+T", L"track menu", L"2 remove", L"delete track 2 (ctrl+z back)" },
-        { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"2 stereo", L"stereo: inputs 3-4 (2 i 3-4)" },
-        { Heading, L"SAMPLES", nullptr, L"EDIT", nullptr },
-        { Pair, L"sample f", L"new sample track", L"ctrl c x v", L"copy / cut / paste" },
-        { Pair, L".  >", L"play armed (> accent)", L"snap  snap 50", L"quantize hits (%)" },
-        { Pair, L"3 sample", L"convert (3 audio: back)", L"ctrl d", L"duplicate after itself" },
-        { Pair, L"sel clip", L"select the clip here", L"alt+shift+3", L"consolidate (cons)" },
-        { Pair, L"3 pat x...", L"pattern: X x o .", L"delete", L"clear the range" },
-        { Pair, L"grid 16", L"steps of a 16th", L"ctrl z / y", L"undo / redo" },
-        { Pair, L"alt+/", L"toggle a hit at cursor", L"sel 3 5", L"select bars 3 to 5" },
-        { Heading, L"INSTRUMENTS", nullptr, L"ROUTING", nullptr },
-        { Pair, L"inst  inst juno", L"instrument track (picker)", L"bus Verb", L"new bus track" },
-        { Pair, L"shift+R  |", L"arm for MIDI / plugin window", L"2 send verb", L"send A-E (a new name: a bus)" },
-        { Pair, L"f  shift+E", L"piano roll / editor window", L"2 send b -6", L"level; pre post off on x" },
-        { Pair, L"scan  midi", L"find plugins / MIDI inputs on", L"2 out drums", L"output to a bus (out mix)" },
-        { Pair, L"ctrl+K", L"keys mode: type to play", L"", L"" },
-        { Pair, L"ins  ins cla", L"effect picker / by name", L"2 fx b  b x", L"its window / remove it" },
-        { Pair, L"2 fx b off", L"bypass (on)  2 fx b>d swaps", L"\\   io", L"inserts+sends column / hide" },
-        { Pair, L"mix fx lim", L"an effect on the mix bus", L"\\ on Mix", L"its inserts (after its fader)" },
-        { Heading, L"SESSION", nullptr, nullptr, nullptr },
-        { Pair, L"click", L"click on / off", L"click rec", L"click only when recording" },
-        { Pair, L"count 4", L"count-in clicks (off)", L"count always", L"...on play too (rec: not)" },
-        { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"dev  panel", L"audio device / driver" },
-        { Pair, L"lowlat", L"latent plugins sit out", L"lowlat 256", L"...over this many samples" },
-        { Pair, L"height 3", L"rows per track (1-4)", L"dark  light", L"themes (also: grey)" },
+    static const std::vector<Page> pages = {
+        { L"BASICS", {
+            { Heading, L"MOVE", nullptr, L"PLAY & RECORD", nullptr },
+            { Pair, L"\x2190 \x2192", L"next grid line (zoom)", L"space", L"play / stop" },
+            { Pair, L"ctrl \x2190 \x2192", L"4 bars", L"shift+R  1r", L"arm (+ hear input)" },
+            { Pair, L"alt \x2190 \x2192", L"1 step (ctrl+alt: 4)", L"ctrl+space", L"record armed tracks" },
+            { Pair, L"shift + any", L"select time / tracks", L"ctrl+space", L"...playing: punch in/out" },
+            { Pair, L"home / end", L"start / end", L"shift+I 2mon", L"input on playback too" },
+            { Pair, L"\x2191 \x2193", L"track (ctrl: first/last)", L"~  `", L"add marker / markers row" },
+            { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
+            { Pair, L"r t   enter", L"zoom out, in / return", L"l", L"loop selection / toggle" },
+            { Pair, L"q w", L"go to sel. start / end", L"tab", L"next clip edge / hit" },
+            { Pair, L"ctrl+s / w", L"save / close session", L"ctrl+q  exit", L"save and quit" },
+            { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights" },
+        } },
+        { L"TRACKS", {
+            { Heading, L"TRACKS", nullptr, L"VOLUME", nullptr },
+            { Note, L"Numbers first, spaces optional: 2m, 1-3m, 2i3, 2v-6. No number = selection or \x25b8 track." },
+            { Pair, L"add vox in2", L"new track on input 2", L"[  ]", L"track -1 / +1 dB" },
+            { Pair, L"shift+M S", L"mute / solo  (2m 2s)", L"{ } ctrl [ ]", L"mix -1 / +1 dB" },
+            { Pair, L"1 rec", L"arm 1 and record", L"2v-6", L"track volume to -6 dB" },
+            { Pair, L"2i3", L"use input 3", L"mixv-3", L"mix volume to -3 dB" },
+            { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
+            { Pair, L"alt \x2191 \x2193", L"move tracks up / down", L"2 remove", L"delete track 2 (undo ok)" },
+            { Pair, L"shift+T", L"track menu", L"2 stereo", L"stereo (inputs 3-4)" },
+            { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"height 3", L"rows per track (1-4)" },
+        } },
+        { L"EDIT", {
+            { Heading, L"EDIT", nullptr, L"SAMPLES", nullptr },
+            { Pair, L"ctrl c x v", L"copy / cut / paste", L"sample f", L"new sample track" },
+            { Pair, L"ctrl d", L"duplicate after itself", L".  >", L"play armed (> accent)" },
+            { Pair, L"delete", L"clear the range", L"3 sample", L"convert (3 audio: back)" },
+            { Pair, L"ctrl z / y", L"undo / redo", L"3 pat x...", L"pattern: X x o ." },
+            { Pair, L"sel 3 5", L"select bars 3 to 5", L"grid 16", L"steps of a 16th" },
+            { Pair, L"sel clip", L"select the clip here", L"snap 50", L"quantize hits (50%)" },
+            { Pair, L"alt+shift+3", L"consolidate (cons)", L"alt+/", L"toggle a hit at cursor" },
+            { Note, L"Automation goes with the clips: copy, cut, paste and duplicate carry it." },
+        } },
+        { L"PLUGINS", {
+            { Heading, L"INSTRUMENTS", nullptr, L"EFFECTS & ROUTING", nullptr },
+            { Pair, L"inst juno", L"instrument (alone: list)", L"ins  ins cla", L"effect picker / by name" },
+            { Pair, L"shift+R  |", L"arm MIDI / plugin window", L"2 fx b  b x", L"its window / remove it" },
+            { Pair, L"f  shift+E", L"piano roll / editor", L"2 fx b off", L"bypass (on); b>d swaps" },
+            { Pair, L"scan  midi", L"find plugins / MIDI ins", L"\\   io", L"routing column / hide" },
+            { Pair, L"ctrl+K", L"keys mode: type to play", L"bus Verb", L"new bus track" },
+            { Pair, L"ctrl+\\", L"close plugin windows", L"2 send verb", L"send (new name: new bus)" },
+            { Pair, L"lowlat", L"latent plugins sit out", L"2 send b -6", L"level; pre post off on x" },
+            { Pair, L"lowlat 256", L"...over 256 samples", L"2 out drums", L"output to a bus" },
+            { Pair, L"mix fx lim", L"an effect on the mix bus", L"\\ on Mix", L"its inserts (post-fader)" },
+        } },
+        { L"AUTOMATION", {
+            { Heading, L"LANES", nullptr, L"KNOBS (MIDI CC)", nullptr },
+            { Pair, L"shift+A", L"lanes (on Mix: the mix)", L"map", L"next knob moved runs it" },
+            { Pair, L"auto", L"its parameters (adds)", L"map 74", L"...that controller" },
+            { Pair, L"lane cutoff", L"a lane by name", L"unmap", L"all knobs off (74: one)" },
+            { Pair, L"| on a lane", L"change what it shows", L"unmap lane", L"the knob on this lane" },
+            { Pair, L"pt -6", L"a point (sel: a level)", L"shift+W  aw", L"write: record knobs" },
+            { Pair, L"alt+\x2191\x2193", L"move points up / down", L"shift+O", L"lane off / on" },
+            { Pair, L"del", L"remove selected points", L"", L"off: setting plays" },
+            { Note, L"Points follow the tempo. A knob on a lane with no points is a fader: where it's left stays." },
+        } },
+        { L"SESSION", {
+            { Heading, L"SESSION", nullptr, L"BOUNCE", nullptr },
+            { Pair, L"click", L"click on / off", L"b  b mp3", L"bounce the selection" },
+            { Pair, L"click rec", L"click only recording", L"bounces", L"open the bounce folder" },
+            { Pair, L"count 4", L"count-in clicks (off)", L"bounces off", L"...don't open after" },
+            { Pair, L"count always", L"...on play too", L"bv", L"bounce with video (mp4)" },
+            { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"bv cue 3", L"named (no sel: all)" },
+            { Pair, L"dev  panel", L"audio device / driver", L"", L"" },
+            { Pair, L"dark  light", L"themes (also: grey)", L"", L"" },
+            { Pair, L"project", L"the session's settings", L"", L"" },
 #if JUCE_WINDOWS
-        { Pair, L"b  b mp3", L"bounce the selection", L"b wav D:\\x", L"...to a folder (remembered)" },
+            { Note, L"b wav D:\\x bounces to a folder (remembered)." },
 #else
-        { Pair, L"b  b mp3", L"bounce the selection", L"b wav ~/x", L"...to a folder (remembered)" },
+            { Note, L"b wav ~/x bounces to a folder (remembered)." },
 #endif
-        { Pair, L"bounces", L"open the bounce folder", L"bounces off", L"...not after every bounce" },
-        { Pair, L"import f", L"track per file/folder", L"2 import f", L"onto track 2  (or drop files)" },
-        { Pair, L"ctrl+B", L"sample browser (again: hide)", L"index f", L"add a sample folder (or drop one)" },
-        { Pair, L"library", L"its folders, samples in each", L"index remove f", L"take a folder out" },
-        { Pair, L"video f", L"picture window (or drop one)", L"video", L"show / hide it" },
-        { Pair, L"video at 5", L"move its start (-0:05 ok)", L"video offset 2", L"show it 2 frames late" },
-        { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
-        { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
-        { Pair, L"shift+A", L"automation lanes (on Mix: its own)", L"auto", L"its parameters: enter adds a lane" },
-        { Pair, L"shift+O", L"on a lane: automation off / on", L"", L"off: its setting plays, no writing" },
-        { Pair, L"| on a lane", L"change what the lane shows", L"lane cutoff", L"...by name (on the track: adds)" },
-        { Pair, L"pt -6", L"a point (selection: a level)", L"alt+\x2191\x2193  del", L"on a lane: move / remove points" },
-        { Pair, L"map", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },
-        { Pair, L"unmap", L"every knob off (unmap 74: one)", L"unmap lane", L"the knob on the lane you're on" },
-        { Pair, L"ctrl+s  ctrl+w", L"save / close (back to sessions)", L"ctrl+q  exit", L"save and quit" },
-        { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights \x00b7 ? closes this" },
+        } },
+        { L"FILES", {
+            { Heading, L"FILES & SAMPLES", nullptr, L"VIDEO", nullptr },
+            { Pair, L"import f", L"track per file/folder", L"video f", L"picture window (or drop)" },
+            { Pair, L"2 import f", L"onto track 2 (or drop)", L"video", L"show / hide it" },
+            { Pair, L"ctrl+B", L"sample browser / hide", L"video at 5", L"move its start (-0:05)" },
+            { Pair, L"index f", L"add a sample folder", L"video offset", L"2: picture 2 frames late" },
+            { Pair, L"library", L"folders and samples", L"\x2191 video row", L"\x2190\x2192 frame, ctrl second" },
+            { Pair, L"index remove", L"f: take a folder out", L"click / drag", L"on it: scrubs picture" },
+        } },
     };
+
+    static_assert (App::helpPages == 7, "one page per tab");
+    const auto& page = pages[(size_t) juce::jlimit (0, (int) pages.size() - 1, app.helpPage)];
+
+    // The box is as tall as the tallest page, so turning pages doesn't make it jump.
+    size_t tallest = 0;
+
+    for (const auto& p : pages)
+        tallest = std::max (tallest, p.rows.size());
 
     constexpr int keyW = 13, colW = 38; // key column width, width of each half
     const int w = canvas.width(), h = canvas.height();
-    // Covers everything but the header and the hint line.
-    const int boxW = std::min (w - 4, 2 * colW + 4), boxH = std::min (h - 2, (int) std::size (rows) + 2);
+    const int boxW = std::min (w - 4, 2 * colW + 4), boxH = std::min (h - 2, (int) tallest + 5);
     const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
 
     for (int y = 0; y < boxH; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
-    auto pair = [&] (int x, int y, const wchar_t* k, const wchar_t* d)
+    // Tabs: the page you're on lit.
+    int x = x0 + 2;
+
+    for (int i = 0; i < (int) pages.size(); ++i)
+    {
+        const bool on = i == app.helpPage;
+        const auto label = juce::String (" ") + pages[(size_t) i].name + " ";
+
+        if (x + label.length() > x0 + boxW - 2)
+            break;
+
+        x = canvas.text (x, y0, label, on ? colour::text : colour::dim, on ? colour::selBg : bg, on) + 1;
+    }
+
+    auto pair = [&] (int px, int y, const wchar_t* k, const wchar_t* d)
     {
         if (k == nullptr)
             return;
 
-        canvas.text (x, y, k, colour::accent, bg, false, keyW - 1);
-        canvas.text (x + keyW, y, d, colour::text, bg, false, colW - keyW - 1);
+        canvas.text (px, y, k, colour::accent, bg, false, keyW - 1);
+        canvas.text (px + keyW, y, d, colour::text, bg, false, colW - keyW - 1);
     };
 
-    for (int i = 0; i < boxH - 2; ++i)
+    for (int i = 0; i < (int) page.rows.size() && i < boxH - 4; ++i)
     {
-        const auto& r = rows[i];
-        const int y = y0 + 1 + i, left = x0 + 2, right = left + colW;
+        const auto& r = page.rows[(size_t) i];
+        const int y = y0 + 2 + i, left = x0 + 2, right = left + colW;
 
         switch (r.kind)
         {
@@ -2056,10 +2101,10 @@ void Ui::drawHelp (App&)
                 pair (left, y, r.k1, r.d1);
                 pair (right, y, r.k2, r.d2);
                 break;
-            case Blank:
-                break;
         }
     }
+
+    canvas.text (x0 + 2, y0 + boxH - 1, L"\x2190\x2192 or tab: pages \x00b7 1-7 jumps \x00b7 ? or esc closes", colour::faint, bg, false, boxW - 4);
 }
 
 // "project": the session's settings, in a box like help. The chosen row is lit; its value

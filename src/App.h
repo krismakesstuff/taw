@@ -482,6 +482,10 @@ public:
     juce::int64 timeHead = -1;   // its moving end
     int trackAnchor = -1;        // where a shift-selection of tracks started
     bool recording = false, helpVisible = false;
+    // Help is in pages (tabs), so it fits a small screen: left/right, tab or 1-9 turn them.
+    int helpPage = 0;
+    static constexpr int helpPages = 7;
+    bool handleHelpKey (const Key&);
 
     // "project": the session's settings in a panel like help. Up/down choose, left/right change,
     // enter types the setting's command (bpm ...) or flips a switch; typed commands work too.

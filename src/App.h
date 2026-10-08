@@ -511,6 +511,7 @@ public:
     juce::StringArray midiOff;   // MIDI inputs switched off, by name
     void loadSettings();
     void saveSettings() const;
+    mutable juce::var settingsSeen; // settings.json as this taw last read or wrote it
 
     juce::String commandLine, message;
 

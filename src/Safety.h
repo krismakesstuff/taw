@@ -33,6 +33,10 @@ void installCloseHandler();
 bool closeRequested();
 void shutdownComplete();
 
+// This process's id, and whether a pid is a taw that's running (not a reused pid).
+juce::uint32 thisProcess();
+bool tawRunning (juce::uint32 pid);
+
 // A marker per running taw (<config>/running/<pid>.json) naming its session. A marker
 // whose process is gone means that run didn't exit cleanly. Only interactive runs keep one:
 // startRunMarker turns it on, markRunning updates the session it names.

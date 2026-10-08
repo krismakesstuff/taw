@@ -2776,6 +2776,8 @@ void App::zoom (int delta)
 void App::loadSettings()
 {
     const auto json = juce::JSON::parse (settingsFile());
+    settingsSeen = json;
+
     if (const auto t = json["theme"].toString(); t == "light" || t == "grey")
         theme = t;
 
@@ -2818,7 +2820,21 @@ void App::saveSettings() const
         off.add (name);
 
     o->setProperty ("midiOff", off);
-    settingsFile().replaceWithText (juce::JSON::toString (juce::var (o)));
+    const juce::var mine (o);
+
+    // Other taws share the file: write only what this one changed since it last read or wrote
+    // it, over the file as it is now, so a setting changed in another taw meanwhile stays.
+    auto merged = juce::JSON::parse (settingsFile());
+
+    if (merged.getDynamicObject() == nullptr)
+        merged = new juce::DynamicObject();
+
+    for (const auto& p : o->getProperties())
+        if (! settingsSeen.hasProperty (p.name) || juce::JSON::toString (p.value) != juce::JSON::toString (settingsSeen[p.name]))
+            merged.getDynamicObject()->setProperty (p.name, p.value);
+
+    settingsFile().replaceWithText (juce::JSON::toString (merged));
+    settingsSeen = mine; // what wasn't written is what this taw saw anyway
 }
 
 // The markers row: the arrows (and tab) go marker to marker, selecting the one they land on and

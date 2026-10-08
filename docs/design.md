@@ -929,6 +929,13 @@ took (and anything later that held a frame for over 150 ms), to find what made o
 
 - **Saves are atomic and constant.** `session.json` is rewritten (temp file + rename) after
   every change, so a crash loses at most the last few milliseconds of edits.
+- **One taw per session.** Opening a session writes `.taw-lock` in it (pid, computer, when);
+  another taw (or `--exec`) opening it is refused while that taw runs. A lock left by a taw
+  that's gone is taken over. One from another computer (a synced folder) can't be checked, so
+  it stands until deleted; the message says where it is. Computers are told apart by their
+  hardware id, since a Mac's hostname changes with the network.
+- **Shared settings.** `settings.json` is shared by every taw running: each writes only the
+  settings it changed since it last read or wrote the file, over the file as it is then.
 - **Backups.** Each open copies `session.json` to `backups\session-<time>.json` (newest 10
   kept). If `session.json` won't load, taw opens the newest backup that does and keeps the
   damaged file as `session.json.damaged-<time>`.

@@ -1,8 +1,8 @@
 # Plan: the taw audio hub
 
-Status: step 0 done (2026-10-08); building macOS first, see "macOS first" below. Written so
-another agent can pick it up. Read `docs/design.md` first (Threads, Recording, Routing and
-inserts, Delay compensation).
+Status: steps 0 and 1 built on macOS (2026-10-08), see "Step 1 as built" and the Hub section
+of `docs/design.md`; next, the virtual devices. Written so another agent can pick it up. Read
+`docs/design.md` first (Threads, Recording, Routing and inserts, Delay compensation, Hub).
 
 ## Why
 
@@ -146,6 +146,29 @@ Done (2026-10-08):
    each write and write atomically (temp file, then rename).
 
 ## Step 1: the hub
+
+### Step 1 as built (macOS, 2026-10-08)
+
+What `docs/design.md` (Hub) describes. Where it differs from the plan below:
+- **Control:** a local TCP socket (`InterprocessConnectionServer` on 127.0.0.1, its port in
+  `hub-info.json`), not a named pipe. JUCE's named pipes are one connection each.
+- **Sessions' inputs:** at least 8, more than the interface has when it's small.
+- **Hub commands:** `hub forget <session>`, because sessions seen once stay in `hub.json`.
+- **Permission (checked):** a launchd agent running "taw hub.app" gets the microphone prompt
+  and keeps the answer.
+- **Rebuilds:** a rebuild re-signs the bundle ad hoc, and macOS asks again. A fixed local
+  signing identity would stop that (not done: it means a certificate in the login keychain;
+  ask).
+
+Not done yet in step 1:
+- **requestRate:** a session at another rate plays off-speed on the hub, as it would on a
+  device at the wrong rate.
+- **The hub's own device choice:** no command yet; it takes `hub-device.xml`, the sessions'
+  device, or the default.
+- **Workgroups:** joining the hub's audio workgroup isn't done. No late blocks so far in tests
+  at 256 samples.
+- **Not tried in the full UI:** choosing "taw hub" in `dev` and the `hub` panel need trying in
+  a real session.
 
 ### Processes
 

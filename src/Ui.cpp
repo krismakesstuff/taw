@@ -314,7 +314,7 @@ void Ui::drawMain (App& app)
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
-        || app.settingsVisible)
+        || app.hubPanelVisible || app.settingsVisible)
         laneMap.valid = false;
 
     if (app.helpVisible)
@@ -329,6 +329,8 @@ void Ui::drawMain (App& app)
         drawAutoPanel (app);
     else if (app.midiPanelVisible && app.midiInputs != nullptr)
         drawMidiPanel (app);
+    else if (app.hubPanelVisible)
+        drawHubPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
         drawSettings (app);
 }
@@ -2035,9 +2037,15 @@ void Ui::drawHelp (App& app)
             { Pair, L"count 4", L"count-in clicks (off)", L"bounces off", L"...don't open after" },
             { Pair, L"count always", L"...on play too", L"bv", L"bounce with video (mp4)" },
             { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"bv cue 3", L"named (no sel: all)" },
+#if TAW_HUB
+            { Pair, L"dev  panel", L"audio device / driver", L"hub", L"the hub: routes, sessions" },
+            { Pair, L"dark  light", L"themes (also: grey)", L"hub route", L"in 1 > Song  Song > out" },
+            { Pair, L"project", L"the session's settings", L"hub stop", L"(start) run the hub" },
+#else
             { Pair, L"dev  panel", L"audio device / driver", L"", L"" },
             { Pair, L"dark  light", L"themes (also: grey)", L"", L"" },
             { Pair, L"project", L"the session's settings", L"", L"" },
+#endif
 #if JUCE_WINDOWS
             { Note, L"b wav D:\\x bounces to a folder (remembered)." },
 #else
@@ -2769,6 +2777,96 @@ void Ui::drawMidiPanel (App& app)
     }
 
     canvas.text (x0 + 2, y0 + boxH - 2, L"\x2191\x2193 choose \x00b7 enter / space switches on or off (\x2190 off, \x2192 on) \x00b7 esc closes",
+                 colour::dim, bg, false, boxW - 4);
+}
+
+// The hub: its interface, the sessions it knows (closed ones dim), and every route, one a row:
+// "in 1  →  Song 1   0.0 dB". A list, so it fits 80x24.
+void Ui::drawHubPanel (App& app)
+{
+    const auto& s = app.hubStatus;
+    const auto* routes = s["routes"].getArray();
+    const int numRoutes = routes != nullptr ? routes->size() : 0;
+    const int w = canvas.width(), h = canvas.height();
+    const int boxW = std::min (w - 4, 84), boxH = std::min (h - 2, std::max (numRoutes, 1) + 9);
+    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+    const int listRows = boxH - 8;
+    constexpr int endW = 24;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    canvas.text (x0 + 2, y0 + 1, "HUB", colour::text, bg, true);
+
+    if (s.isVoid())
+    {
+        canvas.text (x0 + 7, y0 + 1, app.hubError, colour::error, bg, false, boxW - 9);
+        canvas.text (x0 + 2, y0 + 3, L"hub start runs it \x00b7 sessions join it by choosing the taw hub device (dev)", colour::dim, bg, false, boxW - 4);
+    }
+    else
+    {
+        const auto device = s["device"].toString() + L" \x00b7 " + juce::String ((double) s["sampleRate"] / 1000.0, 1) + L" kHz \x00b7 "
+                            + juce::String ((int) s["blockSize"]) + L" samples \x00b7 " + juce::String ((int) s["inputs"]) + " in, "
+                            + juce::String ((int) s["outputs"]) + " out";
+        canvas.text (x0 + 7, y0 + 1, device, colour::dim, bg, false, boxW - 9);
+
+        // The sessions, on one line.
+        int x = x0 + 2;
+        x = canvas.text (x, y0 + 2, "sessions ", colour::dim, bg);
+
+        if (auto* sessions = s["sessions"].getArray(); sessions == nullptr || sessions->isEmpty())
+            canvas.text (x, y0 + 2, L"none yet \x2014 a session joins by choosing the taw hub device (dev)", colour::faint, bg, false, x0 + boxW - 2 - x);
+        else
+            for (const auto& c : *sessions)
+            {
+                const bool on = (bool) c["connected"];
+                const auto late = (juce::int64) c["late"];
+                const auto text = c["name"].toString() + (! on ? " (closed)" : late > 0 ? " (" + juce::String (late) + " late)" : juce::String());
+
+                if (x + (int) text.length() + 3 > x0 + boxW - 2)
+                    break;
+
+                x = canvas.text (x, y0 + 2, text, on ? (late > 0 ? colour::error : colour::text) : colour::faint, bg);
+                x = canvas.text (x, y0 + 2, "   ", colour::dim, bg);
+            }
+
+        if (numRoutes == 0)
+            canvas.text (x0 + 2, y0 + 4, L"no routes \x2014 hub route in 1-2 > Song adds one", colour::dim, bg, false, boxW - 4);
+
+        const int first = juce::jlimit (0, std::max (0, numRoutes - listRows), app.hubPanelIndex - listRows / 2);
+
+        for (int row = 0; row < listRows && first + row < numRoutes; ++row)
+        {
+            const int i = first + row, y = y0 + 4 + row;
+            const auto& r = routes->getReference (i);
+            const bool chosen = i == app.hubPanelIndex;
+            const int rowBg = chosen ? colour::selBg : bg;
+            const auto from = r["from"].toString(), to = r["to"].toString();
+
+            // Dim while an end is a session that isn't connected.
+            bool live = true;
+
+            if (auto* sessions = s["sessions"].getArray())
+                for (const auto& c : *sessions)
+                    if ((c["key"].toString() == from || c["key"].toString() == to) && ! (bool) c["connected"])
+                        live = false;
+
+            canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+
+            if (chosen)
+                canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+
+            const int fg = live ? colour::text : colour::faint;
+            canvas.text (x0 + 3, y, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, false, endW);
+            canvas.put (x0 + 4 + endW, y, L'\x2192', live ? colour::accent : colour::faint, rowBg);
+            canvas.text (x0 + 6 + endW, y, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, false, endW);
+            canvas.text (x0 + 8 + 2 * endW, y, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : colour::faint, rowBg);
+        }
+    }
+
+    canvas.text (x0 + 2, y0 + boxH - 3, L"hub route in 1-2 > Song \x00b7 hub route Song > out 1-2 -6 \x00b7 hub unroute Song > out \x00b7 this: here",
+                 colour::dim, bg, false, boxW - 4);
+    canvas.text (x0 + 2, y0 + boxH - 2, L"\x2191\x2193 choose \x00b7 [ ] level \x00b7 del takes it out \x00b7 hub start / stop \x00b7 esc closes",
                  colour::dim, bg, false, boxW - 4);
 }
 

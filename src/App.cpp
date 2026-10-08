@@ -3,6 +3,10 @@
 #include "Safety.h"
 #include "Timing.h"
 
+#if TAW_HUB
+ #include "HubDevice.h"
+#endif
+
 namespace taw
 {
 static juce::File deviceStateFile() { return configFolder().getChildFile ("audio-device.xml"); }
@@ -349,6 +353,9 @@ int App::run()
 
         syncVideo();
 
+        if (hubPanelVisible)
+            refreshHub (false); // the sessions coming and going, their late blocks
+
         if (engine.isRolling())
         {
             if (juce::Time::getMillisecondCounterHiRes() - cursorMovedAt > 3000.0)
@@ -396,6 +403,12 @@ void App::startupDevice()
 {
     auto& dm = engine.devices();
     std::unique_ptr<juce::XmlElement> saved;
+
+#if TAW_HUB
+    // The hub, next to the system's own types (made first: JUCE only makes them if there are none).
+    dm.getAvailableDeviceTypes();
+    dm.addAudioDeviceType (hub::makeDeviceType());
+#endif
 
     if (deviceStateFile().existsAsFile())
         saved = juce::parseXML (deviceStateFile());
@@ -529,6 +542,9 @@ void App::attachSession (std::unique_ptr<Session> s)
     session->tree().addListener (this);
     rememberSession (session->folder());
     safety::markRunning (session->folder());
+#if TAW_HUB
+    hub::setClientName (session->name(), session->folder().getFullPathName()); // who this taw is to the hub
+#endif
     focused = 0;
     topLane = TopLane::none;
     selectedMarker = {};
@@ -3329,7 +3345,7 @@ void App::handleMainKey (const Key& k)
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
     if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
-        || handleSettingsKey (k) || handleIoKey (k))
+        || handleHubPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.

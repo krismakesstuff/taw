@@ -237,6 +237,20 @@ public:
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
 
+    // "hub": the audio hub (docs/plan-audio-hub.md; HubPanel.cpp). The panel shows its
+    // interface, the sessions and the routes between them; "hub route in 1-2 > Song" and
+    // "hub unroute" change them, "hub start" / "hub stop" run it. macOS only so far.
+    Result hubCommand (const juce::String& rest);
+    Result hubRoute (const juce::String& spec, bool add);
+    bool hubPanelVisible = false;
+    int hubPanelIndex = 0;
+    juce::var hubStatus;      // what the hub last said (void: nothing)
+    juce::String hubError;    // why not
+    double hubAskedAt = 0.0;  // when, to ask again now and then while the panel is up
+    void refreshHub (bool now);
+    bool handleHubPanelKey (const Key&);
+    juce::String hubEndName (const juce::String& key, int channel, bool source) const;
+
     // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen
     // kind where samples that sound alike sit together, and a list; typing filters by name, and
     // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)

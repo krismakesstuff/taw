@@ -10,6 +10,12 @@
 
 #include <juce_events/juce_events.h>
 
+#if TAW_HUB
+ #include "Hub.h"
+ #include "HubDevice.h"
+ #include "HubServer.h"
+#endif
+
 #if JUCE_MAC
  #include "MacFocus.h"
  #include "TerminalSetup.h"
@@ -70,6 +76,72 @@ int main (int argc, char** argv)
     }
 
     taw::safety::installCrashHandler();
+
+#if TAW_HUB
+    // taw --hub   the audio hub (docs/plan-audio-hub.md), headless; launchd runs it from
+    // "taw hub.app" on macOS. taw --install-hub / --uninstall-hub: start it at login, or not.
+    if (args[0] == "--hub")
+        return taw::hub::run (args);
+
+    if (args[0] == "--install-hub" || args[0] == "--uninstall-hub")
+    {
+        std::printf ("%s\n", (args[0] == "--install-hub" ? taw::hub::install() : taw::hub::uninstall()).toRawUTF8());
+        return 0;
+    }
+
+    // taw --hubping [seconds]   connect to the running hub as a session does, listen (silent
+    // out), and say what came in, the latency it reports, and the blocks missed.
+    if (args[0] == "--hubping")
+    {
+        struct Listen final : juce::AudioIODeviceCallback
+        {
+            void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
+                                                   const juce::AudioIODeviceCallbackContext&) override
+            {
+                for (int c = 0; c < numIn; ++c)
+                    peak = std::max (peak.load(), juce::FloatVectorOperations::findMaximum (in[c], n));
+
+                for (int c = 0; c < numOut; ++c)
+                    juce::FloatVectorOperations::clear (out[c], n);
+
+                blocks++;
+            }
+
+            void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+            void audioDeviceStopped() override {}
+            std::atomic<float> peak { 0.0f };
+            std::atomic<int> blocks { 0 };
+        } listen;
+
+        taw::hub::setClientName ("hubping");
+        auto type = taw::hub::makeDeviceType();
+        std::unique_ptr<juce::AudioIODevice> d (type->createDevice ({}, {}));
+        juce::BigInteger all;
+        all.setRange (0, 64, true);
+
+        if (const auto error = d->open (all, all, 0.0, 0); error.isNotEmpty())
+        {
+            std::printf ("%s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        std::printf ("connected: %.0f Hz, %d samples, %d in, %d out, latency in %d / out %d samples\n", d->getCurrentSampleRate(),
+                     d->getCurrentBufferSizeSamples(), d->getActiveInputChannels().countNumberOfSetBits(),
+                     d->getActiveOutputChannels().countNumberOfSetBits(), d->getInputLatencyInSamples(), d->getOutputLatencyInSamples());
+        d->start (&listen);
+
+        for (int s = 0; s < (args[1].isNotEmpty() ? args[1].getIntValue() : 3); ++s)
+        {
+            juce::Thread::sleep (1000);
+            const auto peak = listen.peak.exchange (0.0f);
+            std::printf ("%d blocks, heard %s, %d missed\n", listen.blocks.load(),
+                         peak > 0.0f ? (juce::String (juce::Decibels::gainToDecibels (peak), 1) + " dB").toRawUTF8() : "silence", d->getXRunCount());
+        }
+
+        d->close();
+        return 0;
+    }
+#endif
 
     if (args.contains ("-h") || args.contains ("--help"))
     {
@@ -712,6 +784,222 @@ int main (int argc, char** argv)
 
         return failures;
     }
+
+#if TAW_HUB
+    // taw --hubtest   the hub with no device: an engine and server in this process, a thread
+    // standing in for the interface, and two sessions connected through "taw hub" devices (the
+    // socket and shared memory as for real). Session A plays its inputs straight back: what the
+    // interface puts out must be what came in, exactly one block later, as A's device reports.
+    // Session B stalls now and then: A must never miss a block, and B's misses are counted. Then
+    // the hub restarts and both sessions connect again. Uses its own settings folder.
+    if (args[0] == "--hubtest")
+    {
+        const juce::TemporaryFile scratch;
+        scratch.getFile().createDirectory();
+        setenv ("TAW_CONFIG", scratch.getFile().getFullPathName().toRawUTF8(), 1);
+
+        constexpr int block = 256, channels = 2;
+        constexpr double rate = 48000.0;
+        taw::hub::Engine engine;
+        engine.sampleRate = rate;
+        engine.blockSize = block;
+
+        // The interface: input 1 counts samples (exact as floats), input 2 is its negative. It
+        // checks each block it gets back against what it sent a block before.
+        struct Interface final : juce::Thread
+        {
+            explicit Interface (taw::hub::Engine& e) : juce::Thread ("hubtest interface"), engine (e) {}
+
+            void run() override
+            {
+                juce::AudioBuffer<float> in (channels, block), out (channels, block);
+                auto next = std::chrono::steady_clock::now();
+                juce::int64 sample = 0;
+
+                while (! threadShouldExit())
+                {
+                    for (int i = 0; i < block; ++i)
+                    {
+                        in.setSample (0, i, (float) ((sample + i) % 65536));
+                        in.setSample (1, i, -(float) ((sample + i) % 65536));
+                    }
+
+                    engine.process (in.getArrayOfReadPointers(), channels, out.getArrayOfWritePointers(), channels, block);
+
+                    if (checking)
+                    {
+                        bool exact = true, silent = true;
+
+                        for (int i = 0; i < block; ++i)
+                        {
+                            const auto want = (float) ((sample - block + i) % 65536);
+                            exact = exact && out.getSample (0, i) == want && out.getSample (1, i) == -want;
+                            silent = silent && out.getSample (0, i) == 0.0f;
+                        }
+
+                        (exact ? good : silent ? missed : wrong)++;
+                    }
+
+                    // A block's time on, as an interface keeps it: woken late, it carries on from
+                    // then rather than running blocks back to back to catch up.
+                    sample += block;
+                    const auto period = std::chrono::microseconds ((int) (1.0e6 * block / rate));
+                    next = std::max (next + period, std::chrono::steady_clock::now() + period / 2);
+                    std::this_thread::sleep_until (next);
+                }
+            }
+
+            taw::hub::Engine& engine;
+            std::atomic<bool> checking { false };
+            std::atomic<int> good { 0 }, missed { 0 }, wrong { 0 };
+        } interface (engine);
+
+        struct Echo final : juce::AudioIODeviceCallback // session A: its inputs back out
+        {
+            void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
+                                                   const juce::AudioIODeviceCallbackContext&) override
+            {
+                for (int c = 0; c < numOut; ++c)
+                    if (c < numIn)
+                        juce::FloatVectorOperations::copy (out[c], in[c], n);
+                    else
+                        juce::FloatVectorOperations::clear (out[c], n);
+            }
+
+            void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+            void audioDeviceStopped() override {}
+            void audioDeviceError (const juce::String&) override { errors++; }
+            std::atomic<int> errors { 0 };
+        } echo;
+
+        struct Staller final : juce::AudioIODeviceCallback // session B: silent, and every 40th block three blocks late
+        {
+            void audioDeviceIOCallbackWithContext (const float* const*, int, float* const* out, int numOut, int n,
+                                                   const juce::AudioIODeviceCallbackContext&) override
+            {
+                for (int c = 0; c < numOut; ++c)
+                    juce::FloatVectorOperations::clear (out[c], n);
+
+                if (++blocks % 40 == 0)
+                    juce::Thread::sleep ((int) (3000.0 * block / rate));
+            }
+
+            void audioDeviceAboutToStart (juce::AudioIODevice*) override {}
+            void audioDeviceStopped() override {}
+            void audioDeviceError (const juce::String&) override { errors++; }
+            int blocks = 0;
+            std::atomic<int> errors { 0 };
+        } staller;
+
+        bool ok = true;
+        auto check = [&ok] (bool pass, const juce::String& what)
+        {
+            std::printf ("%-60s %s\n", what.toRawUTF8(), pass ? "ok" : "FAILED");
+            ok = ok && pass;
+        };
+
+        auto startHub = [&] (std::unique_ptr<taw::hub::Server>& server)
+        {
+            server = std::make_unique<taw::hub::Server> (engine);
+            taw::hub::HubInfo info;
+            info.pid = taw::safety::thisProcess();
+            info.port = server->start();
+            info.inputs = taw::hub::sessionInputs (channels);
+            info.outputs = channels;
+            info.blockSize = block;
+            info.sampleRate = rate;
+            server->setHardware (channels, channels, "hubtest");
+            taw::hub::infoFile().replaceWithText (juce::JSON::toString (info.toVar()));
+            return info.port > 0;
+        };
+
+        auto type = taw::hub::makeDeviceType();
+        std::unique_ptr<juce::AudioIODevice> a (type->createDevice ({}, {})), b (type->createDevice ({}, {}));
+        auto openBoth = [&]
+        {
+            juce::BigInteger all;
+            all.setRange (0, channels, true);
+            taw::hub::setClientName ("A", {}, false); // two sessions in one process: naming B mustn't rename A
+            const auto ea = a->open (all, all, rate, block);
+            taw::hub::setClientName ("B", {}, false);
+            const auto eb = b->open (all, all, rate, block);
+
+            if (ea.isNotEmpty() || eb.isNotEmpty())
+                std::printf ("open: %s %s\n", ea.toRawUTF8(), eb.toRawUTF8());
+
+            a->start (&echo);
+            b->start (&staller);
+            return ea.isEmpty() && eb.isEmpty();
+        };
+
+        auto measure = [&] (double seconds)
+        {
+            juce::Thread::sleep (300); // settling: the first blocks after joining
+            interface.good = interface.missed = interface.wrong = 0;
+            interface.checking = true;
+            juce::Thread::sleep ((int) (seconds * 1000.0));
+            interface.checking = false;
+        };
+
+        std::unique_ptr<taw::hub::Server> server;
+        interface.startRealtimeThread (juce::Thread::RealtimeOptions().withApproximateAudioProcessingTime (block, rate));
+        check (startHub (server), "the hub listens");
+        check (openBoth(), "two sessions connect");
+        check (a->getOutputLatencyInSamples() == block && a->getInputLatencyInSamples() == 0,
+               "A's device reports a block of output latency (" + juce::String (a->getOutputLatencyInSamples()) + ")");
+        check (a->getActiveInputChannels().countNumberOfSetBits() == taw::hub::sessionInputs (channels) && a->getCurrentSampleRate() == rate,
+               "A runs at the hub's rate, with " + juce::String (a->getActiveInputChannels().countNumberOfSetBits()) + " inputs");
+
+        measure (3.0);
+        const auto lateA = a->getXRunCount(), lateB = b->getXRunCount();
+        check (interface.wrong == 0 && interface.missed == 0 && interface.good > 400,
+               "A's blocks come back exact, a block late: " + juce::String (interface.good.load()) + " good, "
+                   + juce::String (interface.missed.load()) + " missed, " + juce::String (interface.wrong.load()) + " wrong");
+        check (lateA == 0, "A missed no blocks (" + juce::String (lateA) + ")");
+        check (lateB > 0, "B's stalls were counted (" + juce::String (lateB) + " blocks late)");
+
+        // Routes, as taw's hub command asks for them: A off the interface, then back on.
+        auto ask = [] (const juce::String& type, const juce::String& from, int fromChannel, const juce::String& to, int toChannel)
+        {
+            auto* m = new juce::DynamicObject();
+            m->setProperty ("type", type);
+            m->setProperty ("from", from);
+            m->setProperty ("fromChannel", fromChannel);
+            m->setProperty ("to", to);
+            m->setProperty ("toChannel", toChannel);
+            juce::String error;
+            const auto answer = taw::hub::request (m, error);
+            return error.isNotEmpty() ? -1 : answer["routes"].size();
+        };
+
+        check (ask ("unroute", "A", 0, taw::hub::interfaceKey, 0) == 6, "unroute A from the interface (6 routes left)");
+        measure (0.5);
+        check (interface.good == 0 && interface.wrong == 0, "the interface hears nothing of A");
+        ask ("route", "A", 1, taw::hub::interfaceKey, 1);
+        check (ask ("route", "A", 2, taw::hub::interfaceKey, 2) == 8, "route A to the interface again (8 routes)");
+        measure (0.5);
+        check (interface.wrong == 0 && interface.missed == 0 && interface.good > 50, "A is heard again, exact");
+
+        // The hub restarts: both sessions hear it went, and connect again by themselves.
+        server->stopAll();
+        juce::Thread::sleep (300);
+        check (echo.errors > 0 && staller.errors > 0, "both sessions heard the hub stop");
+        server.reset();
+        check (startHub (server), "the hub listens again");
+        juce::Thread::sleep (1200); // they look every half second
+        check (server->clients().size() == 2, "both sessions came back by themselves");
+        measure (1.0);
+        check (interface.wrong == 0 && interface.missed == 0 && interface.good > 100,
+               "A is exact again: " + juce::String (interface.good.load()) + " good, " + juce::String (interface.missed.load()) + " missed");
+
+        a->close();
+        b->close();
+        server.reset();
+        interface.stopThread (2000);
+        std::puts (ok ? "ok" : "FAILED");
+        return ok ? 0 : 1;
+    }
+#endif
 
     // taw --counttest   count-in without a device: the clicks land on the beats before the start,
     // the playhead holds until they're done, and a recording starts exactly at the start.

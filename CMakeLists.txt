@@ -49,6 +49,7 @@ target_sources(taw PRIVATE
     src/Inserts.cpp
     src/AlsImport.cpp
     src/AutomationEdit.cpp
+    src/HubPanel.cpp
     src/TrackMenu.cpp
     src/Midi.cpp
     src/MidiEditor.cpp
@@ -86,6 +87,22 @@ endif()
 
 if (APPLE)
     target_sources(taw PRIVATE src/TerminalSetup.cpp src/MacFocus.mm)
+
+    # The audio hub (docs/plan-audio-hub.md): macOS first; its shared memory is POSIX.
+    target_sources(taw PRIVATE src/Hub.cpp src/HubDevice.cpp src/HubServer.cpp src/HubShared.cpp src/HubMac.mm)
+    target_link_libraries(taw PRIVATE "-framework AVFoundation")
+    target_compile_definitions(taw PRIVATE TAW_HUB=1)
+
+    # The hub runs from "taw hub.app" beside taw: the same binary in a bundle of its own, so
+    # macOS asks about the microphone for it (it runs from launchd, not a terminal).
+    configure_file(cmake/HubInfo.plist ${CMAKE_BINARY_DIR}/generated/HubInfo.plist @ONLY)
+    set(TAW_HUB_APP "$<TARGET_FILE_DIR:taw>/taw hub.app")
+    add_custom_command(TARGET taw POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${TAW_HUB_APP}/Contents/MacOS"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/generated/HubInfo.plist "${TAW_HUB_APP}/Contents/Info.plist"
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:taw> "${TAW_HUB_APP}/Contents/MacOS/taw"
+        COMMAND codesign --force --sign - "${TAW_HUB_APP}"
+        VERBATIM)
 endif()
 
 if (WIN32)

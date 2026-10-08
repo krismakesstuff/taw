@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -831,6 +831,7 @@ Result App::execute (const juce::String& line)
     if (v == "inst")                return loadInstrument (p.hasSelector ? p.tracks : std::vector<int> {}, p.rest);
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
+    if (v == "hub")                return hubCommand (p.rest.trim());
 
     // browse: show or hide the sample browser (ctrl+B goes into it); index <folder> adds a folder of samples to it.
     // browse vol -6: the audition's own level.

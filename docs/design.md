@@ -897,6 +897,50 @@ own, it shows the frame for where the playhead is, so it can't drift.
   `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
   undo and opening sessions need nothing else.
 
+## Hub
+
+The audio hub (`docs/plan-audio-hub.md`; macOS so far): one background taw that owns the
+interface and routes between it and taw sessions, Voicemeeter-style. Apps (Zoom, a browser)
+join it later through virtual devices.
+
+- **Process:** `taw --hub`, headless, run by a launchd agent (`com.taw.hub`, RunAtLoad,
+  KeepAlive after a failure) from "taw hub.app", a bundle the build makes beside taw (the same
+  binary, ad-hoc signed). The bundle is what gets the microphone permission, since launchd
+  starts it, not a terminal. `taw --install-hub` / `--uninstall-hub`, or `hub start` /
+  `hub stop` inside taw. One per user (an `InterProcessLock`). Its log is `hub.log` in the
+  config folder; `hub-info.json` there says where it listens (a local TCP port), its pid, rate,
+  block size, and how many inputs a session gets.
+- **Its interface:** `hub-device.xml` if there is one, else the device taw sessions saved
+  (unless that's the hub itself), else the default.
+- **Sessions join it as a device:** "taw hub" in `dev`, a `juce::AudioIODeviceType`
+  (`HubDevice.cpp`), so `AudioEngine` doesn't change. Opening it starts the hub if it's
+  installed, says hello over the socket (JSON messages), and maps the shared memory the hub
+  made for it (`HubShared.h`). A session gets the interface's inputs, at least 8 (room for apps
+  and other sessions on a MacBook's one mic), and 2 outputs.
+- **Real time:** each block the hub writes every session's inputs for cycle n into slot n % 2,
+  publishes n and wakes it (`os_sync_wake_by_address_any`); the session's device thread
+  (real-time priority) renders and marks n done. At n + 1 the hub plays what was done, or
+  silence and a late block. The hub never waits on a session, so one that stalls doesn't touch
+  the others. A session's outputs are a block later than straight from the interface, which
+  its device reports as output latency, so recording, the picture and delay compensation are
+  right as they are.
+- **Routes:** source channel to destination channel with a level, kept in `hub.json`. Ends are
+  `interface` or a session by its folder, so routes outlive restarts and wait for a session
+  that's closed. A session the hub sees for the first time gets the defaults (every interface
+  input to its inputs in order, its outputs 1-2 to the interface's 1-2); after that its routes
+  are whatever they've been made. Session to session adds a block. The plan the audio thread
+  runs is rebuilt on any change and handed over through a queue like the engine's graphs.
+- **In taw:** `hub` opens the panel (the interface, the sessions with their late blocks, closed
+  ones dim, every route; ↑↓, `[ ]` level, del takes one out). `hub route in 1-2 > Song`,
+  `hub route Song > out 1-2 -6`, `hub unroute Song > out`, `hub forget Song`; `this` is the
+  session here. Channels pair up (one to many spreads, many to one sums, none given: 1-2).
+- **The hub going away:** sessions hear it, wait for it, and carry on when it's back (same rate
+  and block), without choosing the device again.
+- **Tests:** `taw --hubtest` (an engine and server in process, a thread for the interface, two
+  sessions through real "taw hub" devices: sample-exact a block late, the reported latency, a
+  stalling session not touching the other, routes, the hub restarting). `taw --hubping` joins
+  the real hub as a session for a few seconds and says what it heard.
+
 ## Startup
 
 With no session given, taw lists recent sessions (newest first, and any sessions in the

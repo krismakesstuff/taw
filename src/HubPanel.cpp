@@ -64,7 +64,7 @@ juce::String App::hubEndName (const juce::String& key, int channel, bool source)
         return (source ? "in " : "out ") + juce::String (channel);
 
     if (hub::appNumber (key) > 0)
-        return key + (channel == 1 ? " L" : channel == 2 ? " R" : " " + juce::String (channel));
+        return hubAppName (key) + (channel == 1 ? " L" : channel == 2 ? " R" : " " + juce::String (channel));
 
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
@@ -72,6 +72,12 @@ juce::String App::hubEndName (const juce::String& key, int channel, bool source)
                 return s["name"].toString() + " " + juce::String (channel);
 
     return juce::File (key).getFileName() + " " + juce::String (channel);
+}
+
+juce::String App::hubAppName (const juce::String& key) const
+{
+    const auto label = hubStatus["labels"][juce::Identifier (key)].toString();
+    return label.isNotEmpty() ? label : key;
 }
 
 // "in 1-2 > Song 1-2 -6": pairs the channels (as many as both give; one to many spreads it,
@@ -103,6 +109,32 @@ Result App::hubRoute (const juce::String& spec, bool add)
     {
         End e;
         tokens.removeEmptyStrings(); // "in 1 > ..." leaves one after the space
+
+        // An app device by its name ("Zoom", or "Zoom L" with channels): as "taw 1" from here on.
+        auto deviceNamed = [this] (const juce::String& name) -> juce::String
+        {
+            if (auto* labels = hubStatus["labels"].getDynamicObject())
+                for (const auto& p : labels->getProperties())
+                    if (p.value.toString().equalsIgnoreCase (name))
+                        return p.name.toString();
+
+            return {};
+        };
+
+        if (const auto whole = deviceNamed (tokens.joinIntoString (" ")); whole.isNotEmpty())
+        {
+            tokens = juce::StringArray::fromTokens (whole, false);
+        }
+        else if (tokens.size() > 1)
+        {
+            const auto channels = tokens[tokens.size() - 1];
+
+            if (const auto named = deviceNamed (juce::StringArray (tokens.begin(), tokens.size() - 1).joinIntoString (" ")); named.isNotEmpty())
+            {
+                tokens = juce::StringArray::fromTokens (named, false);
+                tokens.add (channels);
+            }
+        }
 
         // An app device: "taw 2", then maybe its channels ("1", "1-2", "L", "R").
         if (tokens.size() >= 2 && tokens[0].equalsIgnoreCase ("taw") && tokens[1].containsOnly ("123456789") && tokens[1].length() == 1)
@@ -206,9 +238,13 @@ Result App::hubRoute (const juce::String& spec, bool add)
     // Which channel goes where.
     std::vector<std::pair<int, int>> pairs;
 
-    if (! add && from->count() == 0 && to->count() == 0)
+    if (! add && (from->count() == 0 || to->count() == 0))
     {
-        pairs.push_back ({ 0, 0 }); // all of them
+        // Taking out, a side without channels means all of them (0).
+        const int fromN = std::max (1, from->count()), toN = std::max (1, to->count());
+
+        for (int i = 0; i < std::max (fromN, toN); ++i)
+            pairs.push_back ({ from->count() == 0 ? 0 : from->first + std::min (i, fromN - 1), to->count() == 0 ? 0 : to->first + std::min (i, toN - 1) });
     }
     else
     {
@@ -266,6 +302,50 @@ Result App::hubCommand (const juce::String& rest)
 
     if (word == "route" || word == "unroute")
         return hubRoute (args, word == "route");
+
+    // name taw 1 Zoom: what an app device is called in taw (apps still see taw 1). name taw 1:
+    // back to its own name. Its current name works too: name Zoom Call.
+    if (word == "name")
+    {
+        refreshHub (true);
+
+        if (hubStatus.isVoid())
+            return Result::fail (hubError);
+
+        auto words = juce::StringArray::fromTokens (args, false);
+        words.removeEmptyStrings();
+        juce::String key;
+
+        if (words.size() >= 2 && words[0].equalsIgnoreCase ("taw") && hub::appNumber ("taw " + words[1]) > 0)
+        {
+            key = "taw " + words[1];
+            words.removeRange (0, 2);
+        }
+        else if (auto* labels = hubStatus["labels"].getDynamicObject(); labels != nullptr && words.size() >= 1)
+        {
+            for (const auto& p : labels->getProperties())
+                if (p.value.toString().equalsIgnoreCase (words[0]))
+                    key = p.name.toString();
+
+            if (key.isNotEmpty())
+                words.remove (0);
+        }
+
+        if (key.isEmpty())
+            return Result::fail (L"name taw 1 Zoom \x00b7 names an app device in taw (other apps still see taw 1)");
+
+        auto m = hubMessage ("label");
+        m.getDynamicObject()->setProperty ("key", key);
+        m.getDynamicObject()->setProperty ("label", words.joinIntoString (" "));
+        juce::String error;
+        const auto answer = hub::request (m, error);
+
+        if (error.isNotEmpty() || answer["error"].toString().isNotEmpty())
+            return Result::fail (error.isNotEmpty() ? error : answer["error"].toString());
+
+        hubStatus = answer;
+        return Result::good (words.isEmpty() ? key + " has its own name again" : key + " is " + words.joinIntoString (" ") + " here");
+    }
 
     if (word == "forget")
     {
@@ -387,7 +467,6 @@ void App::openHubPage()
 
     mode = Mode::Hub;
     hubLine.clear();
-    hubIndex = 0;
     helpVisible = settingsVisible = pluginPickerVisible = midiPanelVisible = false;
     refreshHub (true);
     say (hubStatus.isVoid() ? Result::fail (hubError) : Result::good());
@@ -404,38 +483,317 @@ void App::closeHubPage()
         proceedToSession();
 }
 
-// The page's keys: typing goes to its command line ("route in 1 > Song", "hub" optional);
-// with the line empty, the arrows choose a route, [ ] ride its level and del takes it out.
-void App::handleHubPageKey (const Key& k)
-{
-    const auto* routes = hubStatus["routes"].getArray();
-    const int n = routes != nullptr ? routes->size() : 0;
-    hubIndex = juce::jlimit (0, juce::jmax (0, n - 1), hubIndex);
+//==============================================================================
+// The matrix.
 
-    auto send = [this, routes] (const juce::String& type, double db)
+std::vector<App::HubEnd> App::hubRows() const
+{
+    std::vector<HubEnd> rows;
+
+    for (int i = 1; i <= (int) hubStatus["inputs"]; ++i)
+        rows.push_back ({ interfaceKey, i, 1, "in " + juce::String (i), {}, false, true });
+
+    for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
     {
-        const auto& r = routes->getReference (hubIndex);
-        auto m = hubMessage (type);
+        const auto key = "taw " + juce::String (n);
+        rows.push_back ({ key, 1, 2, hubAppName (key), hubAppName (key) != key ? key : juce::String(), false, true });
+    }
+
+    if (auto* sessions = hubStatus["sessions"].getArray())
+        for (const auto& s : *sessions)
+            rows.push_back ({ s["key"].toString(), 1, 2, s["name"].toString(), {}, true, (bool) s["connected"] });
+
+    return rows;
+}
+
+std::vector<App::HubEnd> App::hubCols() const
+{
+    std::vector<HubEnd> cols;
+    const int outputs = hubStatus["outputs"];
+
+    for (int c = 1; c <= outputs; c += 2)
+        cols.push_back ({ interfaceKey, c, juce::jmin (2, outputs - c + 1), "out",
+                          c < outputs ? juce::String (c) + "-" + juce::String (c + 1) : juce::String (c), false, true });
+
+    for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
+    {
+        const auto key = "taw " + juce::String (n);
+        cols.push_back ({ key, 1, 2, hubAppName (key), "mic", false, true });
+    }
+
+    if (auto* sessions = hubStatus["sessions"].getArray())
+        for (const auto& s : *sessions)
+            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), "in", true, (bool) s["connected"] });
+
+    return cols;
+}
+
+namespace
+{
+// The routes a cell makes, as (from channel, to channel): stereo to stereo side by side, mono
+// to stereo on both sides, stereo to mono summed; to a session from where it lands.
+std::vector<std::array<int, 2>> cellPairs (const App::HubEnd& row, const App::HubEnd& col, int land)
+{
+    std::vector<std::array<int, 2>> pairs;
+
+    if (col.session)
+    {
+        for (int i = 0; i < row.width; ++i)
+            pairs.push_back ({ row.first + i, land + i });
+    }
+    else if (row.width == col.width)
+    {
+        for (int i = 0; i < row.width; ++i)
+            pairs.push_back ({ row.first + i, col.first + i });
+    }
+    else
+    {
+        for (int f = 0; f < row.width; ++f)
+            for (int t = 0; t < col.width; ++t)
+                pairs.push_back ({ row.first + f, col.first + t });
+    }
+
+    return pairs;
+}
+
+// How many inputs a session column has: what it got if it's here, else what it would get.
+int sessionInputCount (const juce::var& status, const juce::String& key)
+{
+    if (auto* sessions = status["sessions"].getArray())
+        for (const auto& s : *sessions)
+            if (s["key"].toString() == key && (bool) s["connected"])
+                return s["inputs"];
+
+    return hub::sessionInputs (status["inputs"]);
+}
+} // namespace
+
+App::HubCell App::hubCell (const HubEnd& row, const HubEnd& col) const
+{
+    HubCell cell;
+    cell.self = row.key == col.key && row.key != interfaceKey; // the interface's inputs to its outputs is monitoring
+
+    if (auto* routes = hubStatus["routes"].getArray())
+        for (const auto& r : *routes)
+        {
+            const int from = r["fromChannel"], to = r["toChannel"];
+
+            if (r["from"].toString() == row.key && from >= row.first && from < row.first + row.width && r["to"].toString() == col.key
+                && (col.session || (to >= col.first && to < col.first + col.width)))
+                cell.routes.add (r);
+        }
+
+    cell.on = ! cell.routes.isEmpty();
+
+    if (! cell.on)
+        return cell;
+
+    cell.db = cell.routes.getReference (0)["db"];
+    cell.land = cell.landLast = (int) cell.routes.getReference (0)["toChannel"];
+
+    for (const auto& r : cell.routes)
+    {
+        cell.land = juce::jmin (cell.land, (int) r["toChannel"]);
+        cell.landLast = juce::jmax (cell.landLast, (int) r["toChannel"]);
+    }
+
+    // The usual shape, or something typed by hand?
+    auto expected = cellPairs (row, col, cell.land);
+    cell.odd = (int) expected.size() != cell.routes.size();
+
+    for (const auto& r : cell.routes)
+        cell.odd = cell.odd || std::find (expected.begin(), expected.end(), std::array<int, 2> { (int) r["fromChannel"], (int) r["toChannel"] }) == expected.end();
+
+    return cell;
+}
+
+// Takes routes out and puts others in, between two ends, and keeps what the hub says after.
+Result App::hubReplace (const juce::Array<juce::var>& remove, const std::vector<std::array<int, 2>>& add,
+                        const juce::String& from, const juce::String& to, double db)
+{
+    auto send = [this] (const juce::var& m) -> juce::String
+    {
+        juce::String error;
+        const auto answer = hub::request (m, error);
+
+        if (error.isEmpty() && answer["error"].toString().isNotEmpty())
+            error = answer["error"].toString();
+
+        if (error.isEmpty())
+            hubStatus = answer;
+
+        return error;
+    };
+
+    for (const auto& r : remove)
+    {
+        auto m = hubMessage ("unroute");
 
         for (const auto* p : { "from", "fromChannel", "to", "toChannel" })
             m.getDynamicObject()->setProperty (p, r[p]);
 
-        m.getDynamicObject()->setProperty ("db", db);
-        juce::String error;
+        if (const auto error = send (m); error.isNotEmpty())
+            return Result::fail (error);
+    }
 
-        if (const auto answer = hub::request (m, error); error.isEmpty())
-            hubStatus = answer;
-        else
-            say (Result::fail (error));
-    };
+    for (const auto& [f, t] : add)
+    {
+        auto m = hubMessage ("route");
+        m.getDynamicObject()->setProperty ("from", from);
+        m.getDynamicObject()->setProperty ("fromChannel", f);
+        m.getDynamicObject()->setProperty ("to", to);
+        m.getDynamicObject()->setProperty ("toChannel", t);
+        m.getDynamicObject()->setProperty ("db", db);
+
+        if (const auto error = send (m); error.isNotEmpty())
+            return Result::fail (error);
+    }
+
+    return Result::good();
+}
+
+// Space: the chosen cell on or off. Into a session it lands on the input of the same number for
+// an interface input, else on the first free inputs after the interface's (stereo on a pair).
+Result App::hubToggle()
+{
+    const auto rows = hubRows();
+    const auto cols = hubCols();
+
+    if (rows.empty() || cols.empty())
+        return Result::fail ("nothing to route yet");
+
+    const auto& row = rows[(size_t) hubRow];
+    const auto& col = cols[(size_t) hubCol];
+    const auto cell = hubCell (row, col);
+
+    if (cell.self)
+        return Result::fail (row.name + " into itself would feed back");
+
+    if (cell.on)
+    {
+        const auto r = hubReplace (cell.routes, {}, {}, {}, 0.0);
+        return r.ok ? Result::good (row.name + L" \x2192 " + col.name + " off") : r;
+    }
+
+    int land = 1;
+
+    if (col.session)
+    {
+        const int count = sessionInputCount (hubStatus, col.key);
+        std::vector<bool> used ((size_t) count + 2, false);
+
+        if (auto* routes = hubStatus["routes"].getArray())
+            for (const auto& r : *routes)
+                if (r["to"].toString() == col.key && (int) r["toChannel"] <= count)
+                    used[(size_t) (int) r["toChannel"]] = true;
+
+        auto free = [&] (int k) { return k >= 1 && k + row.width - 1 <= count && ! used[(size_t) k] && (row.width < 2 || ! used[(size_t) k + 1]); };
+        land = 0;
+
+        if (row.key == interfaceKey && free (row.first))
+            land = row.first;
+
+        // Stereo on a pair (3-4, not 2-3).
+        const int after = (int) hubStatus["inputs"] + 1;
+
+        for (int k = row.width > 1 ? after + (after % 2 == 0 ? 1 : 0) : after; k <= count && land == 0; k += row.width)
+            land = free (k) ? k : 0;
+
+        for (int k = 1; k <= count && land == 0; ++k)
+            land = free (k) ? k : 0;
+
+        if (land == 0)
+            return Result::fail (col.name + "'s inputs are all taken");
+    }
+
+    const auto r = hubReplace ({}, cellPairs (row, col, land), row.key, col.key, 0.0);
+
+    if (! r.ok)
+        return r;
+
+    return Result::good (row.name + L" \x2192 " + col.name
+                         + (col.session ? " " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()) : juce::String())
+                         + (! col.live ? juce::String (L" \x00b7 waits for it to open") : juce::String()));
+}
+
+// Shift+←→ on a cell into a session: the inputs it lands on, one along.
+Result App::hubMoveLanding (int delta)
+{
+    const auto rows = hubRows();
+    const auto cols = hubCols();
+
+    if (rows.empty() || cols.empty())
+        return Result::good();
+
+    const auto& row = rows[(size_t) hubRow];
+    const auto& col = cols[(size_t) hubCol];
+    const auto cell = hubCell (row, col);
+
+    if (! col.session || ! cell.on)
+        return Result::fail (L"shift+\x2190\x2192 moves where a route lands in a session: on a session's column");
+
+    const int land = juce::jlimit (1, sessionInputCount (hubStatus, col.key) - row.width + 1, cell.land + delta);
+
+    if (land == cell.land && ! cell.odd)
+        return Result::good();
+
+    const auto r = hubReplace (cell.routes, cellPairs (row, col, land), row.key, col.key, cell.db);
+    return r.ok ? Result::good (row.name + L" \x2192 " + col.name + " " + juce::String (land)
+                                + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()))
+                : r;
+}
+
+// [ ]: the chosen cell's level, a dB at a time (-60 to +12).
+Result App::hubLevel (double delta)
+{
+    const auto rows = hubRows();
+    const auto cols = hubCols();
+
+    if (rows.empty() || cols.empty())
+        return Result::good();
+
+    const auto cell = hubCell (rows[(size_t) hubRow], cols[(size_t) hubCol]);
+
+    if (! cell.on)
+        return Result::fail ("space routes it first");
+
+    const double db = juce::jlimit (-60.0, 12.0, std::round (cell.db) + delta);
+    std::vector<std::array<int, 2>> same;
+
+    for (const auto& r : cell.routes)
+        same.push_back ({ (int) r["fromChannel"], (int) r["toChannel"] });
+
+    const auto r = hubReplace ({}, same, rows[(size_t) hubRow].key, cols[(size_t) hubCol].key, db); // routing again sets the level
+    return r.ok ? Result::good (formatDb (db) + " dB") : r;
+}
+
+// The page's keys. With its command line empty: the arrows move round the matrix, space turns
+// a cell on or off, [ ] its level, shift+←→ where it lands in a session, del takes it out, n
+// names an app device. Anything else typed goes to the command line ("route in 1 > Song",
+// "hub" in front is fine), enter runs it.
+void App::handleHubPageKey (const Key& k)
+{
+    const auto numRows = (int) hubRows().size(), numCols = (int) hubCols().size();
+    hubRow = juce::jlimit (0, juce::jmax (0, numRows - 1), hubRow);
+    hubCol = juce::jlimit (0, juce::jmax (0, numCols - 1), hubCol);
+    const bool typing = hubLine.isNotEmpty();
 
     switch (k.code)
     {
-        case Key::Up:   hubIndex = juce::jmax (0, hubIndex - 1); return;
-        case Key::Down: hubIndex = juce::jmin (n - 1, hubIndex + 1); return;
+        case Key::Up:   hubRow = juce::jmax (0, hubRow - 1); return;
+        case Key::Down: hubRow = juce::jmin (numRows - 1, hubRow + 1); return;
+
+        case Key::Left:
+        case Key::Right:
+            if (k.shift)
+                say (hubMoveLanding (k.code == Key::Right ? 1 : -1));
+            else
+                hubCol = juce::jlimit (0, juce::jmax (0, numCols - 1), hubCol + (k.code == Key::Right ? 1 : -1));
+
+            return;
 
         case Key::Escape:
-            if (hubLine.isNotEmpty())
+            if (typing)
                 hubLine.clear();
             else
                 closeHubPage();
@@ -460,16 +818,19 @@ void App::handleHubPageKey (const Key& k)
         }
 
         case Key::Backspace:
-            if (hubLine.isNotEmpty())
-                hubLine = hubLine.dropLastCharacters (1);
-            else if (n > 0)
-                send ("unroute", 0.0);
-
-            return;
-
         case Key::Delete:
-            if (n > 0 && hubLine.isEmpty())
-                send ("unroute", 0.0);
+            if (typing && k.code == Key::Backspace)
+            {
+                hubLine = hubLine.dropLastCharacters (1);
+            }
+            else if (! typing && numRows > 0 && numCols > 0)
+            {
+                const auto rows = hubRows();
+                const auto cols = hubCols();
+
+                if (const auto cell = hubCell (rows[(size_t) hubRow], cols[(size_t) hubCol]); cell.on)
+                    say (hubToggle());
+            }
 
             return;
 
@@ -477,12 +838,33 @@ void App::handleHubPageKey (const Key& k)
             if (k.ctrl || k.alt || k.ch < 32)
                 return;
 
-            // [ ] the route's level, a dB at a time (from -60 to +12).
-            if ((k.ch == '[' || k.ch == ']') && hubLine.isEmpty() && n > 0)
+            if (! typing && k.ch == ' ')
             {
-                const double db = juce::jlimit (-60.0, 12.0, std::round ((double) routes->getReference (hubIndex)["db"]) + (k.ch == ']' ? 1.0 : -1.0));
-                send ("route", db);
+                say (hubToggle());
                 return;
+            }
+
+            if (! typing && (k.ch == '[' || k.ch == ']'))
+            {
+                say (hubLevel (k.ch == ']' ? 1.0 : -1.0));
+                return;
+            }
+
+            // n: name the app device on the chosen row (or column), on the command line.
+            if (! typing && (k.ch == 'n' || k.ch == 'N') && numRows > 0)
+            {
+                const auto rows = hubRows();
+                const auto cols = hubCols();
+                const auto& row = rows[(size_t) hubRow];
+
+                if (const auto key = hub::appNumber (row.key) > 0 ? row.key
+                                     : numCols > 0 && hub::appNumber (cols[(size_t) hubCol].key) > 0 ? cols[(size_t) hubCol].key
+                                                                                                    : juce::String();
+                    key.isNotEmpty())
+                {
+                    hubLine = "name " + key + " ";
+                    return;
+                }
             }
 
             hubLine += juce::String::charToString ((juce::juce_wchar) k.ch);
@@ -498,6 +880,10 @@ Result App::hubRoute (const juce::String&, bool) { return Result::fail ("the hub
 void App::openHubPage() { say (Result::fail ("the hub runs on macOS only so far")); }
 void App::closeHubPage() {}
 void App::handleHubPageKey (const Key&) {}
+std::vector<App::HubEnd> App::hubRows() const { return {}; }
+std::vector<App::HubEnd> App::hubCols() const { return {}; }
+App::HubCell App::hubCell (const HubEnd&, const HubEnd&) const { return {}; }
+juce::String App::hubAppName (const juce::String& key) const { return key; }
 void App::refreshHub (bool) {}
 juce::String App::hubEndName (const juce::String&, int, bool) const { return {}; }
 #endif

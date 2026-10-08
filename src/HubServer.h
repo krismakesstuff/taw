@@ -149,5 +149,7 @@ private:
     std::vector<SavedRoute> routes;
     juce::StringArray known;    // sessions seen (keys): they have their routes
     juce::StringPairArray names; // key -> the name it last had
+    juce::StringPairArray labels; // app device -> what it's called in taw ("taw 1" -> "Zoom")
+    juce::var labelsVar() const;
 };
 } // namespace taw::hub

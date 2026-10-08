@@ -251,12 +251,41 @@ public:
     bool openHubFirst = false;   // taw hub: the page once the device is open, not the start screen
     Mode hubReturn = Mode::Main; // where esc goes back to
     juce::String hubLine;        // the page's command line
-    int hubIndex = 0;            // the route chosen
     juce::var hubStatus;         // what the hub last said (void: nothing)
     juce::String hubError;       // why not
     double hubAskedAt = 0.0;     // when, to ask again now and then while the page is up
     void refreshHub (bool now);
     juce::String hubEndName (const juce::String& key, int channel, bool source) const;
+    juce::String hubAppName (const juce::String& key) const; // "Zoom" for taw 1 if it's named so
+
+    // The page's matrix: rows are where sound comes from (the interface's inputs, the app
+    // devices, sessions' outputs), columns where it goes (the interface's outputs in pairs, the
+    // app devices' mics, sessions' inputs). A cell stands for the routes between the two.
+    struct HubEnd
+    {
+        juce::String key;          // "interface", "taw 1", or a session's folder
+        int first = 1, width = 1;  // its channels (a session column: where it lands is per cell)
+        juce::String name, sub;    // "in 1" / "Zoom" / "Song"; a column's second line: "1-2", "mic", "in"
+        bool session = false, live = true;
+    };
+
+    struct HubCell
+    {
+        bool on = false, odd = false, self = false; // odd: routes that aren't the usual shape (typed ones)
+        int land = 0, landLast = 0;                 // a session column: the inputs it lands on
+        double db = 0.0;
+        juce::Array<juce::var> routes;             // the routes it stands for
+    };
+
+    std::vector<HubEnd> hubRows() const;
+    std::vector<HubEnd> hubCols() const;
+    HubCell hubCell (const HubEnd& row, const HubEnd& col) const;
+    int hubRow = 0, hubCol = 0;
+    Result hubToggle();
+    Result hubMoveLanding (int delta);
+    Result hubLevel (double delta);
+    Result hubReplace (const juce::Array<juce::var>& remove, const std::vector<std::array<int, 2>>& add,
+                       const juce::String& from, const juce::String& to, double db);
 
     // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen
     // kind where samples that sound alike sit together, and a list; typing filters by name, and

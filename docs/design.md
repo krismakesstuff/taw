@@ -959,9 +959,17 @@ join it later through virtual devices.
   runs is rebuilt on any change and handed over through a queue like the engine's graphs.
 - **In taw:** the hub has a page of its own (`Mode::Hub`), with or without a session: `taw hub`
   from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), tab on
-  the start screen, `hub` in a session (which plays on meanwhile). It shows the interface, the
-  sessions with their late blocks (closed ones dim) and every route; ↑↓, `[ ]` level, del takes
-  one out, esc goes back. Its command line takes `route in 1-2 > Song`,
+  the start screen, `hub` in a session (which plays on meanwhile). It shows the interface and a
+  matrix: rows are where sound comes from (the interface's inputs one by one, the app devices
+  and sessions' outputs as stereo), columns where it goes (the interface's outputs in pairs, the
+  app devices' mics, sessions' inputs). Arrows move, space turns a cell on or off (stereo to
+  stereo side by side, mono to both sides; into a session on the input of the same number for
+  an interface input, else the first free pair after the interface's), `[ ]` its level,
+  shift+←→ which of a session's inputs it lands on, del takes it out, `n` names the app device
+  (`name taw 1 Zoom`: a label in taw, kept in hub.json; route commands take it too). A cell is
+  ● on, · off, the inputs it lands on in a session column, ~ when typed routes don't fit the
+  shape, ─ an app device or session into itself. The line under it says what the cell does.
+  It scrolls both ways. Esc goes back. Its command line takes `route in 1-2 > Song`,
   `route Song > out 1-2 -6`, `unroute Song > out`, `forget Song`, `start`, `stop` (`hub` in
   front is fine, and in a session it's needed). `this` is the session here. Channels pair up
   (one to many spreads, many to one sums, none given: 1-2). A taw with no session open joins

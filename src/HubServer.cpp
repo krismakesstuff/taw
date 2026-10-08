@@ -243,6 +243,29 @@ void Server::received (Connection& c, const juce::var& m)
     {
         c.send (status());
     }
+    else if (type == "label")
+    {
+        // An app device's name in taw ("taw 1" is "Zoom"); empty takes it off.
+        const auto key = m["key"].toString(), label = m["label"].toString().trim();
+        auto reply = status();
+
+        if (appNumber (key) == 0)
+        {
+            reply.getDynamicObject()->setProperty ("error", "only the app devices (taw 1 ...) take names");
+        }
+        else
+        {
+            if (label.isEmpty())
+                labels.remove (juce::StringRef (key));
+            else
+                labels.set (key, label);
+
+            save();
+            reply = status();
+        }
+
+        c.send (reply);
+    }
     else if (type == "forget")
     {
         // A session and its routes, gone from the hub (it gets the defaults if it comes back).
@@ -372,6 +395,18 @@ juce::var Server::status() const
         list.add (r.toVar());
 
     o->setProperty ("routes", list);
+    o->setProperty ("labels", labelsVar());
+    return o;
+}
+
+// The app devices' names: { "taw 1": "Zoom", ... }.
+juce::var Server::labelsVar() const
+{
+    auto* o = new juce::DynamicObject();
+
+    for (const auto& key : labels.getAllKeys())
+        o->setProperty (key, labels[key]);
+
     return o;
 }
 
@@ -405,6 +440,10 @@ void Server::load()
             known.add (s["key"].toString());
             names.set (s["key"].toString(), s["name"].toString());
         }
+
+    if (auto* o = v["labels"].getDynamicObject())
+        for (const auto& p : o->getProperties())
+            labels.set (p.name.toString(), p.value.toString());
 }
 
 void Server::save() const
@@ -425,6 +464,7 @@ void Server::save() const
     auto* o = new juce::DynamicObject();
     o->setProperty ("sessions", sessions);
     o->setProperty ("routes", list);
+    o->setProperty ("labels", labelsVar());
     routesFile().replaceWithText (juce::JSON::toString (juce::var (o)));
 }
 

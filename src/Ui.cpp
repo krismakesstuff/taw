@@ -2780,16 +2780,15 @@ void Ui::drawMidiPanel (App& app)
                  colour::dim, bg, false, boxW - 4);
 }
 
-// The hub's page, a screen of its own (with a session open or not): the interface, the sessions
-// it knows (closed ones dim), every route one a row ("in 1  →  Song 1   0.0 dB"), and its own
-// command line. A list, so it fits 80x24.
+// The hub's page, a screen of its own (with a session open or not): its interface, then the
+// matrix of where sound goes. Rows are where it comes from (the interface's inputs, the app
+// devices, sessions' outputs); columns where it goes (the interface's outputs, the app devices'
+// mics, sessions' inputs). A cell is ● on, · off, the inputs it lands on in a session's column,
+// ~ when typed routes don't fit the usual shape. It scrolls both ways, so it fits 80x24.
 void Ui::drawHubPage (App& app)
 {
     const auto& s = app.hubStatus;
-    const auto* routes = s["routes"].getArray();
-    const int numRoutes = routes != nullptr ? routes->size() : 0;
     const int w = canvas.width(), h = canvas.height();
-    constexpr int endW = 26;
 
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
@@ -2809,88 +2808,120 @@ void Ui::drawHubPage (App& app)
     else
     {
         canvas.text (1, y, "interface", colour::dim);
-        canvas.text (12, y++, s["device"].toString() + L" \x00b7 " + juce::String ((double) s["sampleRate"] / 1000.0, 1) + L" kHz \x00b7 "
-                                  + juce::String ((int) s["blockSize"]) + L" samples \x00b7 " + juce::String ((int) s["inputs"]) + " in, "
-                                  + juce::String ((int) s["outputs"]) + " out",
-                     colour::text, -1, false, w - 13);
+        // The rate and block first: the device's name can be long (two devices).
+        x = canvas.text (12, y, juce::String ((double) s["sampleRate"] / 1000.0, 1) + "k/" + juce::String ((int) s["blockSize"]), colour::dim);
+        canvas.text (x + 2, y++, s["device"].toString() + L" \x00b7 interface lists others", colour::text, -1, false, w - x - 3);
 
-        // The sessions, on one line.
-        canvas.text (1, y, "sessions", colour::dim);
-        x = 12;
-
-        if (auto* sessions = s["sessions"].getArray(); sessions == nullptr || sessions->isEmpty())
-            canvas.text (x, y, L"none yet \x2014 a session joins by choosing the taw hub device (dev)", colour::faint, -1, false, w - 13);
-        else
-            for (const auto& c : *sessions)
-            {
-                const bool on = (bool) c["connected"];
-                const auto late = (juce::int64) c["late"];
-                const auto text = c["name"].toString() + (! on ? " (closed)" : late > 0 ? " (" + juce::String (late) + " late)" : juce::String());
-
-                if (x + (int) text.length() + 3 > w - 1)
-                    break;
-
-                x = canvas.text (x, y, text, on ? (late > 0 ? colour::error : colour::text) : colour::faint);
-                x += 3;
-            }
-
-        // The app devices.
-        ++y;
-        canvas.text (1, y, "apps", colour::dim);
-
-        if (const int apps = (int) s["apps"]; apps > 0)
-        {
-            juce::StringArray names;
-
-            for (int n = 1; n <= apps; ++n)
-                names.add ("taw " + juce::String (n));
-
-            x = canvas.text (12, y, names.joinIntoString ("  "), colour::text);
-            canvas.text (x + 3, y, L"pick one in an app as its speaker or mic \x00b7 route taw 1 > Song, Song > taw 2",
-                         colour::faint, -1, false, w - x - 4);
-        }
-        else
-        {
-            canvas.text (12, y, L"none \x2014 driver install adds taw 1 to taw 4 for apps (Zoom, a browser)", colour::faint, -1, false, w - 13);
-        }
+        if ((int) s["apps"] == 0)
+            canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
 
         y += 2;
-        canvas.text (1, y++, "routes", colour::dim);
 
-        if (numRoutes == 0)
-            canvas.text (3, y, L"none \x2014 route in 1-2 > Song adds one", colour::faint, -1, false, w - 4);
+        const auto rows = app.hubRows();
+        const auto cols = app.hubCols();
+        constexpr int labelW = 20, colW = 8;
+        const int top = y, firstRowY = top + 2;
+        const int visibleCols = std::max (1, (w - 2 - labelW) / colW);
+        const int visibleRows = std::max (1, h - 5 - firstRowY);
+        const int firstCol = juce::jlimit (0, std::max (0, (int) cols.size() - visibleCols), app.hubCol - visibleCols / 2);
+        const int firstRow = juce::jlimit (0, std::max (0, (int) rows.size() - visibleRows), app.hubRow - visibleRows / 2);
 
-        const int listRows = std::max (1, h - 4 - y);
-        const int first = juce::jlimit (0, std::max (0, numRoutes - listRows), app.hubIndex - listRows / 2);
+        canvas.text (1, top, "from", colour::faint);
+        canvas.text (1, top + 1, L"   \x2193   to \x2192", colour::faint);
 
-        for (int row = 0; row < listRows && first + row < numRoutes; ++row)
+        // The columns' heads: a name, and under it what part of it ("1-2", "mic", "in").
+        for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
         {
-            const int i = first + row, ry = y + row;
-            const auto& r = routes->getReference (i);
-            const bool chosen = i == app.hubIndex;
-            const int rowBg = chosen ? colour::focusBg : -1;
-            const auto from = r["from"].toString(), to = r["to"].toString();
+            const auto& c = cols[(size_t) (firstCol + i)];
+            const bool chosen = firstCol + i == app.hubCol;
+            const int cx = 1 + labelW + i * colW;
+            canvas.text (cx, top, c.name, chosen ? colour::accent : (c.live ? colour::text : colour::faint), -1, chosen, colW - 1);
+            canvas.text (cx, top + 1, c.sub, chosen ? colour::accent : colour::faint, -1, false, colW - 1);
+        }
 
-            // Dim while an end is a session that isn't connected.
-            bool live = true;
+        if (firstCol > 0)
+            canvas.put (labelW, top, L'\x25c2', colour::dim);
 
-            if (auto* sessions = s["sessions"].getArray())
-                for (const auto& c : *sessions)
-                    if ((c["key"].toString() == from || c["key"].toString() == to) && ! (bool) c["connected"])
-                        live = false;
+        if (firstCol + visibleCols < (int) cols.size())
+            canvas.put (w - 2, top, L'\x25b8', colour::dim);
 
-            canvas.fill (1, ry, w - 2, L' ', -1, rowBg);
+        for (int r = 0; r < visibleRows && firstRow + r < (int) rows.size(); ++r)
+        {
+            const auto& row = rows[(size_t) (firstRow + r)];
+            const int ry = firstRowY + r;
+            const bool rowChosen = firstRow + r == app.hubRow;
 
-            if (chosen)
-                canvas.put (1, ry, L'\x25b8', colour::accent, rowBg);
+            if (rowChosen)
+                canvas.put (1, ry, L'\x25b8', colour::accent);
 
-            // Faint is unreadable on the highlight: the chosen row goes no fainter than dim.
-            const int quiet = chosen ? colour::dim : colour::faint;
-            const int fg = live ? colour::text : quiet;
-            canvas.text (3, ry, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, chosen, endW);
-            canvas.put (4 + endW, ry, L'\x2192', live ? colour::accent : quiet, rowBg);
-            canvas.text (6 + endW, ry, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, chosen, endW);
-            canvas.text (8 + 2 * endW, ry, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : quiet, rowBg);
+            x = canvas.text (3, ry, row.name, rowChosen ? colour::text : (row.live ? colour::text : colour::faint), -1, rowChosen, labelW - 3);
+
+            if (row.sub.isNotEmpty() && x + 1 < labelW)
+                canvas.text (x + 1, ry, row.sub, colour::faint, -1, false, labelW - x - 1);
+            else if (! row.live && x + 1 < labelW)
+                canvas.text (x + 1, ry, "(closed)", colour::faint, -1, false, labelW - x - 1);
+
+            for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
+            {
+                const auto& col = cols[(size_t) (firstCol + i)];
+                const auto cell = app.hubCell (row, col);
+                const bool chosen = rowChosen && firstCol + i == app.hubCol;
+                const int bg = chosen ? colour::focusBg : -1;
+                const bool live = row.live && col.live;
+                const int cx = 1 + labelW + i * colW;
+
+                juce::String mark;
+                int fg = colour::faint;
+
+                if (cell.self)
+                    mark = L"\x2500";
+                else if (! cell.on)
+                    mark = L"\x00b7";
+                else
+                {
+                    mark = cell.odd ? juce::String ("~")
+                           : col.session ? juce::String (cell.land) + (cell.landLast > cell.land ? "-" + juce::String (cell.landLast) : juce::String())
+                                         : juce::String (L"\x25cf");
+                    fg = live ? colour::accent : colour::dim;
+                }
+
+                if (chosen && fg == colour::faint)
+                    fg = colour::dim; // faint doesn't read on the highlight
+
+                canvas.fill (cx, ry, colW - 1, L' ', -1, bg);
+                canvas.text (cx + std::max (0, (colW - 1 - (int) mark.length()) / 2), ry, mark, fg, bg, cell.on);
+            }
+        }
+
+        // The chosen cell, in words.
+        if (! rows.empty() && ! cols.empty())
+        {
+            const auto& row = rows[(size_t) juce::jlimit (0, (int) rows.size() - 1, app.hubRow)];
+            const auto& col = cols[(size_t) juce::jlimit (0, (int) cols.size() - 1, app.hubCol)];
+            const auto cell = app.hubCell (row, col);
+            juce::String words;
+
+            if (cell.self)
+            {
+                words = row.name + L" can't feed itself";
+            }
+            else if (! cell.on)
+            {
+                words = row.name + L" \x2192 " + col.name + (col.sub.isNotEmpty() ? " " + col.sub : juce::String()) + L": off \x00b7 space routes it";
+            }
+            else
+            {
+                juce::StringArray parts;
+
+                for (const auto& r : cell.routes)
+                    parts.add (app.hubEndName (r["from"].toString(), r["fromChannel"], true) + L" \x2192 "
+                               + app.hubEndName (r["to"].toString(), r["toChannel"], false));
+
+                words = parts.joinIntoString (", ") + L" \x00b7 " + formatDb (cell.db) + " dB"
+                        + (col.session ? juce::String (L" \x00b7 shift+\x2190\x2192 moves it") : juce::String());
+            }
+
+            canvas.text (1, h - 4, words, colour::dim, -1, false, w - 2);
         }
     }
 
@@ -2903,10 +2934,11 @@ void Ui::drawHubPage (App& app)
     canvas.put (x, h - 2, L' ', -1, colour::text);
 
     if (app.hubLine.isEmpty())
-        canvas.text (x + 2, h - 2, L"route in 1-2 > Song \x00b7 route taw 1 > out \x00b7 unroute Song > out \x00b7 interface \x00b7 forget Song \x00b7 start \x00b7 stop",
+        canvas.text (x + 2, h - 2, L"or type: route in 1 > Song 3 \x00b7 name taw 1 Zoom \x00b7 interface \x00b7 forget Song \x00b7 start \x00b7 stop",
                      colour::faint, -1, false, w - x - 3);
 
-    canvas.text (1, h - 1, L"\x2191\x2193 choose \x00b7 [ ] level \x00b7 del takes it out \x00b7 enter runs the line \x00b7 esc back", colour::dim, -1, false, w - 2);
+    canvas.text (1, h - 1, L"\x2190\x2191\x2193\x2192 move \x00b7 space on/off \x00b7 [ ] level \x00b7 shift+\x2190\x2192 which inputs \x00b7 n name \x00b7 esc back",
+                 colour::dim, -1, false, w - 2);
 }
 
 //==============================================================================

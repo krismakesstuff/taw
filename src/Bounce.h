@@ -7,17 +7,20 @@ namespace taw
 // Offline render of the mix bus over a time range, on its own thread, faster than real time.
 // Prints what the mix bus plays (track volume, mute/solo, buses and sends, mix volume); never the click or
 // live inputs.
+// Format::video: the session's video, and where in it the range starts (seconds). Outside Bounce
+// so it's complete where Bounce's constructor defaults it (clang insists).
+struct BouncePicture
+{
+    juce::File file;
+    double from = 0.0;
+};
+
 class Bounce final : private juce::Thread
 {
 public:
     enum class Format { wav, mp3, video };
 
-    // Format::video: the session's video, and where in it the range starts (seconds).
-    struct Picture
-    {
-        juce::File file;
-        double from = 0.0;
-    };
+    using Picture = BouncePicture;
 
     Bounce (std::unique_ptr<Graph>, juce::Range<juce::int64> range, double sampleRate, Format, juce::File target, Picture = {});
     ~Bounce() override;

@@ -857,7 +857,10 @@ own, it shows the frame for where the playhead is, so it can't drift.
 - **Decoding:** FFmpeg's libraries (libavformat, libavcodec, libswscale), linked from Gyan's
   pinned 9.0.2 shared build, which CMake downloads. The DLLs are delay-loaded, so taw starts
   without loading them, and still runs without video if they're missing. FFmpeg rather than
-  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode.
+  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode. On
+  macOS, Homebrew's FFmpeg (`brew install ffmpeg`, 8.x works) is found at build time and
+  weak-linked: without it taw still starts, and `videoAvailable` asks the loader whether the
+  libraries are there. Homebrew's next major version renames them, which needs a rebuild.
 - **Exact frames:** the frame for a time is the last one whose timestamp is at or before it.
   Moving forward decodes on from the current frame (it's always one frame ahead, so playback
   only has to scale); a jump past a keyframe seeks to the keyframe before the target and decodes
@@ -866,8 +869,9 @@ own, it shows the frame for where the playhead is, so it can't drift.
   latency (what you hear); stopped, the cursor. Less the video's start (`videoStart`, samples,
   negative to skip a slate), less `videoOffset` frames (for a screen that lags).
 - **Window:** a normal JUCE window with the native title bar, a view only: it ignores keys,
-  never activates (`WS_EX_NOACTIVATE`; set up before it goes on the desktop, because JUCE
-  activates a window when it remakes it), and the decoder thread scales frames to its size in
+  never activates (`WS_EX_NOACTIVATE` on Windows, set up before it goes on the desktop, because
+  JUCE activates a window when it remakes it; on macOS it can't become the key window, and if
+  it's activated anyway `syncVideo` hands the keyboard back to the terminal), and the decoder thread scales frames to its size in
   physical pixels so painting is a copy. Its close button hides it until `video` or the next
   open (not saved: Windows sends every window the same close on shutdown). Its place is saved
   in the session (`videoWindow`).
@@ -877,8 +881,9 @@ own, it shows the frame for where the playhead is, so it can't drift.
   before the video) in the header. Up from the first track reaches it. Arrows step frames
   (ctrl: seconds; alt keeps the beat), landing on each frame's first sample (`frameStart`:
   the first sample the decoder shows that frame at); tab hops to its start and end; a click
-  puts the cursor on a frame and a drag scrubs (the Windows console reports moves with the
-  left button held as `Key::drag`, once per cell). Selections made there cover every track,
+  puts the cursor on a frame and a drag scrubs (moves with the left button held come in as
+  `Key::drag`, once per cell: from the Windows console, and on macOS from the terminal's
+  button-event mouse mode, 1002). Selections made there cover every track,
   like the other top lanes.
 - **Bounce with picture (`bv`):** `Bounce` with `Format::video` feeds the mix to `VideoMuxer`,
   which re-encodes the picture (x264, CRF 18, the source's size and frame rate) rather than

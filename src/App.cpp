@@ -1689,7 +1689,7 @@ Result App::importAbletonSet (const juce::File& als)
 
     if (auto r = closeSession(); ! r.ok)
     {
-        openAfterClose = {};
+        openAfterClose = juce::File();
         openAfterCloseNote.clear();
         return Result::fail (summary + L" \x00b7 couldn't close this session to open it: " + r.message);
     }

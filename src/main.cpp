@@ -11,6 +11,7 @@
 #include <juce_events/juce_events.h>
 
 #if JUCE_MAC
+ #include "MacFocus.h"
  #include "TerminalSetup.h"
 #endif
 
@@ -355,7 +356,13 @@ int main (int argc, char** argv)
             return 1;
         }
 
-        const auto front = GetForegroundWindow();
+        // What has the keyboard: the window in front (Windows), the app in front (macOS).
+#if JUCE_WINDOWS
+        auto keyboardOwner = [] { return (juce::pointer_sized_int) GetForegroundWindow(); };
+#else
+        auto keyboardOwner = [] { return (juce::pointer_sized_int) taw::macFocus::frontmostApp(); };
+#endif
+        const auto front = keyboardOwner();
         player.setVisible (true);
         juce::MessageManager::getInstance()->runDispatchLoopUntil (300);
 
@@ -390,7 +397,7 @@ int main (int argc, char** argv)
 
         std::printf ("played: %d of %d frames in a second, one after another\n", changes, juce::roundToInt (info.fps));
 
-        if (GetForegroundWindow() != front)
+        if (keyboardOwner() != front)
         {
             std::puts ("FAILED: showing the window took the keyboard");
             ok = false;
@@ -1095,7 +1102,7 @@ int main (int argc, char** argv)
             for (const auto& k : keys)
                 out.add (juce::String (k.ctrl ? "ctrl+" : "") + (k.alt ? "alt+" : "") + (k.shift ? "shift+" : "")
                          + (k.code == taw::Key::Char    ? juce::String::charToString ((juce::juce_wchar) k.ch)
-                            : k.code == taw::Key::Mouse ? juce::String (k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
+                            : k.code == taw::Key::Mouse ? juce::String (k.drag ? "drag" : k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
                                                         : juce::String (names[k.code])));
 
             return out.joinIntoString (" ");
@@ -1115,11 +1122,13 @@ int main (int argc, char** argv)
             { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
             // kitty's shift+return; taw's Terminal profile: ctrl+up/down
             { "\x1b[13;2u", "shift+Enter" }, { "\x1b[1;5A", "ctrl+Up" }, { "\x1b[1;5B", "ctrl+Down" },
-            // SGR mouse: presses only (not releases, moves, the wheel or the middle button), cells from 0
-            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<32;10;5M", "" },
+            // SGR mouse: presses and left drags (not releases, the wheel or the middle button), cells from 0
+            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<34;10;5M", "" },
             { "\x1b[<1;10;5M", "" }, { "\x1b[<6;3;2M", "shift+right@2,1" }, { "\x1b[<16;3;2M", "ctrl+click@2,1" },
             { "\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M", "click@19,6 click2@19,6 click@19,6" },
             { "\x1b[<0;30;7M\x1b[<0;31;7M", "click@29,6 click@30,6" },
+            // a drag: once per cell it reaches, none where it was pressed; shift kept
+            { "\x1b[<0;40;7M\x1b[<32;40;7M\x1b[<32;41;7M\x1b[<32;41;7M\x1b[<36;43;8M\x1b[<0;43;8m", "click@39,6 drag@40,6 shift+drag@42,7" },
         };
 
         // Control bytes made readable: esc[1;5D, 0x1a.

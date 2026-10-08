@@ -25,9 +25,10 @@ termios oldMode {};
 // Keyboard enhancement (kitty protocol, "disambiguate"): terminals that support it (iTerm2,
 // Ghostty, kitty, WezTerm) report ctrl+[ apart from Escape and ctrl+m apart from Enter.
 // Terminal.app ignores it and keeps sending the classic sequences, which are decoded too.
-// Mouse buttons are reported (1000) in SGR form (1006), so clicks come in as cells.
-constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u\x1b[?1000h\x1b[?1006h";
-constexpr const char* leave = "\x1b[?1006l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
+// Mouse buttons are reported (1000), and moves while one is held (1002), in SGR form (1006),
+// so clicks and drags come in as cells.
+constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u\x1b[?1000h\x1b[?1002h\x1b[?1006h";
+constexpr const char* leave = "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
 
 void writeAll (const char* data, size_t size)
 {
@@ -155,24 +156,43 @@ Key csiKey (const std::string& params, char final)
 // report presses, so it's the same button in the same cell soon after.
 struct LastClick { double at = -1.0e9; int x = -1, y = -1; bool right = false; } lastClick;
 
+// The cell a press or drag last reported: a drag is reported once per cell it reaches.
+int dragX = -1, dragY = -1;
+
 // An SGR mouse report: "<b;x;y" then M (pressed) or m (released). b is the button (0 left,
 // 1 middle, 2 right) plus 4 shift, 8 alt, 16 ctrl, 32 moved, 64 wheel; x and y count from 1.
-// Only left and right presses become keys, as the Windows console reports them.
+// Left and right presses, and moves with the left button held (drags), become keys, as the
+// Windows console reports them.
 Key mouseKey (const std::string& params, char final)
 {
     const auto p = csiParams (params.substr (1));
     Key k;
 
-    if (final != 'M' || p.size() < 3 || (p[0] & (32 | 64)) != 0 || (p[0] & 3) == 1 || (p[0] & 3) == 3)
+    if (final != 'M' || p.size() < 3 || (p[0] & 64) != 0 || (p[0] & 3) == 1 || (p[0] & 3) == 3)
         return k;
+
+    const auto x = std::max (0, p[1] - 1), y = std::max (0, p[2] - 1);
+
+    if ((p[0] & 32) != 0) // moved
+    {
+        if ((p[0] & 3) != 0 || (x == dragX && y == dragY))
+            return k;
+
+        k.code = Key::Mouse;
+        k.drag = true;
+        k.shift = (p[0] & 4) != 0;
+        k.x = dragX = x;
+        k.y = dragY = y;
+        return k;
+    }
 
     k.code = Key::Mouse;
     k.right = (p[0] & 3) == 2;
     k.shift = (p[0] & 4) != 0;
     k.alt = (p[0] & 8) != 0;
     k.ctrl = (p[0] & 16) != 0;
-    k.x = std::max (0, p[1] - 1);
-    k.y = std::max (0, p[2] - 1);
+    k.x = dragX = x;
+    k.y = dragY = y;
 
     const auto now = juce::Time::getMillisecondCounterHiRes();
     k.doubleClick = now - lastClick.at < 500.0 && k.x == lastClick.x && k.y == lastClick.y && k.right == lastClick.right;

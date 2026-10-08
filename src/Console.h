@@ -37,7 +37,7 @@ struct Key
     // double-click (the first arrives as an ordinary press).
     int x = 0, y = 0;
     bool right = false, doubleClick = false;
-    bool drag = false; // moved with the left button held (Windows only so far)
+    bool drag = false; // moved with the left button held, once per cell
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.

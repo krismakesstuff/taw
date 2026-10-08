@@ -6,6 +6,8 @@
   #define NOMINMAX
  #endif
  #include <windows.h>
+#elif JUCE_MAC
+ #include <dlfcn.h>
 #endif
 
 #if TAW_VIDEO
@@ -40,6 +42,25 @@ bool videoAvailable (juce::String& why)
 
     why = missing.isEmpty() ? juce::String() : "video needs FFmpeg's " + missing + " next to taw.exe";
     return missing.isEmpty();
+#elif TAW_VIDEO && JUCE_MAC
+    // Weak-linked: a library that didn't load leaves its functions unbound (asked of the loader:
+    // the compiler takes a function's address for granted). Homebrew's next major FFmpeg renames
+    // them (libavcodec.62 to .63), which needs a rebuild.
+    static const bool loaded = []
+    {
+        bool all = true;
+
+        for (const auto* symbol : { "avformat_open_input", "avcodec_send_packet", "av_frame_alloc", "sws_scale" })
+            all = all && dlsym (RTLD_DEFAULT, symbol) != nullptr;
+
+        if (all)
+            av_log_set_level (AV_LOG_QUIET); // FFmpeg's messages would land on taw's screen
+
+        return all;
+    }();
+
+    why = loaded ? juce::String() : "video needs FFmpeg: brew install ffmpeg (or rebuild taw if it was upgraded)";
+    return loaded;
 #else
     why = "video isn't built for this platform yet";
     return false;

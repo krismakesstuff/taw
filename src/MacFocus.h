@@ -5,4 +5,7 @@
 namespace taw::macFocus
 {
 void activateTerminal();
+
+// The process id of the app in front (that has the keyboard), for tests.
+int frontmostApp();
 } // namespace taw::macFocus

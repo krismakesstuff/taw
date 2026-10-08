@@ -161,6 +161,7 @@ void AudioEngine::renderPads (const TrackPlay& tp, int trackIndex, float* left, 
 
 void AudioEngine::play (juce::int64 from, juce::int64 countIn)
 {
+    resetBlockLoad(); // counted per pass
     playPos.store (juce::jmax<juce::int64> (0, from));
     seekTo.store (-1);
     countInLeft.store (juce::jmax<juce::int64> (0, countIn));
@@ -309,6 +310,32 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
                                                     int numSamples, const juce::AudioIODeviceCallbackContext&)
 {
     juce::ScopedNoDenormals noDenormals;
+
+    // How long this block took against how long it lasts: one that ran over is a dropout (a
+    // click), counted while rolling so it can be told apart from one the driver chain made.
+    struct Timer
+    {
+        AudioEngine& e;
+        int n;
+        juce::int64 start = juce::Time::getHighResolutionTicks();
+
+        ~Timer()
+        {
+            if (e.deviceRate <= 0.0 || n <= 0)
+                return;
+
+            const auto load = (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * e.deviceRate / n);
+
+            if (e.rolling.load (std::memory_order_relaxed))
+            {
+                if (load > 1.0f)
+                    e.lateBlocks.fetch_add (1, std::memory_order_relaxed);
+
+                if (load > e.worstLoad.load (std::memory_order_relaxed))
+                    e.worstLoad.store (load, std::memory_order_relaxed);
+            }
+        }
+    } timer { *this, numSamples };
 
     for (int ch = 0; ch < numOut; ++ch)
         if (out[ch] != nullptr)

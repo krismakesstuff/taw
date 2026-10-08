@@ -772,6 +772,15 @@ Result App::stop()
     // Back to where play started, unless you moved the cursor during playback.
     setCursor (cursorMovedWhileRolling ? cursor : playStart);
     cursorMovedWhileRolling = false;
+
+    // Blocks taw rendered too slowly this pass: each was a dropout (a click). None while you
+    // heard clicks means they came from further down the chain (the driver, Voicemeeter).
+    if (const auto late = engine.lateBlockCount(); late > 0)
+        return Result::fail ((wasRecording ? juce::String (L"stopped \x00b7 saving take \x00b7 ") : juce::String ("stopped "))
+                             + juce::String (late) + (late == 1 ? " dropout" : " dropouts") + L" \x2014 taw's audio ran late (worst block "
+                             + juce::String (juce::roundToInt (engine.worstBlockLoad() * 100.0f))
+                             + L"% of its time) \x00b7 a bigger buffer in dev, or fewer plugins, helps");
+
     return Result::good (wasRecording ? juce::String (L"stopped \x00b7 saving take") : juce::String());
 }
 

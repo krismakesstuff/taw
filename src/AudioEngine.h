@@ -505,6 +505,12 @@ public:
     }
     bool isDeviceRunning() const noexcept { return deviceRunning.load(); }
 
+    // Blocks that took longer to render than they last, while rolling (each is a dropout on taw's
+    // side), and the worst block's time as a share of its length (1 = right at the limit).
+    int lateBlockCount() const noexcept { return lateBlocks.load(); }
+    float worstBlockLoad() const noexcept { return worstLoad.load(); }
+    void resetBlockLoad() noexcept { lateBlocks.store (0); worstLoad.store (0.0f); }
+
     // MIDI: each input port feeds one queue (see MidiInputs). While recording, what the audio
     // thread passed on comes back with the playhead it arrived at.
     std::array<MidiQueue, MidiInputs::maxPorts>& midiInputQueues() { return midiIn; }
@@ -600,6 +606,8 @@ private:
     std::atomic<juce::uint64> liveSerial { 0 }; // serial of the graph the audio thread is running
 
     std::atomic<bool> rolling { false }, deviceRunning { false };
+    std::atomic<int> lateBlocks { 0 };
+    std::atomic<float> worstLoad { 0.0f };
     std::atomic<juce::int64> playPos { 0 }, seekTo { -1 }, countInLeft { 0 };
     std::atomic<int> numInputs { 0 };
 

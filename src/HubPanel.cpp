@@ -7,6 +7,7 @@
  #include "Hub.h"
  #include "HubDevice.h"
  #include "HubServer.h"
+ #include "HubMac.h"
 #endif
 
 namespace taw
@@ -56,6 +57,23 @@ void App::refreshHub (bool now)
     hubAskedAt = t;
     hubError.clear();
     hubStatus = hub::request (hubMessage ("status"), hubError);
+    hubUsers.clear();
+
+    for (const auto& [device, users] : hub::mac::appDeviceUsers())
+        hubUsers[device] = { users.playing, users.listening };
+}
+
+bool App::sessionOnHub() const
+{
+    if (session == nullptr)
+        return false;
+
+    if (auto* sessions = hubStatus["sessions"].getArray())
+        for (const auto& s : *sessions)
+            if (s["key"].toString() == session->folder().getFullPathName())
+                return (bool) s["connected"];
+
+    return false;
 }
 
 juce::String App::hubEndName (const juce::String& key, int channel, bool source) const
@@ -496,7 +514,10 @@ std::vector<App::HubEnd> App::hubRows() const
     for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
     {
         const auto key = "taw " + juce::String (n);
-        rows.push_back ({ key, 1, 2, hubAppName (key), hubAppName (key) != key ? key : juce::String(), false, true });
+        const auto it = hubUsers.find (key);
+        const auto playing = it != hubUsers.end() ? it->second.playing.joinIntoString (", ") : juce::String();
+        const auto named = hubAppName (key) != key ? key + " " : juce::String();
+        rows.push_back ({ key, 1, 2, hubAppName (key), named + (playing.isNotEmpty() ? L"\x25c2 " + playing : juce::String ("no app")), false, true });
     }
 
     if (auto* sessions = hubStatus["sessions"].getArray())
@@ -518,7 +539,9 @@ std::vector<App::HubEnd> App::hubCols() const
     for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
     {
         const auto key = "taw " + juce::String (n);
-        cols.push_back ({ key, 1, 2, hubAppName (key), "mic", false, true });
+        const auto it = hubUsers.find (key);
+        const bool heard = it != hubUsers.end() && ! it->second.listening.isEmpty();
+        cols.push_back ({ key, 1, 2, hubAppName (key), heard ? L"\x25b8" + it->second.listening[0] : juce::String ("as mic"), false, true });
     }
 
     if (auto* sessions = hubStatus["sessions"].getArray())
@@ -713,7 +736,10 @@ Result App::hubToggle()
 
     return Result::good (row.name + L" \x2192 " + col.name
                          + (col.session ? " " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()) : juce::String())
-                         + (! col.live ? juce::String (L" \x00b7 waits for it to open") : juce::String()));
+                         + (! col.live ? juce::String (L" \x00b7 waits for it to open")
+                            : col.session ? L" \x00b7 there, a track takes them: i " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String())
+                                                + ", then mon to hear it or a to arm it"
+                                          : juce::String()));
 }
 
 // Shift+←→ on a cell into a session: the inputs it lands on, one along.

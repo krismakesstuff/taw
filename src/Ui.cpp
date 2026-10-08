@@ -2794,7 +2794,9 @@ void Ui::drawHubPage (App& app)
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
     int x = canvas.text (5, 0, L"\x25b8 hub", colour::text, colour::headerBg);
 
-    if (app.session != nullptr)
+    if (app.session != nullptr && ! s.isVoid() && ! app.sessionOnHub())
+        canvas.text (x + 2, 0, L"(" + app.session->name() + L" isn't on the hub \x00b7 its dev \x2192 taw hub puts it here)", colour::error, colour::headerBg);
+    else if (app.session != nullptr)
         canvas.text (x + 2, 0, L"(" + app.session->name() + L" plays on \x00b7 esc goes back to it)", colour::dim, colour::headerBg);
 
     int y = 2;
@@ -2814,12 +2816,17 @@ void Ui::drawHubPage (App& app)
 
         if ((int) s["apps"] == 0)
             canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
+        else
+            canvas.text (1, y + 1, L"apps: taw 1-4 as a speaker = a row (\x25c2 who plays) \x00b7 as a mic = a column (\x25b8 who hears)",
+                         colour::dim, -1, false, w - 2);
 
-        y += 2;
+        y += 3;
 
         const auto rows = app.hubRows();
         const auto cols = app.hubCols();
-        constexpr int labelW = 20, colW = 8;
+        constexpr int colW = 8;
+        // The names take what the columns leave, so who plays into an app device shows.
+        const int labelW = juce::jlimit (20, 34, w - 2 - (int) cols.size() * colW);
         const int top = y, firstRowY = top + 2;
         const int visibleCols = std::max (1, (w - 2 - labelW) / colW);
         const int visibleRows = std::max (1, h - 5 - firstRowY);
@@ -2907,7 +2914,23 @@ void Ui::drawHubPage (App& app)
             }
             else if (! cell.on)
             {
-                words = row.name + L" \x2192 " + col.name + (col.sub.isNotEmpty() ? " " + col.sub : juce::String()) + L": off \x00b7 space routes it";
+                // An app device in full: who plays into it, who hears it.
+                auto users = [&app] (const App::HubEnd& e, bool source) -> juce::String
+                {
+                    const auto it = app.hubUsers.find (e.key);
+                    const auto list = it == app.hubUsers.end() ? juce::String()
+                                      : (source ? it->second.playing : it->second.listening).joinIntoString (", ");
+
+                    if (source)
+                        return L" (" + (list.isEmpty() ? juce::String ("no app plays into it yet") : list + " into it") + ")";
+
+                    return L"'s mic (" + (list.isEmpty() ? juce::String ("no app hears it yet") : list + " hear it") + ")";
+                };
+
+                const bool appRow = ! row.session && row.key != "interface";
+                const bool appCol = ! col.session && col.key != "interface";
+                words = row.name + (appRow ? users (row, true) : juce::String()) + L" \x2192 "
+                        + col.name + (appCol ? users (col, false) : col.sub.isNotEmpty() ? " " + col.sub : juce::String()) + L": off \x00b7 space routes it";
             }
             else
             {

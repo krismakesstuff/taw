@@ -258,6 +258,15 @@ public:
     juce::String hubEndName (const juce::String& key, int channel, bool source) const;
     juce::String hubAppName (const juce::String& key) const; // "Zoom" for taw 1 if it's named so
 
+    // Who uses each app device now ("taw 1"): the apps playing into it, and those hearing it as
+    // their mic (macOS only lists an app while its audio runs). Asked with the status.
+    struct HubUsers
+    {
+        juce::StringArray playing, listening;
+    };
+    std::map<juce::String, HubUsers> hubUsers;
+    bool sessionOnHub() const; // the open session is one of the hub's (its device is taw hub)
+
     // The page's matrix: rows are where sound comes from (the interface's inputs, the app
     // devices, sessions' outputs), columns where it goes (the interface's outputs in pairs, the
     // app devices' mics, sessions' inputs). A cell stands for the routes between the two.

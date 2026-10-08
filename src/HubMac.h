@@ -2,6 +2,8 @@
 
 #include <juce_core/juce_core.h>
 
+#include <map>
+
 // macOS pieces of the hub that need Objective-C or CoreAudio itself.
 namespace taw::hub::mac
 {
@@ -13,6 +15,15 @@ juce::String microphoneAccess();
 inline constexpr int appDevices = 4;   // taw 1 .. taw 4
 inline constexpr int appChannels = 2 * appDevices; // the hidden device's channels each way
 bool driverInstalled();
+
+// Who uses the app devices right now, by name ("taw 1"): the apps playing into one and those
+// recording from it ("Google Chrome", for its helper processes too), and "the Mac" when it's
+// the system's output or input. macOS only lists an app while its audio runs.
+struct DeviceUsers
+{
+    juce::StringArray playing, listening;
+};
+std::map<juce::String, DeviceUsers> appDeviceUsers();
 
 // A private aggregate device (only this process sees it): the interface (its output device,
 // and its input device when that's another one), clocked by it, and the driver's hidden device

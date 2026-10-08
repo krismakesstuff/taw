@@ -1,9 +1,14 @@
 #include "HubMac.h"
 
+#import <AppKit/AppKit.h>
 #import <AVFoundation/AVFoundation.h>
 #include <CoreAudio/CoreAudio.h>
 
+#include <libproc.h>
 #include <vector>
+
+// Which process stands behind another (Chrome for its helpers); libsystem has it, no header.
+extern "C" pid_t responsibility_get_pid_responsible_for_pid (pid_t);
 
 namespace taw::hub::mac
 {
@@ -136,6 +141,105 @@ juce::String microphoneAccess()
 }
 
 bool driverInstalled() { return deviceWithUID (driverHubUID) != kAudioObjectUnknown; }
+
+namespace
+{
+template <typename T>
+std::vector<T> arrayProperty (AudioObjectID object, AudioObjectPropertySelector s, AudioObjectPropertyScope scope = kAudioObjectPropertyScopeGlobal)
+{
+    const AudioObjectPropertyAddress address { s, scope, kAudioObjectPropertyElementMain };
+    UInt32 size = 0;
+
+    if (AudioObjectGetPropertyDataSize (object, &address, 0, nullptr, &size) != noErr || size == 0)
+        return {};
+
+    std::vector<T> values (size / sizeof (T));
+
+    if (AudioObjectGetPropertyData (object, &address, 0, nullptr, &size, values.data()) != noErr)
+        return {};
+
+    values.resize (size / sizeof (T));
+    return values;
+}
+
+template <typename T>
+T scalarProperty (AudioObjectID object, AudioObjectPropertySelector s)
+{
+    const auto values = arrayProperty<T> (object, s);
+    return values.empty() ? T {} : values.front();
+}
+
+// An app's name for a process: the app behind it (Chrome for "Google Chrome Helper"). A tool
+// with no bundle (afplay) goes by its own name: the app behind it is only the terminal.
+juce::String appName (pid_t pid, bool bundled)
+{
+    const auto owner = bundled ? responsibility_get_pid_responsible_for_pid (pid) : pid_t (-1);
+
+    for (auto p : { owner, pid })
+        if (p > 0)
+            if (auto* app = [NSRunningApplication runningApplicationWithProcessIdentifier: p]; app != nil && app.localizedName != nil)
+                return juce::String (app.localizedName.UTF8String);
+
+    char name[2 * MAXCOMLEN] {};
+    proc_name (pid, name, sizeof (name));
+    return juce::String (name);
+}
+} // namespace
+
+std::map<juce::String, DeviceUsers> appDeviceUsers()
+{
+    std::map<juce::String, DeviceUsers> users;
+    const auto me = getpid();
+
+    @autoreleasepool
+    {
+        for (auto process : arrayProperty<AudioObjectID> (kAudioObjectSystemObject, kAudioHardwarePropertyProcessObjectList))
+        {
+            const auto pid = scalarProperty<pid_t> (process, kAudioProcessPropertyPID);
+            const auto bundle = stringProperty (process, kAudioProcessPropertyBundleID);
+
+            if (pid == me || bundle == "com.taw.hub")
+                continue;
+
+            // A process lists its device both ways; the running flags say which way it's used.
+            juce::String name;
+
+            for (const bool output : { true, false })
+            {
+                if (scalarProperty<UInt32> (process, output ? kAudioProcessPropertyIsRunningOutput : kAudioProcessPropertyIsRunningInput) == 0)
+                    continue;
+
+                for (auto device : arrayProperty<AudioObjectID> (process, kAudioProcessPropertyDevices,
+                                                                 output ? kAudioObjectPropertyScopeOutput : kAudioObjectPropertyScopeInput))
+                {
+                    const auto deviceName = stringProperty (device, kAudioObjectPropertyName);
+
+                    if (! deviceName.startsWith ("taw ") || deviceName == "taw hub")
+                        continue;
+
+                    if (name.isEmpty())
+                        name = appName (pid, bundle.isNotEmpty());
+
+                    auto& list = output ? users[deviceName].playing : users[deviceName].listening;
+                    list.addIfNotAlreadyThere (name);
+                }
+            }
+        }
+    }
+
+    // The system's own output and input: what anything set to "the Mac's sound" uses.
+    for (const bool output : { true, false })
+    {
+        const auto device = scalarProperty<AudioObjectID> (kAudioObjectSystemObject, output ? kAudioHardwarePropertyDefaultOutputDevice
+                                                                                            : kAudioHardwarePropertyDefaultInputDevice);
+        const auto deviceName = stringProperty (device, kAudioObjectPropertyName);
+
+        if (deviceName.startsWith ("taw ") && deviceName != "taw hub")
+            (output ? users[deviceName].playing : users[deviceName].listening).add (output ? "the Mac's output" : "the Mac's input");
+    }
+
+    return users;
+}
 
 juce::String makeAggregate (const juce::String& outputDevice, const juce::String& inputDevice, juce::String& error)
 {

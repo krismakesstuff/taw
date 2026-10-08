@@ -418,8 +418,11 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   starts and keeps lengths. Recording adds to what's on the track; each pass undoes as one step
   (notes within two seconds of each other coalesce, like pad hits).
 - **Playback.** The graph carries the notes in samples. The plugin slot keeps the notes the
-  timeline started; any jump (stop, seek, loop wrap) ends them, so nothing hangs. Notes that
-  started before the play position aren't chased (yet). Plugins get the tempo, time signature
+  timeline started; any jump (stop, seek, loop wrap) ends them, so nothing hangs. Starting or
+  jumping into the middle of things chases them: each controller's last value before the
+  position (sustain, mod wheel, pitch bend, pressure, per channel) goes out first, then the
+  notes already under the playhead start from there (at their velocity), live and in bounces.
+  Plugins get the tempo, time signature
   and position through a play head, for synced arps and LFOs.
 - **State.** Plugin state is opaque and can be megabytes, so it lives in its own file
   (`plugins/NN-Name.state`), written when it changed: on closing the window, every 15 s, on

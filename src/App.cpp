@@ -2349,6 +2349,28 @@ void App::focusTrack (int index, bool extendSelection)
     focusedLane = -1;
 }
 
+bool App::handleHelpKey (const Key& k)
+{
+    if (! helpVisible || ! commandLine.isEmpty() || k.ctrl || k.alt)
+        return false;
+
+    const bool back = k.code == Key::Left || (k.code == Key::Tab && k.shift);
+
+    if (back || k.code == Key::Right || k.code == Key::Tab)
+    {
+        helpPage = (helpPage + (back ? helpPages - 1 : 1)) % helpPages;
+        return true;
+    }
+
+    if (k.code == Key::Char && k.ch >= '1' && k.ch < '1' + helpPages)
+    {
+        helpPage = (int) (k.ch - '1');
+        return true;
+    }
+
+    return false;
+}
+
 bool App::mixFocused() const
 {
     return session != nullptr && ! onTopLane() && focused >= session->numTracks();
@@ -3216,7 +3238,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
+    if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
         || handleSettingsKey (k) || handleIoKey (k))
         return;
 

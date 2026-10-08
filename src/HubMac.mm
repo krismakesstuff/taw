@@ -32,7 +32,17 @@ juce::String stringProperty (AudioObjectID object, AudioObjectPropertySelector s
     return text;
 }
 
-AudioObjectID deviceNamed (const juce::String& name)
+bool hasStreams (AudioObjectID device, bool output)
+{
+    const AudioObjectPropertyAddress address { kAudioDevicePropertyStreams, output ? kAudioObjectPropertyScopeOutput : kAudioObjectPropertyScopeInput,
+                                               kAudioObjectPropertyElementMain };
+    UInt32 size = 0;
+    return AudioObjectGetPropertyDataSize (device, &address, 0, nullptr, &size) == noErr && size > 0;
+}
+
+// By name, with streams that way: a Bluetooth headset is two devices of the same name, one
+// each way.
+AudioObjectID deviceNamed (const juce::String& name, bool output)
 {
     const auto address = global (kAudioHardwarePropertyDevices);
     UInt32 size = 0;
@@ -46,7 +56,7 @@ AudioObjectID deviceNamed (const juce::String& name)
         return kAudioObjectUnknown;
 
     for (auto id : ids)
-        if (stringProperty (id, kAudioObjectPropertyName) == name)
+        if (stringProperty (id, kAudioObjectPropertyName) == name && hasStreams (id, output))
             return id;
 
     return kAudioObjectUnknown;
@@ -131,8 +141,11 @@ juce::String makeAggregate (const juce::String& outputDevice, const juce::String
 {
     destroyAggregate();
 
-    const auto out = deviceNamed (outputDevice);
-    const auto in = inputDevice.isNotEmpty() && inputDevice != outputDevice ? deviceNamed (inputDevice) : kAudioObjectUnknown;
+    const auto out = deviceNamed (outputDevice, true);
+    auto in = inputDevice.isNotEmpty() ? deviceNamed (inputDevice, false) : kAudioObjectUnknown;
+
+    if (in == out)
+        in = kAudioObjectUnknown; // one device both ways
     const auto hub = deviceWithUID (driverHubUID);
 
     if (out == kAudioObjectUnknown || hub == kAudioObjectUnknown)
@@ -179,7 +192,7 @@ juce::String makeAggregate (const juce::String& outputDevice, const juce::String
     }
 
     // It takes a moment to be ready.
-    for (int i = 0; i < 50 && deviceNamed (aggregateName) == kAudioObjectUnknown; ++i)
+    for (int i = 0; i < 50 && deviceNamed (aggregateName, true) == kAudioObjectUnknown; ++i)
         juce::Thread::sleep (20);
 
     return aggregateName;

@@ -1,8 +1,13 @@
 # Plan: the taw audio hub
 
-Status: steps 0 and 1 built on macOS (2026-10-08), see "Step 1 as built" and the Hub section
-of `docs/design.md`; next, the virtual devices. Written so another agent can pick it up. Read
-`docs/design.md` first (Threads, Recording, Routing and inserts, Delay compensation, Hub).
+Status (2026-10-08), macOS:
+- **Built:** steps 0 and 1, the hub's own page, and step 3's virtual devices (taw.driver,
+  "taw 1" to "taw 4"). App → taw 1 → hub → taw 2 → app is checked with `--apptest`.
+- **Next:** trying it with Zoom, then step 2 (process taps).
+- **Where to read:** "Step 1 as built" below, and the Hub section of `docs/design.md`.
+
+Written so another agent can pick it up. Read `docs/design.md` first (Threads, Recording,
+Routing and inserts, Delay compensation, Hub).
 
 ## Why
 
@@ -167,8 +172,21 @@ Not done yet in step 1:
   device, or the default.
 - **Workgroups:** joining the hub's audio workgroup isn't done. No late blocks so far in tests
   at 256 samples.
-- **Not tried in the full UI:** choosing "taw hub" in `dev` and the `hub` panel need trying in
-  a real session.
+- **The UI, checked in a pseudo-terminal:**
+  - A session on "taw hub" joins, and its I/O line shows the hub.
+  - The hub page works from `taw hub`, from tab on the start screen, and from `hub` in a
+    session.
+- **The hub's interface:** chosen with `interface` on the page (`hub-device.xml`).
+
+Step 3 on macOS, as built:
+- **Taken from the design:** what the "macOS first" section describes, with one hidden
+  8-channel device in place of a hidden partner per device.
+- **Rates:** 8 to 96 kHz; the low ones are for Bluetooth headsets.
+- **To watch:**
+  - The driver's rate is shared by every taw device, so an app picking another rate moves
+    all of them. So far the aggregate's drift correction carries a hub at another rate.
+  - The round trip app → hub → app was 111 ms on a 16 kHz headset at 512 samples. An
+    interface at 48 kHz with smaller blocks will be much less.
 
 ### Processes
 

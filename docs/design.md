@@ -910,8 +910,28 @@ join it later through virtual devices.
   `hub stop` inside taw. One per user (an `InterProcessLock`). Its log is `hub.log` in the
   config folder; `hub-info.json` there says where it listens (a local TCP port), its pid, rate,
   block size, and how many inputs a session gets.
-- **Its interface:** `hub-device.xml` if there is one, else the device taw sessions saved
-  (unless that's the hub itself), else the default.
+- **Its interface:** `hub-device.xml` once it has one (written the first time it starts),
+  else the device taw sessions saved (unless that's the hub itself), else the default; never
+  one of the driver's own devices (that would be a loop). `interface` on the hub page lists
+  the devices, `interface MacBook Pro Speakers + MacBook Pro Microphone` sets it (an output,
+  and an input when it's another device) and restarts the hub.
+- **Apps: taw.driver** (`driver/TawDriver.c`), a CoreAudio AudioServerPlugIn built beside
+  taw. Any app can pick "taw 1" to "taw 4" (stereo both ways) as its speaker or mic. The hub
+  reaches them through a hidden 8-channel device, "taw hub": its inputs 2N-1, 2N are what apps
+  play into taw N, its outputs go to taw N's mic. Inside it's loopback through ring buffers
+  indexed by sample time; every device runs on one clock (one anchor and period, one clock
+  domain), so sample time means the same instant on each, and reading clears what was read so
+  an app that stops leaves silence. coreaudiod runs it sandboxed: it talks to nothing.
+  `taw --install-driver` (or `driver install` on the hub page) copies it to
+  `/Library/Audio/Plug-Ins/HAL` with an admin password, restarts coreaudiod (every app's sound
+  stops for a moment) and then the hub; `--uninstall-driver` takes it out. Rates 8 to 96 kHz
+  (the low ones for Bluetooth headsets with their mic open). A Bluetooth headset is two
+  CoreAudio devices with one name, one each way: devices are found by name and direction.
+- **The hub's device with apps:** a private aggregate (`HubMac.mm`, only the hub sees it) of
+  the interface's output device, its input device when that's another one, and the hidden
+  device, clocked by the interface with drift correction on the others. Its last 8 channels
+  each way are the apps'. Apps may set the driver to another rate than the hub's; the drift
+  correction carries it (seen working at 44.1 kHz against a 16 kHz headset).
 - **Sessions join it as a device:** "taw hub" in `dev`, a `juce::AudioIODeviceType`
   (`HubDevice.cpp`), so `AudioEngine` doesn't change. Opening it starts the hub if it's
   installed, says hello over the socket (JSON messages), and maps the shared memory the hub
@@ -925,8 +945,8 @@ join it later through virtual devices.
   its device reports as output latency, so recording, the picture and delay compensation are
   right as they are.
 - **Routes:** source channel to destination channel with a level, kept in `hub.json`. Ends are
-  `interface` or a session by its folder, so routes outlive restarts and wait for a session
-  that's closed. A session the hub sees for the first time gets the defaults (every interface
+  `interface`, an app device (`taw 1`: from it, what apps play into it; to it, its mic), or a
+  session by its folder, so routes outlive restarts and wait for a session that's closed. A session the hub sees for the first time gets the defaults (every interface
   input to its inputs in order, its outputs 1-2 to the interface's 1-2); after that its routes
   are whatever they've been made. Session to session adds a block. The plan the audio thread
   runs is rebuilt on any change and handed over through a queue like the engine's graphs.
@@ -944,7 +964,9 @@ join it later through virtual devices.
 - **Tests:** `taw --hubtest` (an engine and server in process, a thread for the interface, two
   sessions through real "taw hub" devices: sample-exact a block late, the reported latency, a
   stalling session not touching the other, routes, the hub restarting). `taw --hubping` joins
-  the real hub as a session for a few seconds and says what it heard.
+  the real hub as a session for a few seconds and says what it heard. `taw --apptest` plays
+  beeps into taw 1 and records taw 2's mic through a route between them (beeps, not clicks:
+  drift correction resamples, which smears a one-sample click).
 
 ## Startup
 

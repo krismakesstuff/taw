@@ -2901,7 +2901,7 @@ void Ui::drawHubPage (App& app)
     canvas.put (x, h - 2, L' ', -1, colour::text);
 
     if (app.hubLine.isEmpty())
-        canvas.text (x + 2, h - 2, L"route in 1-2 > Song \x00b7 route Song > out 1-2 -6 \x00b7 unroute Song > out \x00b7 forget Song \x00b7 start \x00b7 stop",
+        canvas.text (x + 2, h - 2, L"route in 1-2 > Song \x00b7 route taw 1 > out \x00b7 unroute Song > out \x00b7 interface \x00b7 forget Song \x00b7 start \x00b7 stop",
                      colour::faint, -1, false, w - x - 3);
 
     canvas.text (1, h - 1, L"\x2191\x2193 choose \x00b7 [ ] level \x00b7 del takes it out \x00b7 enter runs the line \x00b7 esc back", colour::dim, -1, false, w - 2);

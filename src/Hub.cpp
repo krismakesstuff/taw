@@ -198,6 +198,8 @@ int run (const juce::StringArray&)
         log ("device: " + d->getName() + " (" + d->getTypeName() + "), " + juce::String (info.sampleRate, 0) + " Hz, "
              + juce::String (info.blockSize) + " samples, " + juce::String (inputs) + " inputs, " + juce::String (info.outputs) + " outputs, "
              + juce::String (appChannels / 2) + " apps");
+        log ("  inputs: " + d->getInputChannelNames().joinIntoString (", ") + " (on: " + d->getActiveInputChannels().toString (2) + ")");
+        log ("  outputs: " + d->getOutputChannelNames().joinIntoString (", ") + " (on: " + d->getActiveOutputChannels().toString (2) + ")");
     }
     else
     {
@@ -295,7 +297,11 @@ juce::String installDriver()
     const auto bundle = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("taw.driver");
     const auto said = mac::installDriver (bundle);
 
-    // The hub picks the devices up when it starts: restart it if it's running.
+    // The hub picks the devices up when it starts: restart it once the restarted audio service
+    // has loaded the driver.
+    for (int i = 0; i < 100 && ! mac::driverInstalled(); ++i)
+        juce::Thread::sleep (100);
+
     if (agentFile().existsAsFile())
         launchctl ({ "kickstart", "-k", domain() + "/" + label });
 
@@ -334,6 +340,47 @@ juce::String start()
 #else
     return "the hub runs on macOS only so far";
 #endif
+}
+
+juce::String restart()
+{
+#if JUCE_MAC
+    if (! agentFile().existsAsFile())
+        return "the hub isn't installed (hub start)";
+
+    if (const auto error = launchctl ({ "kickstart", "-k", domain() + "/" + label }); error.isNotEmpty())
+        return "couldn't restart the hub: " + error;
+
+    return "the hub restarted";
+#else
+    return "the hub runs on macOS only so far";
+#endif
+}
+
+juce::String setInterface (const juce::String& output, const juce::String& input)
+{
+    const auto file = configFolder().getChildFile ("hub-device.xml");
+    auto xml = juce::parseXML (file);
+
+    if (xml == nullptr)
+        xml = std::make_unique<juce::XmlElement> ("DEVICESETUP");
+
+    xml->setAttribute ("deviceType", "CoreAudio");
+    xml->setAttribute ("audioOutputDeviceName", output);
+
+    if (input.isNotEmpty())
+        xml->setAttribute ("audioInputDeviceName", input);
+
+    // Its rate, its channels: the device's own (taken when it opens).
+    for (const auto* a : { "audioDeviceRate", "audioDeviceInChans", "audioDeviceOutChans" })
+        xml->removeAttribute (a);
+
+    if (! xml->writeTo (file))
+        return "couldn't write " + file.getFullPathName();
+
+    const auto chosen = output + (input.isNotEmpty() && input != output ? " + " + input : juce::String());
+    const auto restarted = restart();
+    return restarted == "the hub restarted" ? "the hub's interface is " + chosen : "the hub's interface will be " + chosen + L" \x00b7 " + restarted;
 }
 
 juce::String stop()

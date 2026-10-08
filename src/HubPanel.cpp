@@ -32,6 +32,8 @@ struct End
     int count() const { return first == 0 ? 0 : last - first + 1; }
 };
 
+bool isSession (const juce::String& key) { return key != interfaceKey && hub::appNumber (key) == 0; }
+
 bool isChannels (const juce::String& t)
 {
     return t.isNotEmpty() && t.containsOnly ("0123456789-") && t[0] != '-' && ! t.endsWithChar ('-');
@@ -254,7 +256,7 @@ Result App::hubRoute (const juce::String& spec, bool add)
         return removed == 0 ? Result::fail ("no such route") : Result::good ("took out " + juce::String (removed) + (removed == 1 ? " route" : " routes"));
 
     return Result::good (fromText + L" \x2192 " + toText + (db != 0.0 ? "  " + juce::String (db, 1) + " dB" : juce::String())
-                         + (from->key != interfaceKey && to->key != interfaceKey ? juce::String (L" \x00b7 a block later (session to session)") : juce::String()));
+                         + (isSession (from->key) && isSession (to->key) ? juce::String (L" \x00b7 a block later (session to session)") : juce::String()));
 }
 
 Result App::hubCommand (const juce::String& rest)
@@ -292,6 +294,64 @@ Result App::hubCommand (const juce::String& rest)
 
         hubStatus = answer;
         return Result::good ("the hub forgot " + args + " and its " + juce::String ((int) answer["removed"]) + " routes");
+    }
+
+    // interface: the devices there are; interface MacBook Pro Speakers (+ MacBook Pro Microphone):
+    // the hub's own interface, by name or the start of one. The hub restarts with it.
+    if (word == "interface" || word == "if")
+    {
+        juce::StringArray outputs, inputs;
+
+        for (auto* type : engine.devices().getAvailableDeviceTypes())
+            if (type->getTypeName() == "CoreAudio")
+            {
+                type->scanForDevices();
+                outputs = type->getDeviceNames (false);
+                inputs = type->getDeviceNames (true);
+            }
+
+        for (auto* list : { &outputs, &inputs })
+            for (int i = list->size(); --i >= 0;)
+                if (list->getReference (i).startsWith ("taw ")) // the driver's own: a loop
+                    list->remove (i);
+
+        if (args.isEmpty())
+        {
+            const juce::String dot (L" \x00b7 ");
+            return Result::good ("outputs: " + outputs.joinIntoString (dot) + "   inputs: " + inputs.joinIntoString (dot));
+        }
+
+        auto pick = [] (const juce::StringArray& names, const juce::String& typed) -> juce::String
+        {
+            juce::StringArray starting;
+
+            for (const auto& n : names)
+            {
+                if (n.equalsIgnoreCase (typed))
+                    return n;
+
+                if (n.startsWithIgnoreCase (typed))
+                    starting.add (n);
+            }
+
+            return starting.size() == 1 ? starting[0] : juce::String();
+        };
+
+        const auto typedOut = args.upToFirstOccurrenceOf ("+", false, false).trim();
+        const auto typedIn = args.fromFirstOccurrenceOf ("+", false, false).trim();
+        const auto output = pick (outputs, typedOut);
+        auto input = typedIn.isNotEmpty() ? pick (inputs, typedIn) : juce::String();
+
+        if (output.isEmpty())
+            return Result::fail ("no one output called " + typedOut + L" \x00b7 interface lists them");
+
+        if (typedIn.isNotEmpty() && input.isEmpty())
+            return Result::fail ("no one input called " + typedIn + L" \x00b7 interface lists them");
+
+        if (typedIn.isEmpty() && inputs.contains (output))
+            input = output; // an interface with both
+
+        return Result::good (hub::setInterface (output, input));
     }
 
     // driver install / uninstall: taw 1 to taw 4 for apps (an admin password; the Mac's sound

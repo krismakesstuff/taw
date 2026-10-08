@@ -133,7 +133,8 @@ int main (int argc, char** argv)
         ask ("route", 1);
         ask ("route", 2);
 
-        // A click every half second out; where each comes back in.
+        // A 20 ms beep every half second out (not a single-sample click: the aggregate's drift
+        // correction resamples, which smears one); where each comes back in.
         struct Clicks final : juce::AudioIODeviceCallback
         {
             void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
@@ -141,7 +142,9 @@ int main (int argc, char** argv)
             {
                 for (int i = 0; i < n; ++i, ++now)
                 {
-                    const float click = now % period == 0 ? 0.5f : 0.0f;
+                    const auto phase = now % period;
+                    const float click = phase < period / 25 ? 0.5f * (float) std::sin (juce::MathConstants<double>::twoPi * 500.0 * (double) phase / (2.0 * (double) period))
+                                                            : 0.0f;
 
                     for (int c = 0; c < numOut; ++c)
                         out[c][i] = click;

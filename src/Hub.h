@@ -22,9 +22,15 @@ juce::String uninstall();
 juce::String installDriver();
 juce::String uninstallDriver();
 
-// Runs or stops it now; it still starts at login (start installs it if it isn't).
+// Runs or stops it now; it still starts at login (start installs it if it isn't). restart: stop
+// and start, if it's installed.
 juce::String start();
 juce::String stop();
+juce::String restart();
+
+// The hub's own interface (hub-device.xml): an output device and an input device (the same one,
+// or empty to leave the input as it is). Restarts the hub with it.
+juce::String setInterface (const juce::String& output, const juce::String& input);
 
 // Where the hub writes what it's doing.
 juce::File logFile();

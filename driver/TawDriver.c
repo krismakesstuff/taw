@@ -68,7 +68,8 @@ static Float64 gHostTicksPerFrame = 0.0;
 static UInt32 gIOCount[kNumDevices];
 static UInt32 gRefCount = 0;
 
-static const Float64 kRates[] = { 44100.0, 48000.0, 88200.0, 96000.0 };
+// The low ones are Bluetooth headsets with their mic open (16 kHz is the usual).
+static const Float64 kRates[] = { 8000.0, 16000.0, 22050.0, 24000.0, 32000.0, 44100.0, 48000.0, 88200.0, 96000.0 };
 enum { kNumRates = sizeof (kRates) / sizeof (kRates[0]) };
 
 // A stereo ring buffer: frames by sample time, and up to when they've been written.

@@ -1619,7 +1619,10 @@ void Ui::drawTimeline (App& app)
             };
 
             // Header: the track's colour strip carries on down; the lane's name, its value here,
-            // its controller (lit while it moves).
+            // its controller (lit while it moves). Indented, hanging off the track by a tree line.
+            constexpr int indent = 4;
+            const bool lastLane = k == (int) lanes.size() - 1;
+
             for (int r = 0; r < laneRows; ++r)
             {
                 canvas.fill (0, y + r, leftW, L' ', -1, bg);
@@ -1630,22 +1633,23 @@ void Ui::drawTimeline (App& app)
 
                 borders (y + r);
                 canvas.put (0, y + r, focusedLane && r == 0 ? L'\x25b8' : L'\x2502', focusedLane ? colour::accent : colour::faint, bg);
+                canvas.put (2, y + r, r == 0 ? (lastLane ? L'\x2514' : L'\x251c') : (lastLane ? L' ' : L'\x2502'), colour::faint, bg);
             }
 
-            canvas.text (2, y, app.automationName (t, param, false), focusedLane ? colour::text : colour::dim, bg, focusedLane, leftW - 3);
+            canvas.text (indent, y, app.automationName (t, param, false), focusedLane ? colour::text : colour::dim, bg, focusedLane, leftW - indent - 1);
             const auto value = app.automationText (t, param, curve.pos.empty() && ! touched ? setting : (double) curve.at (at), false);
             const auto control = app.controlText (node);
 
             if (laneRows > 1)
             {
-                canvas.text (3, y + 1, value, colour::dim, bg, false, leftW - 4);
+                canvas.text (indent + 1, y + 1, value, colour::dim, bg, false, leftW - indent - 2);
 
                 if (control.isNotEmpty())
-                    canvas.text (std::max (3 + value.length() + 1, leftW - 1 - control.length()), y + 1, control, touched ? colour::accent : colour::faint, bg, touched);
+                    canvas.text (std::max (indent + 1 + value.length() + 1, leftW - 1 - control.length()), y + 1, control, touched ? colour::accent : colour::faint, bg, touched);
             }
             else
             {
-                canvas.text (std::max (2 + app.automationName (t, param, false).length() + 1, leftW - 1 - value.length()), y, value, colour::dim, bg);
+                canvas.text (std::max (indent + app.automationName (t, param, false).length() + 1, leftW - 1 - value.length()), y, value, colour::dim, bg);
             }
 
             if (io && control.isNotEmpty())

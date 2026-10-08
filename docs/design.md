@@ -776,7 +776,10 @@ can change over time.
   on a lane with no points a knob is a fader (where it's left becomes the setting). With write
   on (shift+W, `aw`) and playing, its moves are recorded; 0.6 s after it stops moving, the
   touch releases: its points replace that stretch (one undo step) and the curve glides back
-  over 0.25 s. A stop releases everything. While it writes, the lane draws what's been
+  over 0.25 s. A stop releases everything. shift+O on a lane turns its automation off (`bypass`
+  on the AUTO): its points stay, drawn faint with OFF, but playback, bounces and readouts use
+  the setting, a mapped knob moves the setting, and writing passes it by; shift+O again turns
+  it back on. While it writes, the lane draws what's been
   written so far, from the touch's first point to the playhead, in the record colour
   (`writtenValue`).
 - **Follows the clips:** automation goes where the clips over it go. Copy (and so cut,

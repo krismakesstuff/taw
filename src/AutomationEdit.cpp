@@ -118,7 +118,7 @@ double App::currentValue (const juce::ValueTree& owner, const juce::String& para
             if (t.lane == lane)
                 return t.live->value.load();
 
-        if (lane.getNumChildren() > 0)
+        if (lane.getNumChildren() > 0 && ! laneOff (lane))
             return automationValue (owner, param, engine.isRolling() ? heardPlayhead() : cursor);
     }
 
@@ -128,7 +128,7 @@ double App::currentValue (const juce::ValueTree& owner, const juce::String& para
 bool App::isAutomated (const juce::ValueTree& owner, const juce::String& param) const
 {
     const auto lane = Session::automation (owner, param);
-    return lane.isValid() && (lane.getNumChildren() > 0 || isTouched (lane));
+    return lane.isValid() && ((lane.getNumChildren() > 0 && ! laneOff (lane)) || isTouched (lane));
 }
 
 double App::automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos)
@@ -839,6 +839,38 @@ Result App::removeLane (int trackIndex, const juce::String& param)
     return Result::good ("removed the " + name + L" lane and its automation \x00b7 ctrl+z brings it back");
 }
 
+// shift+O on a lane: its automation off or on. Off, its points stay but don't play (nor
+// bounce); the setting does, a mapped knob moves the setting, and writing passes it by. For
+// trying values before writing again.
+Result App::toggleLaneOff()
+{
+    int track = -1;
+    juce::String param;
+
+    if (auto r = automationTrack (track, param); ! r.ok)
+        return r;
+
+    auto owner = automationOwner (track);
+    auto lane = Session::automation (owner, param);
+    beginEdit ("automation off");
+
+    if (! lane.isValid())
+    {
+        lane = juce::ValueTree (ids::AUTO, { { ids::param, param } });
+        owner.appendChild (lane, um());
+    }
+
+    const bool off = ! laneOff (lane);
+
+    if (off)
+        lane.setProperty (ids::bypass, true, um());
+    else
+        lane.removeProperty (ids::bypass, um());
+
+    return Result::good (automationName (owner, param) + (off ? juce::String (" automation OFF: plays its setting, isn't written") : juce::String (" automation on"))
+                         + " (shift+O)");
+}
+
 // shift+A: the focused track's automation lanes, open under it or closed.
 Result App::toggleLanes()
 {
@@ -1200,7 +1232,8 @@ void App::handleControl (const ControlMsg& m)
 
             it->lastMs = now;
 
-            if (writeOn && rolling)
+            // A lane that's off isn't written (the knob just moves the setting).
+            if (writeOn && rolling && ! laneOff (lane))
             {
                 auto& w = it->written;
 
@@ -1246,7 +1279,7 @@ void App::releaseTouches (bool idleOnly)
 // is the setting (volume, pan, mute, the send; a plugin's parameter stays where it was put).
 void App::keepAsSetting (const Touch& t)
 {
-    if (! t.lane.getParent().isValid() || ! Session::points (t.lane).empty())
+    if (! t.lane.getParent().isValid() || (! Session::points (t.lane).empty() && ! laneOff (t.lane)))
         return;
 
     const auto param = t.lane[ids::param].toString();

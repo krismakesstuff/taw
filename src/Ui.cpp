@@ -1603,10 +1603,12 @@ void Ui::drawTimeline (App& app)
             const bool inSel = timeSel && (focusedLane || app.onTopLane());
 
             const auto target = AutomationTarget::parse (param);
-            const auto curve = app.automationCurve (t, param);
-            const auto setting = curve.pos.empty() ? app.staticValue (t, param, false) : 0.0;
-            const int steps = laneRows * 8;
+            // Off (shift+O): its points drawn faint, its value the setting that plays instead.
             const auto node = Session::automation (t, param);
+            const bool off = node.isValid() && App::laneOff (node);
+            const auto curve = app.automationCurve (t, param, true);
+            const auto setting = curve.pos.empty() || off ? app.staticValue (t, param, false) : 0.0;
+            const int steps = laneRows * 8;
             const bool touched = node.isValid() && app.isTouched (node);
 
             auto height = [&] (double v)
@@ -1636,8 +1638,13 @@ void Ui::drawTimeline (App& app)
                 canvas.put (2, y + r, r == 0 ? (lastLane ? L'\x2514' : L'\x251c') : (lastLane ? L' ' : L'\x2502'), colour::faint, bg);
             }
 
-            canvas.text (indent, y, app.automationName (t, param, false), focusedLane ? colour::text : colour::dim, bg, focusedLane, leftW - indent - 1);
-            const auto value = app.automationText (t, param, curve.pos.empty() && ! touched ? setting : (double) curve.at (at), false);
+            const auto nameEnd = canvas.text (indent, y, app.automationName (t, param, false), focusedLane ? colour::text : colour::dim, bg, focusedLane,
+                                              leftW - indent - 1 - (off ? 4 : 0));
+
+            if (off)
+                canvas.text (nameEnd + 1, y, "OFF", colour::rec, bg, true);
+
+            const auto value = app.automationText (t, param, (curve.pos.empty() || off) && ! touched ? setting : (double) curve.at (at), false);
             const auto control = app.controlText (node);
 
             if (laneRows > 1)
@@ -1649,7 +1656,7 @@ void Ui::drawTimeline (App& app)
             }
             else
             {
-                canvas.text (std::max (indent + app.automationName (t, param, false).length() + 1, leftW - 1 - value.length()), y, value, colour::dim, bg);
+                canvas.text (std::max (nameEnd + (off ? 5 : 1), leftW - 1 - value.length()), y, value, colour::dim, bg);
             }
 
             if (io && control.isNotEmpty())
@@ -1681,7 +1688,7 @@ void Ui::drawTimeline (App& app)
                 {
                     const int part = juce::jlimit (0, 8, filled - (laneRows - 1 - r) * 8);
                     wchar_t ch = part == 0 ? (line > 0 && r == laneRows - 1 ? gridMark : L' ') : (wchar_t) (0x2580 + part);
-                    int fg = wrote ? colour::rec : curve.pos.empty() ? colour::faint : point ? colour::accent : colour::note;
+                    int fg = wrote ? colour::rec : curve.pos.empty() || off ? colour::faint : point ? colour::accent : colour::note;
 
                     if (part == 0 && line > 0)
                         fg = line == 2 ? colour::gridBar : colour::faint;
@@ -2003,6 +2010,7 @@ void Ui::drawHelp (App&)
         { Pair, L"bv", L"bounce with the video (mp4)", L"bv cue 3", L"named; no selection: all of it" },
         { Pair, L"\x2191 video row", L"\x2190\x2192 a frame, ctrl a second", L"click / drag", L"on it: scrubs the picture" },
         { Pair, L"shift+A", L"automation lanes (on Mix: its own)", L"auto", L"its parameters: enter adds a lane" },
+        { Pair, L"shift+O", L"on a lane: automation off / on", L"", L"off: its setting plays, no writing" },
         { Pair, L"| on a lane", L"change what the lane shows", L"lane cutoff", L"...by name (on the track: adds)" },
         { Pair, L"pt -6", L"a point (selection: a level)", L"alt+\x2191\x2193  del", L"on a lane: move / remove points" },
         { Pair, L"map", L"the next knob moved runs the lane", L"shift+W", L"write: record knobs (touch)" },

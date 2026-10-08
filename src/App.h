@@ -704,6 +704,8 @@ public:
     Result removeLane (int track, const juce::String& param);
     Result laneByName (int track, const juce::String& what); // "lane cutoff"
     Result toggleLanes();                                    // shift+A
+    Result toggleLaneOff();                                  // shift+O on a lane
+    static bool laneOff (const juce::ValueTree& lane) { return lane[ids::bypass]; } // its points ignored
     // load false (drawing): a plugin not loaded yet isn't loaded for this; names and values fall back.
     PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
     double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
@@ -712,7 +714,8 @@ public:
     bool isAutomated (const juce::ValueTree& owner, const juce::String& param) const; // points, or a knob moving it
     juce::String automationName (const juce::ValueTree& owner, const juce::String& param, bool load = true);
     juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
-    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
+    // Its lane, in samples. A lane that's off plays no points (drawing asks for them anyway).
+    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param, bool evenIfOff = false) const;
     bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
     Result setAutomation (const juce::String& value); // pt <value>
     Result setAutomationValue (int track, const juce::String& param, double value);

@@ -1272,7 +1272,7 @@ void App::rebuildGraph()
     syncControlMap();
 }
 
-Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param) const
+Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param, bool evenIfOff) const
 {
     Curve c;
     const auto lane = Session::automation (owner, param);
@@ -1301,6 +1301,14 @@ Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& pa
                 break;
             default: break;
         }
+    }
+
+    // Off (shift+O): the setting plays, as if it had no points; a mapped knob still moves it.
+    if (laneOff (lane) && ! evenIfOff)
+    {
+        c.live = liveValueFor (lane);
+        c.base = (float) const_cast<App*> (this)->staticValue (owner, param, false);
+        return c;
     }
 
     for (const auto& p : Session::points (lane))
@@ -3546,6 +3554,9 @@ void App::handleMainKey (const Key& k)
             // shift+A: the focused track's automation lanes open under it (or close).
             else if (lineEmpty && k.ch == 'A' && session != nullptr)
                 say (toggleLanes());
+            // shift+O on a lane: its automation off (the setting plays, nothing's written) or on.
+            else if (lineEmpty && k.ch == 'O' && session != nullptr && focusedLaneParam().isNotEmpty())
+                say (toggleLaneOff());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

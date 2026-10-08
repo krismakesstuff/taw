@@ -89,6 +89,114 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // taw --install-driver / --uninstall-driver   the apps' devices, taw 1 to taw 4 (admin password).
+    if (args[0] == "--install-driver" || args[0] == "--uninstall-driver")
+    {
+        std::printf ("%s\n", (args[0] == "--install-driver" ? taw::hub::installDriver() : taw::hub::uninstallDriver()).toRawUTF8());
+        return 0;
+    }
+
+    // taw --apptest   the app devices end to end, as apps would use them: clicks played into
+    // taw 1, recorded from taw 2's mic, with a route taw 1 > taw 2 through the hub for the
+    // while. Says whether they came through, how loud, and how late.
+    if (args[0] == "--apptest")
+    {
+        auto ask = [] (const juce::String& type, int channel)
+        {
+            auto* m = new juce::DynamicObject();
+            m->setProperty ("type", type);
+            m->setProperty ("from", "taw 1");
+            m->setProperty ("fromChannel", channel);
+            m->setProperty ("to", "taw 2");
+            m->setProperty ("toChannel", channel);
+            juce::String error;
+            taw::hub::request (m, error);
+            return error;
+        };
+
+        {
+            auto* m = new juce::DynamicObject();
+            m->setProperty ("type", "status");
+            juce::String error;
+            const auto status = taw::hub::request (m, error);
+
+            if (error.isEmpty() && (int) status["apps"] < 2)
+                error = "the hub has no app devices (taw --install-driver)";
+
+            if (error.isNotEmpty())
+            {
+                std::printf ("%s\n", error.toRawUTF8());
+                return 1;
+            }
+        }
+
+        ask ("route", 1);
+        ask ("route", 2);
+
+        // A click every half second out; where each comes back in.
+        struct Clicks final : juce::AudioIODeviceCallback
+        {
+            void audioDeviceIOCallbackWithContext (const float* const* in, int numIn, float* const* out, int numOut, int n,
+                                                   const juce::AudioIODeviceCallbackContext&) override
+            {
+                for (int i = 0; i < n; ++i, ++now)
+                {
+                    const float click = now % period == 0 ? 0.5f : 0.0f;
+
+                    for (int c = 0; c < numOut; ++c)
+                        out[c][i] = click;
+
+                    const float heard = numIn > 0 ? std::abs (in[0][i]) : 0.0f;
+                    peak = std::max (peak.load(), heard);
+
+                    if (heard > 0.25f && now - lastHeard > period / 2)
+                    {
+                        lastHeard = now;
+                        lateBy = (int) (now % period);
+                        heardClicks++;
+                    }
+                }
+            }
+
+            void audioDeviceAboutToStart (juce::AudioIODevice* d) override { period = (juce::int64) d->getCurrentSampleRate() / 2; }
+            void audioDeviceStopped() override {}
+
+            juce::int64 now = 0, period = 24000, lastHeard = -1000000;
+            std::atomic<float> peak { 0.0f };
+            std::atomic<int> lateBy { -1 }, heardClicks { 0 };
+        } clicks;
+
+        juce::AudioDeviceManager dm;
+        dm.initialise (2, 2, nullptr, false);
+        dm.setCurrentAudioDeviceType ("CoreAudio", true);
+        auto setup = dm.getAudioDeviceSetup();
+        setup.outputDeviceName = "taw 1";
+        setup.inputDeviceName = "taw 2";
+        setup.useDefaultInputChannels = setup.useDefaultOutputChannels = true;
+        auto error = dm.setAudioDeviceSetup (setup, true);
+
+        if (error.isEmpty())
+        {
+            dm.addAudioCallback (&clicks);
+            juce::Thread::sleep (3000);
+            dm.removeAudioCallback (&clicks);
+            const auto rate = dm.getCurrentAudioDevice()->getCurrentSampleRate();
+            std::printf ("%d clicks came back from taw 2, peak %.1f dB, %d samples (%.1f ms) late\n", clicks.heardClicks.load(),
+                         juce::Decibels::gainToDecibels (clicks.peak.load()), clicks.lateBy.load(), 1000.0 * clicks.lateBy.load() / rate);
+        }
+        else
+        {
+            std::printf ("couldn't open taw 1 and taw 2: %s\n", error.toRawUTF8());
+        }
+
+        dm.closeAudioDevice();
+        ask ("unroute", 1);
+        ask ("unroute", 2);
+        const bool ok = error.isEmpty() && clicks.heardClicks >= 4 && clicks.peak > 0.4f;
+        std::puts (ok ? "ok" : "FAILED");
+        return ok ? 0 : 1;
+    }
+
     // taw --hubping [seconds]   connect to the running hub as a session does, listen (silent
     // out), and say what came in, the latency it reports, and the blocks missed.
     if (args[0] == "--hubping")

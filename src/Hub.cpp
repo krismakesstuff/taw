@@ -97,6 +97,80 @@ int run (const juce::StringArray&)
     if (const auto error = devices.initialise (64, 2, saved.get(), true); error.isNotEmpty())
         log ("device: " + error);
 
+    // Never one of the driver's own devices (the Mac's default output might be taw 1): that
+    // would be a loop.
+    auto setup = devices.getAudioDeviceSetup();
+
+    if (setup.outputDeviceName.startsWith ("taw ") || setup.inputDeviceName.startsWith ("taw "))
+        if (auto* type = devices.getCurrentDeviceTypeObject())
+        {
+            for (const auto& name : type->getDeviceNames (false))
+                if (! name.startsWith ("taw "))
+                {
+                    setup.outputDeviceName = name;
+                    break;
+                }
+
+            for (const auto& name : type->getDeviceNames (true))
+                if (! name.startsWith ("taw "))
+                {
+                    setup.inputDeviceName = name;
+                    break;
+                }
+
+            devices.setAudioDeviceSetup (setup, true);
+            setup = devices.getAudioDeviceSetup();
+        }
+
+    // From now on the hub keeps its own interface, whatever sessions choose.
+    if (const auto own = configFolder().getChildFile ("hub-device.xml"); ! own.existsAsFile())
+        if (auto xml = devices.createStateXml())
+            xml->writeTo (own);
+
+    const auto interfaceName = setup.outputDeviceName == setup.inputDeviceName || setup.inputDeviceName.isEmpty()
+                                   ? setup.outputDeviceName
+                                   : setup.outputDeviceName + " + " + setup.inputDeviceName;
+    int appChannels = 0;
+
+#if JUCE_MAC
+    // With the driver installed, the interface and the driver's hidden device together, as one
+    // aggregate the hub opens: taw 1 to taw 4 are its last channels.
+    if (mac::driverInstalled())
+    {
+        juce::String error;
+
+        if (const auto aggregate = mac::makeAggregate (setup.outputDeviceName, setup.inputDeviceName, error); aggregate.isNotEmpty())
+        {
+            if (auto* type = devices.getCurrentDeviceTypeObject())
+                type->scanForDevices();
+
+            auto withApps = setup;
+            withApps.outputDeviceName = withApps.inputDeviceName = aggregate;
+            withApps.useDefaultInputChannels = withApps.useDefaultOutputChannels = false;
+            withApps.inputChannels.setRange (0, 64, true);
+            withApps.outputChannels.setRange (0, 64, true);
+
+            if (const auto failed = devices.setAudioDeviceSetup (withApps, true); failed.isEmpty())
+            {
+                appChannels = mac::appChannels;
+            }
+            else
+            {
+                log ("couldn't open the aggregate (" + failed + "): no apps");
+                devices.setAudioDeviceSetup (setup, true);
+            }
+        }
+        else
+        {
+            log ("no apps: " + error);
+        }
+    }
+    else
+    {
+        log ("no apps: taw.driver isn't installed (taw --install-driver)");
+    }
+#endif
+
     Engine engine;
     Server server (engine);
     HubInfo info;
@@ -113,15 +187,17 @@ int run (const juce::StringArray&)
 
     if (auto* d = devices.getCurrentAudioDevice())
     {
-        const int inputs = d->getActiveInputChannels().countNumberOfSetBits();
+        // The interface's own channels; the apps' come after them.
+        const int inputs = d->getActiveInputChannels().countNumberOfSetBits() - appChannels;
         info.inputs = sessionInputs (inputs);
-        info.outputs = d->getActiveOutputChannels().countNumberOfSetBits();
+        info.outputs = d->getActiveOutputChannels().countNumberOfSetBits() - appChannels;
         info.sampleRate = d->getCurrentSampleRate();
         info.blockSize = d->getCurrentBufferSizeSamples();
-        info.device = d->getName();
-        server.setHardware (inputs, info.outputs, info.device);
+        info.device = interfaceName;
+        server.setHardware (inputs, info.outputs, interfaceName, appChannels / 2);
         log ("device: " + d->getName() + " (" + d->getTypeName() + "), " + juce::String (info.sampleRate, 0) + " Hz, "
-             + juce::String (info.blockSize) + " samples, " + juce::String (inputs) + " inputs, " + juce::String (info.outputs) + " outputs");
+             + juce::String (info.blockSize) + " samples, " + juce::String (inputs) + " inputs, " + juce::String (info.outputs) + " outputs, "
+             + juce::String (appChannels / 2) + " apps");
     }
     else
     {
@@ -161,6 +237,10 @@ int run (const juce::StringArray&)
     log ("hub stopping");
     server.stopAll();
     devices.removeAudioCallback (&engine);
+    devices.closeAudioDevice();
+#if JUCE_MAC
+    mac::destroyAggregate();
+#endif
 
     if (HubInfo::fromVar (juce::JSON::parse (infoFile())).pid == info.pid)
         infoFile().deleteFile();
@@ -204,6 +284,36 @@ juce::String install()
         return "couldn't start the hub: " + error;
 
     return "the hub starts at login and is running now (" + exe.getFullPathName() + L") \x00b7 its log: " + logFile().getFullPathName();
+#else
+    return "the hub runs on macOS only so far";
+#endif
+}
+
+juce::String installDriver()
+{
+#if JUCE_MAC
+    const auto bundle = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getSiblingFile ("taw.driver");
+    const auto said = mac::installDriver (bundle);
+
+    // The hub picks the devices up when it starts: restart it if it's running.
+    if (agentFile().existsAsFile())
+        launchctl ({ "kickstart", "-k", domain() + "/" + label });
+
+    return said;
+#else
+    return "the hub runs on macOS only so far";
+#endif
+}
+
+juce::String uninstallDriver()
+{
+#if JUCE_MAC
+    const auto said = mac::uninstallDriver();
+
+    if (agentFile().existsAsFile())
+        launchctl ({ "kickstart", "-k", domain() + "/" + label });
+
+    return said;
 #else
     return "the hub runs on macOS only so far";
 #endif

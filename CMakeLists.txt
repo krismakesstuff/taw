@@ -88,6 +88,24 @@ endif()
 if (APPLE)
     target_sources(taw PRIVATE src/TerminalSetup.cpp src/MacFocus.mm)
 
+    # The hub's virtual devices: taw.driver, a CoreAudio plug-in ("taw 1" to "taw 4", and the
+    # hidden "taw hub"), built beside taw; taw --install-driver puts it where coreaudiod looks.
+    add_library(taw_driver MODULE driver/TawDriver.c)
+    configure_file(driver/Info.plist ${CMAKE_BINARY_DIR}/generated/DriverInfo.plist @ONLY)
+    set_target_properties(taw_driver PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION driver
+        OUTPUT_NAME taw
+        C_STANDARD 11
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/taw_artefacts/$<CONFIG>)
+    target_compile_options(taw_driver PRIVATE -Wall -Wextra)
+    target_link_libraries(taw_driver PRIVATE "-framework CoreAudio" "-framework CoreFoundation")
+    add_custom_command(TARGET taw_driver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/generated/DriverInfo.plist $<TARGET_BUNDLE_CONTENT_DIR:taw_driver>/Info.plist
+        COMMAND codesign --force --sign - $<TARGET_BUNDLE_DIR:taw_driver>
+        VERBATIM)
+    add_dependencies(taw taw_driver)
+
     # The audio hub (docs/plan-audio-hub.md): macOS first; its shared memory is POSIX.
     target_sources(taw PRIVATE src/Hub.cpp src/HubDevice.cpp src/HubServer.cpp src/HubShared.cpp src/HubMac.mm)
     target_link_libraries(taw PRIVATE "-framework AVFoundation")

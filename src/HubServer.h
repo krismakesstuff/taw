@@ -92,6 +92,10 @@ struct SavedRoute
 inline constexpr const char* interfaceKey = "interface";
 juce::File routesFile(); // <config>/hub.json
 
+// The app devices are route ends too, "taw 1" to "taw 4": from one is what apps play into it,
+// to one is what apps hear from it as a mic. appNumber ("taw 3") is 3; 0 for anything else.
+int appNumber (const juce::String& key);
+
 class Server final : private juce::InterprocessConnectionServer
 {
 public:
@@ -101,8 +105,9 @@ public:
     // Listens on a free local port. Returns it (0: couldn't).
     int start();
 
-    // The interface, when its device (re)starts.
-    void setHardware (int inputs, int outputs, const juce::String& device);
+    // The interface, when its device (re)starts: its own channels, and how many app devices
+    // (taw 1 ..., two channels each way) come after them on the device the hub opened.
+    void setHardware (int inputs, int outputs, const juce::String& device, int apps = 0);
 
     // Tells every client the hub is going, then lets them go.
     void stopAll();
@@ -138,7 +143,7 @@ private:
     juce::CriticalSection lock;
     std::vector<std::unique_ptr<Connection>> connections;
     int nextId = 1;
-    int hardwareInputs = 0, hardwareOutputs = 0;
+    int hardwareInputs = 0, hardwareOutputs = 0, appDevices = 0;
     juce::String deviceName;
 
     std::vector<SavedRoute> routes;

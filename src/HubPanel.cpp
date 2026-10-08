@@ -6,6 +6,7 @@
 #if TAW_HUB
  #include "Hub.h"
  #include "HubDevice.h"
+ #include "HubServer.h"
 #endif
 
 namespace taw
@@ -60,6 +61,9 @@ juce::String App::hubEndName (const juce::String& key, int channel, bool source)
     if (key == interfaceKey)
         return (source ? "in " : "out ") + juce::String (channel);
 
+    if (hub::appNumber (key) > 0)
+        return key + (channel == 1 ? " L" : channel == 2 ? " R" : " " + juce::String (channel));
+
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
             if (s["key"].toString() == key)
@@ -97,6 +101,31 @@ Result App::hubRoute (const juce::String& spec, bool add)
     {
         End e;
         tokens.removeEmptyStrings(); // "in 1 > ..." leaves one after the space
+
+        // An app device: "taw 2", then maybe its channels ("1", "1-2", "L", "R").
+        if (tokens.size() >= 2 && tokens[0].equalsIgnoreCase ("taw") && tokens[1].containsOnly ("123456789") && tokens[1].length() == 1)
+        {
+            e.key = "taw " + tokens[1];
+
+            if (add && (int) hubStatus["apps"] < tokens[1].getIntValue()) // taking one out always works
+            {
+                error = (int) hubStatus["apps"] == 0 ? L"no app devices \x2014 driver install adds taw 1 to taw 4"
+                                                     : "there are " + hubStatus["apps"].toString() + " app devices";
+                return {};
+            }
+
+            const auto c = tokens[2].toUpperCase();
+            e.first = c == "L" ? 1 : c == "R" ? 2 : c == "L-R" || c == "LR" ? 1 : c.upToFirstOccurrenceOf ("-", false, false).getIntValue();
+            e.last = c == "L" ? 1 : c == "R" || c == "L-R" || c == "LR" ? 2 : c.contains ("-") ? c.fromFirstOccurrenceOf ("-", false, false).getIntValue() : e.first;
+
+            if (tokens.size() > 3 || e.last > 2 || (c.isNotEmpty() && e.first < 1))
+            {
+                error = L"an app device has 2 channels \x00b7 taw 1, taw 1 L, taw 1 2";
+                return {};
+            }
+
+            return e;
+        }
 
         if (tokens.size() > 1 && isChannels (tokens[tokens.size() - 1]))
         {
@@ -263,6 +292,18 @@ Result App::hubCommand (const juce::String& rest)
 
         hubStatus = answer;
         return Result::good ("the hub forgot " + args + " and its " + juce::String ((int) answer["removed"]) + " routes");
+    }
+
+    // driver install / uninstall: taw 1 to taw 4 for apps (an admin password; the Mac's sound
+    // stops for a moment).
+    if (word == "driver")
+    {
+        if (! args.equalsIgnoreCase ("install") && ! args.equalsIgnoreCase ("uninstall"))
+            return Result::fail (L"driver install \x00b7 driver uninstall");
+
+        const auto said = args.equalsIgnoreCase ("install") ? hub::installDriver() : hub::uninstallDriver();
+        hubAskedAt = 0.0;
+        return Result::good (said);
     }
 
     if (word == "start" || word == "stop" || word == "install" || word == "uninstall")

@@ -339,6 +339,7 @@ juce::var Server::status() const
     o->setProperty ("device", deviceName);
     o->setProperty ("inputs", hardwareInputs);
     o->setProperty ("outputs", hardwareOutputs);
+    o->setProperty ("apps", appDevices);
     o->setProperty ("sampleRate", engine.sampleRate.load());
     o->setProperty ("blockSize", engine.blockSize.load());
 
@@ -437,21 +438,32 @@ void Server::lost (Connection& c)
     rebuild();
 }
 
-void Server::setHardware (int inputs, int outputs, const juce::String& device)
+void Server::setHardware (int inputs, int outputs, const juce::String& device, int apps)
 {
     const juce::ScopedLock sl (lock);
     hardwareInputs = inputs;
     hardwareOutputs = outputs;
     deviceName = device;
+    appDevices = apps;
     rebuild();
+}
+
+// "taw 3" -> 3; anything else 0.
+int appNumber (const juce::String& key)
+{
+    if (! key.startsWith ("taw ") || key.length() != 5)
+        return 0;
+
+    const int n = key.getLastCharacter() - '0';
+    return n >= 1 && n <= 9 ? n : 0;
 }
 
 // The saved routes, for the sessions here now: those to or from one that isn't wait for it.
 void Server::rebuild()
 {
     auto p = std::make_unique<Plan>();
-    p->hardwareInputs = hardwareInputs;
-    int sources = hardwareInputs;
+    p->hardwareInputs = hardwareInputs + 2 * appDevices; // the device's inputs: the interface's, then the apps'
+    int sources = p->hardwareInputs;
     std::map<juce::String, int> clientOf;
 
     for (auto& c : connections)
@@ -471,12 +483,23 @@ void Server::rebuild()
         Plan::Route route;
         route.gain = juce::Decibels::decibelsToGain ((float) r.db);
 
+        // The device's channels: the interface's, then each app device's two.
+        const int fromApp = appNumber (r.from), toApp = appNumber (r.to);
+        route.channel = r.toChannel - 1;
+
         if (r.from == interfaceKey)
         {
             if (r.fromChannel > hardwareInputs)
                 continue;
 
             route.source = r.fromChannel - 1;
+        }
+        else if (fromApp > 0)
+        {
+            if (fromApp > appDevices || r.fromChannel > 2)
+                continue;
+
+            route.source = hardwareInputs + 2 * (fromApp - 1) + r.fromChannel - 1;
         }
         else if (auto it = clientOf.find (r.from); it != clientOf.end() && r.fromChannel <= p->clients[(size_t) it->second].layout.numOutputs)
         {
@@ -489,7 +512,18 @@ void Server::rebuild()
 
         if (r.to == interfaceKey)
         {
+            if (r.toChannel > hardwareOutputs)
+                continue;
+
             route.client = -1;
+        }
+        else if (toApp > 0)
+        {
+            if (toApp > appDevices || r.toChannel > 2)
+                continue;
+
+            route.client = -1;
+            route.channel = hardwareOutputs + 2 * (toApp - 1) + r.toChannel - 1;
         }
         else if (auto it = clientOf.find (r.to); it != clientOf.end() && r.toChannel <= p->clients[(size_t) it->second].layout.numInputs)
         {
@@ -500,7 +534,6 @@ void Server::rebuild()
             continue;
         }
 
-        route.channel = r.toChannel - 1;
         p->routes.push_back (route);
     }
 

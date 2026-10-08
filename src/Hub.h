@@ -16,6 +16,12 @@ int run (const juce::StringArray& args);
 juce::String install();
 juce::String uninstall();
 
+// The driver for the apps' devices (taw.driver, built beside taw), into or out of
+// /Library/Audio/Plug-Ins/HAL: asks for an admin password, restarts the Mac's audio (every
+// app's sound stops for a moment), and restarts the hub so it sees them.
+juce::String installDriver();
+juce::String uninstallDriver();
+
 // Runs or stops it now; it still starts at login (start installs it if it isn't).
 juce::String start();
 juce::String stop();

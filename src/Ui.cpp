@@ -2834,6 +2834,26 @@ void Ui::drawHubPage (App& app)
                 x += 3;
             }
 
+        // The app devices.
+        ++y;
+        canvas.text (1, y, "apps", colour::dim);
+
+        if (const int apps = (int) s["apps"]; apps > 0)
+        {
+            juce::StringArray names;
+
+            for (int n = 1; n <= apps; ++n)
+                names.add ("taw " + juce::String (n));
+
+            x = canvas.text (12, y, names.joinIntoString ("  "), colour::text);
+            canvas.text (x + 3, y, L"pick one in an app as its speaker or mic \x00b7 route taw 1 > Song, Song > taw 2",
+                         colour::faint, -1, false, w - x - 4);
+        }
+        else
+        {
+            canvas.text (12, y, L"none \x2014 driver install adds taw 1 to taw 4 for apps (Zoom, a browser)", colour::faint, -1, false, w - 13);
+        }
+
         y += 2;
         canvas.text (1, y++, "routes", colour::dim);
 

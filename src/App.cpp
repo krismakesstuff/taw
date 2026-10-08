@@ -1272,7 +1272,7 @@ void App::rebuildGraph()
     syncControlMap();
 }
 
-Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param) const
+Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& param, bool evenIfOff) const
 {
     Curve c;
     const auto lane = Session::automation (owner, param);
@@ -1301,6 +1301,14 @@ Curve App::automationCurve (const juce::ValueTree& owner, const juce::String& pa
                 break;
             default: break;
         }
+    }
+
+    // Off (shift+O): the setting plays, as if it had no points; a mapped knob still moves it.
+    if (laneOff (lane) && ! evenIfOff)
+    {
+        c.live = liveValueFor (lane);
+        c.base = (float) const_cast<App*> (this)->staticValue (owner, param, false);
+        return c;
     }
 
     for (const auto& p : Session::points (lane))
@@ -1474,6 +1482,12 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         taw::setPan (tp, (float) (double) t[ids::pan]);
     }
 
+    // The mix bus's inserts (their latency joins delay compensation's in applyRouting).
+    addInserts (g->mixBus, session->tree(), offline);
+
+    for (const auto& fx : g->mixBus.inserts)
+        g->mixBus.latency += fx->latency();
+
     applyRouting (*g, offline);
 
     // Plugins that are gone (undo, a removed insert, a track no longer an instrument): state
@@ -1481,8 +1495,9 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
     if (! offline)
         for (auto it = hosted.begin(); it != hosted.end();)
         {
+            const auto owner = it->node.getParent(); // an insert's track, or the session (the mix's)
             const bool gone = it->node.hasType (ids::INSERT)
-                                  ? ! it->node.getParent().isValid() || ! it->node.getParent().getParent().isValid()
+                                  ? ! owner.isValid() || (! owner.hasType (ids::SESSION) && ! owner.getParent().isValid())
                                   : ! it->node.getParent().isValid() || ! Session::isInstrumentTrack (it->node);
 
             if (gone)
@@ -2370,9 +2385,10 @@ void App::focusUp (bool extendSelection)
 
 void App::focusDown (bool extendSelection)
 {
-    // Down from a track's row through its open lanes, then on to the next track.
-    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused < session->numTracks()
-        && focusedLane + 1 < (int) lanesShown (focused).size())
+    // Down from a track's row through its open lanes, then on to the next track (the Mix row:
+    // through the mix's lanes under it).
+    if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused <= session->numTracks()
+        && focusedLane + 1 < (int) lanesShown (ioTrack()).size())
     {
         ++focusedLane;
         trackAnchor = -1;
@@ -3255,7 +3271,7 @@ void App::handleMainKey (const Key& k)
         // Alt moves the selected (or focused) tracks up or down a place (on a lane, its points).
         case Key::Up:
         case Key::Down:
-            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
+            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
             {
                 // On a lane: its points up or down (the selection's, or the one at the cursor).
                 beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
@@ -3293,7 +3309,7 @@ void App::handleMainKey (const Key& k)
     // Delete clears the time selection on the selected (or focused) tracks. So does backspace
     // with nothing typed (a Mac keyboard's delete key sends backspace).
     // On a track showing automation, delete removes the selection's points instead.
-    const bool onAutomation = session != nullptr && ! onTopLane() && ! mixFocused() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
+    const bool onAutomation = session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty();
 
     if ((k.code == Key::Delete || (k.code == Key::Backspace && commandLine.isEmpty())) && hasTimeSelection() && onAutomation)
     {
@@ -3506,15 +3522,15 @@ void App::handleMainKey (const Key& k)
             // \: into the routing column on the focused track (inserts, sends, then the output).
             else if (lineEmpty && k.ch == '\\' && session != nullptr)
             {
-                if (mixFocused() || onTopLane() || session->numTracks() == 0)
-                    say (Result::fail (L"\\ routes a track \x2014 \x2193 to one"));
+                if (onTopLane() || (session->numTracks() == 0 && ! mixFocused()))
+                    say (Result::fail (L"\\ routes a track or the mix \x2014 \x2193 to one"));
                 else
                 {
                     if (! ioVisible)
                         ioVisible = true, saveSettings();
 
                     ioCell = ioFirstInsert;
-                    say (Result::good (describeIoCell (focused, ioCell)));
+                    say (Result::good (describeIoCell (ioTrack(), ioCell)));
                 }
             }
             // | (shift+\): open or close the plugin under the cursor, playing or not.
@@ -3538,6 +3554,9 @@ void App::handleMainKey (const Key& k)
             // shift+A: the focused track's automation lanes open under it (or close).
             else if (lineEmpty && k.ch == 'A' && session != nullptr)
                 say (toggleLanes());
+            // shift+O on a lane: its automation off (the setting plays, nothing's written) or on.
+            else if (lineEmpty && k.ch == 'O' && session != nullptr && focusedLaneParam().isNotEmpty())
+                say (toggleLaneOff());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

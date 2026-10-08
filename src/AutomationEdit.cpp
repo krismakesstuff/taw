@@ -62,7 +62,7 @@ juce::ValueTree App::automationOwner (int track) const
 // The plugin a lane's parameter belongs to (loading it if it isn't yet), or null.
 PluginSlot* App::automationPlugin (const juce::ValueTree& owner, const AutomationTarget& target, bool load)
 {
-    if (! owner.hasType (ids::TRACK))
+    if (! owner.hasType (ids::TRACK) && ! owner.hasType (ids::SESSION)) // the mix has inserts too
         return nullptr;
 
     const auto node = target.kind == Kind::instrument ? (Session::isInstrumentTrack (owner) ? owner : juce::ValueTree())
@@ -118,7 +118,7 @@ double App::currentValue (const juce::ValueTree& owner, const juce::String& para
             if (t.lane == lane)
                 return t.live->value.load();
 
-        if (lane.getNumChildren() > 0)
+        if (lane.getNumChildren() > 0 && ! laneOff (lane))
             return automationValue (owner, param, engine.isRolling() ? heardPlayhead() : cursor);
     }
 
@@ -128,7 +128,7 @@ double App::currentValue (const juce::ValueTree& owner, const juce::String& para
 bool App::isAutomated (const juce::ValueTree& owner, const juce::String& param) const
 {
     const auto lane = Session::automation (owner, param);
-    return lane.isValid() && (lane.getNumChildren() > 0 || isTouched (lane));
+    return lane.isValid() && ((lane.getNumChildren() > 0 && ! laneOff (lane)) || isTouched (lane));
 }
 
 double App::automationValue (const juce::ValueTree& owner, const juce::String& param, juce::int64 pos)
@@ -288,10 +288,10 @@ void App::writeLane (const juce::ValueTree& owner, const juce::String& param, st
 // The track whose lane edits go to: the focused one (its view says which parameter).
 Result App::automationTrack (int& track, juce::String& param)
 {
-    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+    if (session == nullptr || onTopLane() || (! mixFocused() && focused >= session->numTracks()))
         return Result::fail (L"automation is on a track \x2014 \x2193 to one");
 
-    track = focused;
+    track = ioTrack(); // -1: the mix
     param = focusedLaneParam();
 
     if (param.isEmpty())
@@ -314,6 +314,12 @@ Result App::setAutomation (const juce::String& valueText)
     if (! parseAutomationValue (param, valueText, value))
         return Result::fail (L"pt -6 (dB) \x00b7 pt l30 (pan) \x00b7 pt on (mute) \x00b7 pt 40 (plugins, %)");
 
+    return setAutomationValue (track, param, value);
+}
+
+// The point (or the selection's level) at a value, as pt does once it has parsed it.
+Result App::setAutomationValue (int track, const juce::String& param, double value)
+{
     const auto owner = automationOwner (track);
     const auto steps = AutomationTarget::parse (param).kind == Kind::mute;
     auto pts = readPoints (Session::automation (owner, param));
@@ -391,7 +397,7 @@ Result App::nudgeAutomation (int direction)
                 p.val = shift (p.val), any = true;
 
         if (! any)
-            return setAutomation (automationText (owner, param, shift (valueIn (pts, a, steps, outside))));
+            return setAutomationValue (track, param, shift (valueIn (pts, a, steps, outside)));
 
         std::vector<std::pair<double, double>> out;
 
@@ -617,7 +623,7 @@ bool App::writtenValue (const juce::ValueTree& lane, juce::int64 pos, double& va
 // (opened, and focused); "lane ?" lists the plugins' parameters.
 Result App::laneByName (int trackIndex, const juce::String& whatIn)
 {
-    if (session == nullptr || trackIndex < 0 || trackIndex >= session->numTracks())
+    if (session == nullptr || trackIndex < -1 || trackIndex >= session->numTracks())
         return Result::fail (L"lanes are on tracks \x2014 \x2193 to one");
 
     const auto what = whatIn.trim().toLowerCase();
@@ -628,6 +634,8 @@ Result App::laneByName (int trackIndex, const juce::String& whatIn)
 
     if (what == "vol" || what == "volume")
         param = "vol";
+    else if (trackIndex < 0 && (what == "pan" || what == "mute" || what.startsWith ("send")))
+        return Result::fail ("the mix automates its volume and its inserts' parameters");
     else if (what == "pan" || what == "mute")
         param = what;
     else if (what.startsWith ("send") && slotOf (what.fromLastOccurrenceOf (" ", false, false).trim()) >= 0)
@@ -635,7 +643,7 @@ Result App::laneByName (int trackIndex, const juce::String& whatIn)
     else
     {
         // A plugin parameter, by (part of) its name: the instrument's, then the inserts' in order.
-        const auto track = session->track (trackIndex);
+        const auto track = automationOwner (trackIndex);
         std::vector<std::pair<juce::String, PluginSlot*>> found;
 
         if (Session::isInstrumentTrack (track))
@@ -672,13 +680,14 @@ Result App::laneByName (int trackIndex, const juce::String& whatIn)
                         names.addIfNotAlreadyThere (p.name.toLowerCase());
 
             const auto shown = names.size() > 14 ? juce::StringArray (names.begin(), 14) : names;
-            return Result::fail ((what == "?" ? juce::String ("lane vol pan mute send a") : "no parameter called " + whatIn.trim() + L" \x00b7 lane vol pan mute send a")
+            const juce::String basics (trackIndex < 0 ? "lane vol" : "lane vol pan mute send a");
+            return Result::fail ((what == "?" ? basics : "no parameter called " + whatIn.trim() + L" \x00b7 " + basics)
                                  + (names.isEmpty() ? juce::String() : L" \x00b7 " + shown.joinIntoString (", ") + (names.size() > 14 ? L" \x2026 (" + juce::String (names.size()) + ") \x00b7 auto lists them all" : juce::String())));
         }
     }
 
     // On one of the track's lanes, that lane shows it; from the track's row, a new lane.
-    if (trackIndex == focused && focusedLaneParam().isNotEmpty())
+    if (trackIndex == ioTrack() && focusedLaneParam().isNotEmpty())
         return changeLane (trackIndex, focusedLane, param);
 
     return showLane (trackIndex, param);
@@ -688,10 +697,10 @@ Result App::laneByName (int trackIndex, const juce::String& whatIn)
 // start with when it has none.
 std::vector<juce::String> App::lanesShown (int trackIndex) const
 {
-    if (session == nullptr || trackIndex < 0 || trackIndex >= session->numTracks())
+    if (session == nullptr || trackIndex < -1 || trackIndex >= session->numTracks())
         return {};
 
-    const auto track = session->track (trackIndex);
+    const auto track = automationOwner (trackIndex); // -1: the mix's, under the Mix row
 
     if (! (bool) track[ids::lanes])
         return {};
@@ -737,7 +746,7 @@ void App::setLaneList (juce::ValueTree track, const std::vector<juce::String>& p
 // a lane already showing param swaps places with it.
 Result App::changeLane (int trackIndex, int index, const juce::String& param)
 {
-    auto track = session->track (trackIndex);
+    auto track = automationOwner (trackIndex);
     auto lanes = laneList (track);
 
     if (index < 0 || index >= (int) lanes.size())
@@ -751,7 +760,7 @@ Result App::changeLane (int trackIndex, int index, const juce::String& param)
     lanes[(size_t) index] = param;
     setLaneList (track, lanes);
     track.setProperty (ids::lanes, true, nullptr);
-    focusTrack (trackIndex);
+    focusTrack (trackIndex < 0 ? session->numTracks() : trackIndex);
     focusedLane = index;
 
     const auto lane = Session::automation (track, param);
@@ -766,10 +775,10 @@ Result App::changeLane (int trackIndex, int index, const juce::String& param)
 // The lane under the focused track that edits go to (empty: on the track's own row).
 juce::String App::focusedLaneParam()
 {
-    if (session == nullptr || onTopLane() || mixFocused() || focusedLane < 0)
+    if (session == nullptr || onTopLane() || focusedLane < 0)
         return {};
 
-    const auto lanes = lanesShown (focused);
+    const auto lanes = lanesShown (ioTrack());
 
     if (lanes.empty())
         return (focusedLane = -1), juce::String();
@@ -781,7 +790,7 @@ juce::String App::focusedLaneParam()
 // A lane for param under the track (made if it isn't there), the lanes open, the focus on it.
 Result App::showLane (int trackIndex, const juce::String& param)
 {
-    auto track = session->track (trackIndex);
+    auto track = automationOwner (trackIndex);
     auto lanes = laneList (track);
 
     // A track opening on its starting volume lane with nothing on it: that lane becomes this one.
@@ -793,12 +802,12 @@ Result App::showLane (int trackIndex, const juce::String& param)
 
     setLaneList (track, lanes);
     track.setProperty (ids::lanes, true, nullptr); // open: a view, not an edit
-    focusTrack (trackIndex);
+    focusTrack (trackIndex < 0 ? session->numTracks() : trackIndex);
     focusedLane = (int) (std::find (lanes.begin(), lanes.end(), param) - lanes.begin());
 
     const auto lane = Session::automation (track, param);
     const auto count = lane.isValid() ? (int) Session::points (lane).size() : 0;
-    return Result::good (automationName (track, param) + " lane on " + trackList ({ trackIndex })
+    return Result::good (automationName (track, param) + " lane on " + insertOwnerName (trackIndex)
                          + (count > 0 ? L" \x00b7 " + juce::String (count) + (count == 1 ? " point" : " points") : juce::String (L" \x00b7 no points yet: alt+\x2191\x2193 or pt <value>"))
                          + (lane.hasProperty (ids::num) ? L" \x00b7 " + controlText (lane) : juce::String (L" \x00b7 map: a knob runs it")));
 }
@@ -806,7 +815,7 @@ Result App::showLane (int trackIndex, const juce::String& param)
 // A lane off the track, its points and controller with it (undo brings it back).
 Result App::removeLane (int trackIndex, const juce::String& param)
 {
-    auto track = session->track (trackIndex);
+    auto track = automationOwner (trackIndex);
     const auto lane = Session::automation (track, param);
     auto lanes = laneList (track);
     const auto shown = std::find (lanes.begin(), lanes.end(), param);
@@ -830,24 +839,57 @@ Result App::removeLane (int trackIndex, const juce::String& param)
     return Result::good ("removed the " + name + L" lane and its automation \x00b7 ctrl+z brings it back");
 }
 
+// shift+O on a lane: its automation off or on. Off, its points stay but don't play (nor
+// bounce); the setting does, a mapped knob moves the setting, and writing passes it by. For
+// trying values before writing again.
+Result App::toggleLaneOff()
+{
+    int track = -1;
+    juce::String param;
+
+    if (auto r = automationTrack (track, param); ! r.ok)
+        return r;
+
+    auto owner = automationOwner (track);
+    auto lane = Session::automation (owner, param);
+    beginEdit ("automation off");
+
+    if (! lane.isValid())
+    {
+        lane = juce::ValueTree (ids::AUTO, { { ids::param, param } });
+        owner.appendChild (lane, um());
+    }
+
+    const bool off = ! laneOff (lane);
+
+    if (off)
+        lane.setProperty (ids::bypass, true, um());
+    else
+        lane.removeProperty (ids::bypass, um());
+
+    return Result::good (automationName (owner, param) + (off ? juce::String (" automation OFF: plays its setting, isn't written") : juce::String (" automation on"))
+                         + " (shift+O)");
+}
+
 // shift+A: the focused track's automation lanes, open under it or closed.
 Result App::toggleLanes()
 {
-    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+    if (session == nullptr || onTopLane() || (! mixFocused() && focused >= session->numTracks()))
         return Result::fail (L"shift+A opens a track's automation lanes \x2014 \x2193 to one");
 
-    auto track = session->track (focused);
+    const auto who = ioTrack(); // the mix's lanes go under the Mix row
+    auto track = automationOwner (who);
     const bool open = ! (bool) track[ids::lanes];
     track.setProperty (ids::lanes, open, nullptr); // a view, not an edit
 
     if (! open)
     {
         focusedLane = -1;
-        return Result::good (trackList ({ focused }) + L" lanes closed \x00b7 shift+A opens them");
+        return Result::good (insertOwnerName (who) + L" lanes closed \x00b7 shift+A opens them");
     }
 
-    const auto lanes = lanesShown (focused);
-    return Result::good (trackList ({ focused }) + (lanes.size() == 1 ? " has 1 lane" : " has " + juce::String ((int) lanes.size()) + " lanes")
+    const auto lanes = lanesShown (who);
+    return Result::good (insertOwnerName (who) + (lanes.size() == 1 ? " has 1 lane" : " has " + juce::String ((int) lanes.size()) + " lanes")
                          + L" \x00b7 \x2193 onto one \x00b7 auto adds more \x00b7 shift+A closes them");
 }
 
@@ -856,10 +898,10 @@ Result App::toggleLanes()
 
 Result App::openAutoPanel()
 {
-    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+    if (session == nullptr || onTopLane() || (! mixFocused() && focused >= session->numTracks()))
         return Result::fail (L"auto lists a track's parameters \x2014 \x2193 to one");
 
-    autoPanelTrack = focused;
+    autoPanelTrack = ioTrack(); // -1: the mix
     autoPanelLane = focusedLaneParam().isNotEmpty() ? focusedLane : -1; // from a lane: enter changes it
     autoPanelFilter.clear();
     buildAutoPanelRows();
@@ -886,10 +928,11 @@ void App::buildAutoPanelRows()
 {
     autoPanelRows.clear();
 
-    if (session == nullptr || autoPanelTrack < 0 || autoPanelTrack >= session->numTracks())
+    if (session == nullptr || autoPanelTrack < -1 || autoPanelTrack >= session->numTracks())
         return;
 
-    const auto track = session->track (autoPanelTrack);
+    const auto track = automationOwner (autoPanelTrack);
+    const bool mix = autoPanelTrack < 0;
     const auto filter = autoPanelFilter.trim().toLowerCase();
     auto matches = [&] (const juce::String& name, const juce::String& group)
     {
@@ -918,10 +961,14 @@ void App::buildAutoPanelRows()
         for (const auto& lane : Session::automations (track))
             automated.push_back ({ lane[ids::param].toString(), automationName (track, lane[ids::param].toString()) });
 
-        section ("ON THIS TRACK", automated);
+        section (mix ? "ON THE MIX" : "ON THIS TRACK", automated);
     }
 
-    std::vector<std::pair<juce::String, juce::String>> mixer { { "vol", "volume" }, { "pan", "pan" }, { "mute", "mute" } };
+    // The mix: its volume only.
+    std::vector<std::pair<juce::String, juce::String>> mixer { { "vol", "volume" } };
+
+    if (! mix)
+        mixer.insert (mixer.end(), { { "pan", "pan" }, { "mute", "mute" } });
 
     for (int s = 0; s < Session::numSends; ++s)
         if (Session::send (track, s).isValid())
@@ -1011,7 +1058,7 @@ bool App::handleAutoPanelKey (const Key& k)
         case Key::Delete:
             // A lane the track has: off it (points, controller and all).
             if (autoPanelIndex >= 0 && autoPanelIndex < n && ! autoPanelRows[(size_t) autoPanelIndex].header
-                && Session::automation (session->track (autoPanelTrack), autoPanelRows[(size_t) autoPanelIndex].param).isValid())
+                && Session::automation (automationOwner (autoPanelTrack), autoPanelRows[(size_t) autoPanelIndex].param).isValid())
             {
                 say (removeLane (autoPanelTrack, autoPanelRows[(size_t) autoPanelIndex].param));
                 const auto keep = autoPanelIndex;
@@ -1185,7 +1232,8 @@ void App::handleControl (const ControlMsg& m)
 
             it->lastMs = now;
 
-            if (writeOn && rolling)
+            // A lane that's off isn't written (the knob just moves the setting).
+            if (writeOn && rolling && ! laneOff (lane))
             {
                 auto& w = it->written;
 
@@ -1231,7 +1279,7 @@ void App::releaseTouches (bool idleOnly)
 // is the setting (volume, pan, mute, the send; a plugin's parameter stays where it was put).
 void App::keepAsSetting (const Touch& t)
 {
-    if (! t.lane.getParent().isValid() || ! Session::points (t.lane).empty())
+    if (! t.lane.getParent().isValid() || (! Session::points (t.lane).empty() && ! laneOff (t.lane)))
         return;
 
     const auto param = t.lane[ids::param].toString();

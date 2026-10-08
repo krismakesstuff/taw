@@ -744,8 +744,21 @@ Result App::execute (const juce::String& line)
         return setMixVolume (p.args[0].getDoubleValue());
     }
 
+    // mix fx limiter / mix fx b (its window) / mix fx b x|off|on / mix fx b>d: the mix's inserts.
+    if (onMix && (v == "fx" || v == "ins"))
+        return editInserts ({ -1 }, p.args);
+
+    // mix lane / mix lane ceiling / mix auto: the mix's automation, under the Mix row.
+    if (p.mix && (v == "lane" || v == "auto"))
+    {
+        if (! mixFocused())
+            focusTrack (session->numTracks());
+
+        return v == "auto" ? openAutoPanel() : laneByName (-1, p.rest);
+    }
+
     if (p.mix)
-        return Result::fail ("the mix only takes v, e.g. mix v -3");
+        return Result::fail ("the mix takes v, fx, lane and auto, e.g. mix v -3, mix fx limiter, mix lane vol");
 
     // Global verbs ------------------------------------------------------------
     // rec records the armed tracks (ctrl+space does the same); "1 rec" arms exactly track 1
@@ -853,8 +866,8 @@ Result App::execute (const juce::String& line)
         }
 
         // In the routing column on an insert: that plugin's window.
-        if (! p.hasSelector && ioCell >= ioFirstInsert && ioCell < ioFirstSend && ! mixFocused() && ! onTopLane())
-            return toggleInsertEditor (focused, ioCell);
+        if (! p.hasSelector && ioCell >= ioFirstInsert && ioCell < ioFirstSend && ! onTopLane())
+            return toggleInsertEditor (ioTrack(), ioCell);
 
         const auto targets = p.hasSelector ? p.tracks : defaultTargets();
         return toggleEditor ((onTopLane() && ! p.hasSelector) || targets.empty() ? -1 : targets.front());

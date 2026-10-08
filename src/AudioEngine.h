@@ -216,6 +216,9 @@ struct Graph
     ClickSettings click;
     float mixGain = 1.0f;
     Curve mixCurve; // the mix volume's automation, in dB
+    // The mix bus's own inserts (A-E, bypassed ones left out), their automated parameters and
+    // latency (counted in latency). Only inserts, parameterCurves and latency are used.
+    TrackPlay mixBus;
     double bpm = 120.0;
     int timeSigNum = 4, timeSigDen = 4;
 
@@ -412,6 +415,11 @@ inline void applyMixGain (const Graph& g, juce::int64 pos, float* left, float* r
         juce::FloatVectorOperations::multiply (right + done, gain, len);
     }
 }
+
+// The mix bus once every track is in it: the mix volume (and its automation), then the mix's
+// inserts, after the fader as on a Pro Tools master. Shared by live playback and bounces. In
+// AudioEngine.cpp.
+void mixInserts (Graph&, juce::int64 pos, const HostTransport&, float* left, float* right, int n);
 
 // Adds a sample track's hits for [pos, pos + n) into its bus. Like clips, it depends only on
 // position (no voice state), so loops, seeks and offline bounces all sound the same.

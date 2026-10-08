@@ -74,7 +74,7 @@ std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, doub
     // it's done, plugins load on this thread, so put up a box saying what's loading first.
     const auto track = node.hasType (ids::INSERT) ? node.getParent() : node;
     loadingPlugin = desc->name;
-    loadingWhy = "for " + track[ids::name].toString()
+    loadingWhy = "for " + (track.hasType (ids::SESSION) ? juce::String ("the mix") : track[ids::name].toString())
                  + (node.hasType (ids::INSERT) ? " (insert " + node[ids::slot].toString().toUpperCase() + ")" : juce::String())
                  + L" \x00b7 big ones take a few seconds; taw waits";
 
@@ -151,7 +151,7 @@ bool App::loadNextPlugin()
                                        [this] (const juce::ValueTree& node)
                                        {
                                            const auto track = node.hasType (ids::INSERT) ? node.getParent() : node;
-                                           return ! track.getParent().isValid() || (node.hasType (ids::INSERT) && ! node.getParent().isValid())
+                                           return ! track.isValid() || (! track.hasType (ids::SESSION) && ! track.getParent().isValid())
                                                   || std::any_of (hosted.begin(), hosted.end(), [&] (const auto& in) { return in.node == node; });
                                        }),
                        pluginQueue.end());

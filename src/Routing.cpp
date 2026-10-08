@@ -254,7 +254,7 @@ void App::compensateLatency (Graph& g, bool offline)
             reach (s.bus);
     }
 
-    g.latency = mix;
+    g.latency = mix + g.mixBus.latency; // the mix's own inserts come after
 
     std::vector<KeptDelay> kept;
 
@@ -304,6 +304,9 @@ void App::compensateLatency (Graph& g, bool offline)
 
 bool App::trackIsStereo (const juce::ValueTree& track)
 {
+    if (track.hasType (ids::SESSION)) // the mix bus
+        return true;
+
     if (track.hasProperty (ids::channels))
         return (int) track[ids::channels] >= 2;
 
@@ -560,8 +563,8 @@ Result App::nudgeSend (int track, int slot, double deltaDb)
 
 juce::String App::describeIoCell (int track, int cell) const
 {
-    const auto t = session->track (track);
-    const auto label = "track " + juce::String (track + 1);
+    const auto t = automationOwner (track);
+    const auto label = insertOwnerName (track);
 
     if (cell == ioOutput)
         return label + L" output \x2192 " + busName (t[ids::out]) + L" \x00b7 | changes \x00b7 del: the mix";
@@ -877,13 +880,15 @@ bool App::handleIoKey (const Key& k)
     if (ioCell < 0 || session == nullptr || ! commandLine.isEmpty())
         return false;
 
-    if (mixFocused() || onTopLane() || focused >= session->numTracks())
+    if (onTopLane() || (! mixFocused() && focused >= session->numTracks()))
     {
         ioCell = -1;
         return false;
     }
 
-    const auto track = focused;
+    // The mix has inserts only (one row).
+    const auto track = ioTrack();
+    const auto lastCell = track < 0 ? ioFirstSend - 1 : ioOutput;
     const auto insertSlot = ioCell < ioFirstSend ? ioCell : -1;
     const auto sendSlot = ioCell >= ioFirstSend && ioCell < ioOutput ? ioCell - ioFirstSend : -1;
 
@@ -910,7 +915,7 @@ bool App::handleIoKey (const Key& k)
                 return true;
             }
 
-            ioCell = juce::jlimit (0, ioOutput, ioCell + step);
+            ioCell = juce::jlimit (0, lastCell, ioCell + step);
             followWindow (track, ioCell < ioFirstSend ? ioCell : -1);
             say (Result::good (describeIoCell (track, ioCell)));
             return true;
@@ -928,7 +933,7 @@ bool App::handleIoKey (const Key& k)
             const bool down = k.code == Key::Down;
             const bool rows = session->trackHeight() > 1;
 
-            if (rows && insertSlot >= 0 && down)
+            if (rows && insertSlot >= 0 && down && track >= 0)
                 ioCell = ioFirstSend + insertSlot;
             else if (rows && sendSlot >= 0 && ! down)
                 ioCell = ioFirstInsert + sendSlot;
@@ -937,16 +942,20 @@ bool App::handleIoKey (const Key& k)
                 const auto before = focused;
                 down ? focusDown (false) : focusUp (false);
 
-                if (rows && focused != before && ! mixFocused() && ! onTopLane())
+                if (rows && focused != before && ! onTopLane())
                     ioCell = sendSlot >= 0 ? ioFirstInsert + sendSlot
                            : insertSlot >= 0 ? ioFirstSend + insertSlot
                                              : ioCell;
+
+                // Onto the mix: the insert under the send (the output: its last insert).
+                if (mixFocused() && ioCell >= ioFirstSend)
+                    ioCell = ioCell == ioOutput ? ioFirstSend - 1 : ioCell - ioFirstSend;
             }
 
-            if (! mixFocused() && ! onTopLane())
+            if (! onTopLane())
             {
-                followWindow (focused, ioCell < ioFirstSend ? ioCell : -1);
-                say (Result::good (describeIoCell (focused, ioCell)));
+                followWindow (ioTrack(), ioCell < ioFirstSend ? ioCell : -1);
+                say (Result::good (describeIoCell (ioTrack(), ioCell)));
             }
             return true;
         }

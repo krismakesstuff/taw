@@ -301,6 +301,10 @@ public:
     bool ioVisible = true;
     int ioCell = -1; // -1: not in the column; else one of these
     static constexpr int ioFirstInsert = 0, ioFirstSend = 5, ioOutput = 10;
+    // Whose column you're in: the focused track, or -1 for the mix (its inserts only). Insert
+    // functions take -1 for the mix too.
+    int ioTrack() const { return mixFocused() ? -1 : focused; }
+    juce::String insertOwnerName (int track) const; // "track 2", "the mix"
 
     // The bus picker: where the output or a send goes. Type to filter (a new name makes a bus).
     struct BusChoice
@@ -700,6 +704,8 @@ public:
     Result removeLane (int track, const juce::String& param);
     Result laneByName (int track, const juce::String& what); // "lane cutoff"
     Result toggleLanes();                                    // shift+A
+    Result toggleLaneOff();                                  // shift+O on a lane
+    static bool laneOff (const juce::ValueTree& lane) { return lane[ids::bypass]; } // its points ignored
     // load false (drawing): a plugin not loaded yet isn't loaded for this; names and values fall back.
     PluginSlot* automationPlugin (const juce::ValueTree& owner, const AutomationTarget&, bool load = true);
     double staticValue (const juce::ValueTree& owner, const juce::String& param, bool load = true); // with no automation
@@ -708,9 +714,11 @@ public:
     bool isAutomated (const juce::ValueTree& owner, const juce::String& param) const; // points, or a knob moving it
     juce::String automationName (const juce::ValueTree& owner, const juce::String& param, bool load = true);
     juce::String automationText (const juce::ValueTree& owner, const juce::String& param, double value, bool load = true);
-    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param) const; // its lane, in samples
+    // Its lane, in samples. A lane that's off plays no points (drawing asks for them anyway).
+    Curve automationCurve (const juce::ValueTree& owner, const juce::String& param, bool evenIfOff = false) const;
     bool parseAutomationValue (const juce::String& param, const juce::String& text, double& out) const;
     Result setAutomation (const juce::String& value); // pt <value>
+    Result setAutomationValue (int track, const juce::String& param, double value);
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one
 

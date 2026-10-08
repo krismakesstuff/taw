@@ -24,6 +24,22 @@ void automatePlugins (TrackPlay& tp, juce::int64 pos)
     }
 }
 
+void mixInserts (Graph& g, juce::int64 pos, const HostTransport& transport, float* left, float* right, int n)
+{
+    // What reaches the mix at pos left the timeline the tracks' delay compensation earlier; the
+    // mix's own inserts add theirs after that (both are in g.latency).
+    const auto at = pos - (g.latency - g.mixBus.latency);
+    applyMixGain (g, at, left, right, n);
+
+    if (g.mixBus.inserts.empty())
+        return;
+
+    automatePlugins (g.mixBus, at);
+
+    for (const auto& fx : g.mixBus.inserts)
+        fx->process (transport, n, left, right);
+}
+
 AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats();
@@ -558,7 +574,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         }
     }
 
-    applyMixGain (*current, pos - current->latency, mixL, mixR, n); // what's heard is that late
+    mixInserts (*current, pos, transport, mixL, mixR, n);
 
     const auto l = juce::FloatVectorOperations::findMinAndMax (mixL, n);
     const auto r = juce::FloatVectorOperations::findMinAndMax (mixR, n);

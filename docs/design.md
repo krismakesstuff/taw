@@ -518,6 +518,16 @@ Stereo one. Typed names pick the same way.
   what you hear, so holding them back would only make you late. (What was already in a delay
   still comes out.) Their own plugins' latency, and a latent plugin on a bus they send to, still
   count.
+- **The mix bus has inserts too** (A to E, `INSERT`s on the `SESSION`): `mix fx limiter`,
+  `mix fx b`, `mix fx b off` and the rest work as `2 fx` does, and on the Mix row `\` steps
+  into its slots (one row, inserts only) and `|` opens one. They run after the mix volume, as
+  on a Pro Tools master fader, so a fade-out goes into the limiter rather than coming after
+  it (`mixInserts`, shared by playback and bounces). Their latency adds to the mix's after the
+  tracks' delay compensation; the mix volume's automation is read where the audio entering
+  the mix is, and the inserts' parameter automation (`fx a/<id>` lanes on the session) the
+  same. Always stereo. In code, track index -1 means the mix (`ioTrack`, as `automationOwner`).
+  The mix has automation lanes too, under the Mix row (shift+A there, `mix lane`, `mix auto`):
+  its volume and its inserts' parameters. The Mix row moves up to make room for them.
 - **Low latency mode** (`lowlat`, off by default, not saved): inserts with more latency than the
   session's limit (`lowlat 256`, in samples; also in `project`) sit out, so the mix stops
   running late while you record. They're drawn yellow and the transport shows `LOW LAT`.
@@ -766,7 +776,10 @@ can change over time.
   on a lane with no points a knob is a fader (where it's left becomes the setting). With write
   on (shift+W, `aw`) and playing, its moves are recorded; 0.6 s after it stops moving, the
   touch releases: its points replace that stretch (one undo step) and the curve glides back
-  over 0.25 s. A stop releases everything. While it writes, the lane draws what's been
+  over 0.25 s. A stop releases everything. shift+O on a lane turns its automation off (`bypass`
+  on the AUTO): its points stay, drawn faint with OFF, but playback, bounces and readouts use
+  the setting, a mapped knob moves the setting, and writing passes it by; shift+O again turns
+  it back on. While it writes, the lane draws what's been
   written so far, from the touch's first point to the playhead, in the record colour
   (`writtenValue`).
 - **Follows the clips:** automation goes where the clips over it go. Copy (and so cut,

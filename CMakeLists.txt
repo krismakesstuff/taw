@@ -114,6 +114,30 @@ if (WIN32)
     target_compile_definitions(taw PRIVATE TAW_VIDEO=1)
 endif()
 
+if (APPLE)
+    # FFmpeg's libraries from Homebrew (brew install ffmpeg). Weak-linked: without them taw still
+    # starts, just without video. Without them at build time, video is left out.
+    find_path(TAW_FFMPEG_INCLUDE libavformat/avformat.h
+        HINTS /opt/homebrew/opt/ffmpeg/include /usr/local/opt/ffmpeg/include)
+    set(TAW_FFMPEG_FOUND ${TAW_FFMPEG_INCLUDE})
+    foreach(lib avformat avcodec avutil swscale)
+        find_library(TAW_FFMPEG_${lib} ${lib} HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        if (NOT TAW_FFMPEG_${lib})
+            set(TAW_FFMPEG_FOUND "")
+        endif()
+    endforeach()
+
+    if (TAW_FFMPEG_FOUND)
+        target_include_directories(taw PRIVATE ${TAW_FFMPEG_INCLUDE})
+        foreach(lib avformat avcodec avutil swscale)
+            target_link_options(taw PRIVATE "LINKER:-weak_library,${TAW_FFMPEG_${lib}}")
+        endforeach()
+        target_compile_definitions(taw PRIVATE TAW_VIDEO=1)
+    else()
+        message(STATUS "FFmpeg not found (brew install ffmpeg): building without video")
+    endif()
+endif()
+
 target_link_libraries(taw PRIVATE
     juce::juce_audio_devices
     juce::juce_audio_formats

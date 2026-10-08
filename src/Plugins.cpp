@@ -398,6 +398,48 @@ void PluginSlot::render (const Sequence& seq, const HostTransport& t, int n, con
         sequenceSustain = false;
     }
 
+    // Chase: starting (or jumping) in the middle of things, the controllers as they were last set
+    // before here (the sustain pedal, the mod wheel, a bend), then the notes already playing,
+    // from their middle, as other DAWs do. Only on a start or jump, so a scan back is fine.
+    if (t.rolling && pos != nextPos)
+    {
+        std::array<bool, 16 * 130> seen {}; // per channel: 128 controllers, pitch bend, pressure
+        auto c = std::lower_bound (seq.controls.begin(), seq.controls.end(), pos,
+                                   [] (const Sequence::Control& x, juce::int64 p) { return x.pos < p; });
+
+        while (c != seq.controls.begin())
+        {
+            const auto& m = (--c)->msg;
+            const auto type = m.type();
+            const int which = type == 0xb0 ? (m.d1 & 0x7f) : type == 0xe0 ? 128 : type == 0xd0 ? 129 : -1;
+
+            if (which < 0 || seen[(size_t) (m.channel() * 130 + which)])
+                continue;
+
+            seen[(size_t) (m.channel() * 130 + which)] = true;
+            add (m, 0);
+
+            if (type == 0xb0 && m.d1 == 64)
+                sequenceSustain = sequenceSustain || m.d2 >= 64;
+        }
+
+        for (const auto& note : seq.notes)
+        {
+            if (note.start >= pos)
+                break;
+
+            if (note.end <= pos)
+                continue;
+
+            add (MidiMsg::noteOn (note.channel, note.pitch, note.vel), 0);
+
+            if (note.end < end)
+                add (MidiMsg::noteOff (note.channel, note.pitch), note.end - pos);
+            else if (numSounding < (int) sounding.size())
+                sounding[(size_t) numSounding++] = { note.end, note.channel, note.pitch };
+        }
+    }
+
     if (t.rolling)
     {
         // Notes ending in this block, then controllers, then notes starting: at any one sample a

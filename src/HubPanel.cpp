@@ -275,29 +275,45 @@ Result App::hubCommand (const juce::String& rest)
     if (word.isNotEmpty())
         return Result::fail (L"hub \x00b7 hub route <from> > <to> \x00b7 hub unroute <from> > <to> \x00b7 hub forget <session> \x00b7 hub start \x00b7 hub stop");
 
-    hubPanelVisible = ! hubPanelVisible;
-
-    if (! hubPanelVisible)
-        return Result::good();
-
-    helpVisible = settingsVisible = pluginPickerVisible = midiPanelVisible = false;
-    hubPanelIndex = 0;
-    refreshHub (true);
-    return hubStatus.isVoid() ? Result::fail (hubError) : Result::good();
+    openHubPage();
+    return Result::good();
 }
 
-bool App::handleHubPanelKey (const Key& k)
+void App::openHubPage()
 {
-    if (! hubPanelVisible || ! commandLine.isEmpty())
-        return false;
+    if (mode != Mode::Hub)
+        hubReturn = mode == Mode::Main ? Mode::Main : Mode::TemplatePicker;
 
+    mode = Mode::Hub;
+    hubLine.clear();
+    hubIndex = 0;
+    helpVisible = settingsVisible = pluginPickerVisible = midiPanelVisible = false;
+    refreshHub (true);
+    say (hubStatus.isVoid() ? Result::fail (hubError) : Result::good());
+}
+
+// Back to the session, or to the start screen (set up now if taw hub came straight here).
+void App::closeHubPage()
+{
+    hubLine.clear();
+
+    if (hubReturn == Mode::Main && session != nullptr)
+        mode = Mode::Main;
+    else
+        proceedToSession();
+}
+
+// The page's keys: typing goes to its command line ("route in 1 > Song", "hub" optional);
+// with the line empty, the arrows choose a route, [ ] ride its level and del takes it out.
+void App::handleHubPageKey (const Key& k)
+{
     const auto* routes = hubStatus["routes"].getArray();
     const int n = routes != nullptr ? routes->size() : 0;
-    hubPanelIndex = juce::jlimit (0, juce::jmax (0, n - 1), hubPanelIndex);
+    hubIndex = juce::jlimit (0, juce::jmax (0, n - 1), hubIndex);
 
     auto send = [this, routes] (const juce::String& type, double db)
     {
-        const auto& r = routes->getReference (hubPanelIndex);
+        const auto& r = routes->getReference (hubIndex);
         auto m = hubMessage (type);
 
         for (const auto* p : { "from", "fromChannel", "to", "toChannel" })
@@ -314,34 +330,74 @@ bool App::handleHubPanelKey (const Key& k)
 
     switch (k.code)
     {
-        case Key::Up:     hubPanelIndex = juce::jmax (0, hubPanelIndex - 1); return true;
-        case Key::Down:   hubPanelIndex = juce::jmin (n - 1, hubPanelIndex + 1); return true;
-        case Key::Escape: hubPanelVisible = false; return true;
-        case Key::Delete:
+        case Key::Up:   hubIndex = juce::jmax (0, hubIndex - 1); return;
+        case Key::Down: hubIndex = juce::jmin (n - 1, hubIndex + 1); return;
+
+        case Key::Escape:
+            if (hubLine.isNotEmpty())
+                hubLine.clear();
+            else
+                closeHubPage();
+
+            return;
+
+        case Key::Enter:
+        {
+            auto line = hubLine.trim();
+            hubLine.clear();
+
+            if (line.startsWithIgnoreCase ("hub ") || line.equalsIgnoreCase ("hub"))
+                line = line.substring (3).trim();
+
+            if (line.equalsIgnoreCase ("q") || line.equalsIgnoreCase ("quit"))
+                quit();
+            else if (line.isNotEmpty())
+                say (hubCommand (line));
+
+            refreshHub (true);
+            return;
+        }
+
         case Key::Backspace:
-            if (n > 0)
+            if (hubLine.isNotEmpty())
+                hubLine = hubLine.dropLastCharacters (1);
+            else if (n > 0)
                 send ("unroute", 0.0);
 
-            return true;
+            return;
+
+        case Key::Delete:
+            if (n > 0 && hubLine.isEmpty())
+                send ("unroute", 0.0);
+
+            return;
+
         case Key::Char:
+            if (k.ctrl || k.alt || k.ch < 32)
+                return;
+
             // [ ] the route's level, a dB at a time (from -60 to +12).
-            if ((k.ch == '[' || k.ch == ']') && ! k.ctrl && ! k.alt && n > 0)
+            if ((k.ch == '[' || k.ch == ']') && hubLine.isEmpty() && n > 0)
             {
-                const double db = juce::jlimit (-60.0, 12.0, std::round ((double) routes->getReference (hubPanelIndex)["db"]) + (k.ch == ']' ? 1.0 : -1.0));
+                const double db = juce::jlimit (-60.0, 12.0, std::round ((double) routes->getReference (hubIndex)["db"]) + (k.ch == ']' ? 1.0 : -1.0));
                 send ("route", db);
-                return true;
+                return;
             }
 
-            return false; // typing starts a command as usual
+            hubLine += juce::String::charToString ((juce::juce_wchar) k.ch);
+            return;
+
         default:
-            return false;
+            return;
     }
 }
 #else
 Result App::hubCommand (const juce::String&) { return Result::fail ("the hub runs on macOS only so far"); }
 Result App::hubRoute (const juce::String&, bool) { return Result::fail ("the hub runs on macOS only so far"); }
+void App::openHubPage() { say (Result::fail ("the hub runs on macOS only so far")); }
+void App::closeHubPage() {}
+void App::handleHubPageKey (const Key&) {}
 void App::refreshHub (bool) {}
-bool App::handleHubPanelKey (const Key&) { return false; }
 juce::String App::hubEndName (const juce::String&, int, bool) const { return {}; }
 #endif
 } // namespace taw

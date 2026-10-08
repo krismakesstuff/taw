@@ -113,7 +113,7 @@ int main (int argc, char** argv)
             std::atomic<int> blocks { 0 };
         } listen;
 
-        taw::hub::setClientName ("hubping");
+        taw::hub::setClientName ("hubping", "hubping");
         auto type = taw::hub::makeDeviceType();
         std::unique_ptr<juce::AudioIODevice> d (type->createDevice ({}, {}));
         juce::BigInteger all;
@@ -919,9 +919,9 @@ int main (int argc, char** argv)
         {
             juce::BigInteger all;
             all.setRange (0, channels, true);
-            taw::hub::setClientName ("A", {}, false); // two sessions in one process: naming B mustn't rename A
+            taw::hub::setClientName ("A", "A", false); // two sessions in one process: naming B mustn't rename A
             const auto ea = a->open (all, all, rate, block);
-            taw::hub::setClientName ("B", {}, false);
+            taw::hub::setClientName ("B", "B", false);
             const auto eb = b->open (all, all, rate, block);
 
             if (ea.isNotEmpty() || eb.isNotEmpty())
@@ -1892,13 +1892,23 @@ int main (int argc, char** argv)
         args.removeRange (t, 2);
     }
 
+#if TAW_HUB
+    // taw hub: the hub's page, no session (a session folder called hub: taw ./hub).
+    const bool hubPage = args.size() == 1 && args[0] == "hub";
+
+    if (hubPage)
+        args.clear();
+#else
+    const bool hubPage = false;
+#endif
+
     const auto cwd = juce::File::getCurrentWorkingDirectory();
     const auto target = args.isEmpty() ? cwd : cwd.getChildFile (args[0]);
 
     juce::File openDir, newParent;
     juce::String newName;
 
-    if (taw::Session::existsIn (target))
+    if (taw::Session::existsIn (target) && ! hubPage)
     {
         openDir = target;
     }
@@ -1912,7 +1922,7 @@ int main (int argc, char** argv)
     // straight back to it (opening it also recovers a take that was recording).
     taw::safety::installCloseHandler();
     const auto unclean = taw::safety::findUncleanExit();
-    const bool reopen = unclean.found && openDir == juce::File() && args.isEmpty() && taw::Session::existsIn (unclean.session);
+    const bool reopen = unclean.found && openDir == juce::File() && args.isEmpty() && ! hubPage && taw::Session::existsIn (unclean.session);
 
     if (reopen)
         openDir = unclean.session;
@@ -1934,6 +1944,8 @@ int main (int argc, char** argv)
 
         if (unclean.found)
             app.reportUncleanExit (unclean.crashLog, reopen);
+
+        app.openHubFirst = hubPage;
 
         status = app.run();
     }

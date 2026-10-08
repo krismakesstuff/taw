@@ -234,6 +234,9 @@ Result App::finishClosing()
     newSessionName.clear();
     pendingTemplate.clear();
     safety::markRunning ({});
+#if TAW_HUB
+    hub::setClientName ("taw"); // no session: the hub gives it no routes
+#endif
 
     // Closed to open another (an imported Live set).
     if (const auto next = std::exchange (openAfterClose, juce::File{}); next != juce::File())
@@ -353,7 +356,7 @@ int App::run()
 
         syncVideo();
 
-        if (hubPanelVisible)
+        if (mode == Mode::Hub)
             refreshHub (false); // the sessions coming and going, their late blocks
 
         if (engine.isRolling())
@@ -479,6 +482,9 @@ void App::proceedToSession()
 
     pickIndex = recent.empty() ? defaultTemplateRow() : 0;
     mode = Mode::TemplatePicker;
+
+    if (std::exchange (openHubFirst, false)) // taw hub
+        openHubPage();
 }
 
 int App::defaultTemplateRow() const
@@ -3016,6 +3022,7 @@ void App::handleKey (const Key& k)
         case Mode::Main:           handleMainKey (k); break;
         case Mode::DevicePicker:   handleDevicePickerKey (k); break;
         case Mode::TemplatePicker: handleTemplatePickerKey (k); break;
+        case Mode::Hub:            handleHubPageKey (k); break;
     }
 }
 
@@ -3345,7 +3352,7 @@ void App::handleMainKey (const Key& k)
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
     if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
-        || handleHubPanelKey (k) || handleSettingsKey (k) || handleIoKey (k))
+        || handleSettingsKey (k) || handleIoKey (k))
         return;
 
     // The video row: arrows step frames (ctrl: seconds); holding one scrubs. Alt keeps the beat.
@@ -3800,6 +3807,7 @@ void App::handleTemplatePickerKey (const Key& k)
         case Key::Down:      pickIndex = juce::jmin (n - 1, pickIndex + 1); return;
         case Key::Backspace: newSessionName = newSessionName.dropLastCharacters (1); return;
         case Key::Escape:    quit(); return;
+        case Key::Tab:       openHubPage(); return; // the hub, with no session
         case Key::Enter:
             if (opening != nullptr)
                 return; // already opening one

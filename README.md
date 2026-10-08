@@ -62,6 +62,7 @@ Or run the binary directly:
 taw                   open the session in this folder, or start a new one
 taw my-song           open my-song, or create it
 taw my-song -t 3mic   create my-song from the 3mic template
+taw hub               the audio hub's routing page, no session (macOS)
 taw --devices         list audio devices
 ```
 

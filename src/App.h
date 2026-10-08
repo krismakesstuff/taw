@@ -101,7 +101,8 @@ enum class Mode
 {
     Main,
     DevicePicker,
-    TemplatePicker
+    TemplatePicker,
+    Hub // the audio hub's page, with or without a session (HubPanel.cpp)
 };
 
 class App final : private juce::ValueTree::Listener
@@ -237,18 +238,23 @@ public:
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
 
-    // "hub": the audio hub (docs/plan-audio-hub.md; HubPanel.cpp). The panel shows its
-    // interface, the sessions and the routes between them; "hub route in 1-2 > Song" and
-    // "hub unroute" change them, "hub start" / "hub stop" run it. macOS only so far.
+    // The audio hub (docs/plan-audio-hub.md; HubPanel.cpp): its page shows the interface, the
+    // sessions and the routes between them, from a session ("hub"), the start screen (tab) or
+    // the shell ("taw hub"). "hub route in 1-2 > Song" and "hub unroute" change them, "hub
+    // start" / "hub stop" run it; on the page the same without "hub". macOS only so far.
     Result hubCommand (const juce::String& rest);
     Result hubRoute (const juce::String& spec, bool add);
-    bool hubPanelVisible = false;
-    int hubPanelIndex = 0;
-    juce::var hubStatus;      // what the hub last said (void: nothing)
-    juce::String hubError;    // why not
-    double hubAskedAt = 0.0;  // when, to ask again now and then while the panel is up
+    void openHubPage();
+    void closeHubPage();
+    void handleHubPageKey (const Key&);
+    bool openHubFirst = false;   // taw hub: the page once the device is open, not the start screen
+    Mode hubReturn = Mode::Main; // where esc goes back to
+    juce::String hubLine;        // the page's command line
+    int hubIndex = 0;            // the route chosen
+    juce::var hubStatus;         // what the hub last said (void: nothing)
+    juce::String hubError;       // why not
+    double hubAskedAt = 0.0;     // when, to ask again now and then while the page is up
     void refreshHub (bool now);
-    bool handleHubPanelKey (const Key&);
     juce::String hubEndName (const juce::String& key, int channel, bool source) const;
 
     // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen

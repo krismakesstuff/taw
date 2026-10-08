@@ -3,6 +3,7 @@
 #
 #   ./taw               open or start a session in ./sessions
 #   ./taw my-song       open or create sessions/my-song
+#   ./taw hub           the audio hub's routing page, no session
 #   ./taw build         build Release, then exit
 #
 # Sessions made from here live in ./sessions (git-ignored) so they stay out of the source tree.

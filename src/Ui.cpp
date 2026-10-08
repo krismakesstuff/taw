@@ -250,6 +250,8 @@ void Ui::render (App& app)
         canvas.text (1, 0, L"taw needs at least 70x16 \x2014 make the window bigger", colour::error);
     else if (app.mode == Mode::DevicePicker)
         drawDevicePicker (app);
+    else if (app.mode == Mode::Hub)
+        drawHubPage (app);
     else if (app.mode == Mode::TemplatePicker)
     {
         drawTemplatePicker (app);
@@ -314,7 +316,7 @@ void Ui::drawMain (App& app)
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
-        || app.hubPanelVisible || app.settingsVisible)
+        || app.settingsVisible)
         laneMap.valid = false;
 
     if (app.helpVisible)
@@ -329,8 +331,6 @@ void Ui::drawMain (App& app)
         drawAutoPanel (app);
     else if (app.midiPanelVisible && app.midiInputs != nullptr)
         drawMidiPanel (app);
-    else if (app.hubPanelVisible)
-        drawHubPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
         drawSettings (app);
 }
@@ -2780,42 +2780,46 @@ void Ui::drawMidiPanel (App& app)
                  colour::dim, bg, false, boxW - 4);
 }
 
-// The hub: its interface, the sessions it knows (closed ones dim), and every route, one a row:
-// "in 1  →  Song 1   0.0 dB". A list, so it fits 80x24.
-void Ui::drawHubPanel (App& app)
+// The hub's page, a screen of its own (with a session open or not): the interface, the sessions
+// it knows (closed ones dim), every route one a row ("in 1  →  Song 1   0.0 dB"), and its own
+// command line. A list, so it fits 80x24.
+void Ui::drawHubPage (App& app)
 {
     const auto& s = app.hubStatus;
     const auto* routes = s["routes"].getArray();
     const int numRoutes = routes != nullptr ? routes->size() : 0;
     const int w = canvas.width(), h = canvas.height();
-    const int boxW = std::min (w - 4, 84), boxH = std::min (h - 2, std::max (numRoutes, 1) + 9);
-    const int x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
-    const int listRows = boxH - 8;
-    constexpr int endW = 24;
+    constexpr int endW = 26;
 
-    for (int y = 0; y < boxH; ++y)
-        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
+    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
+    int x = canvas.text (5, 0, L"\x25b8 hub", colour::text, colour::headerBg);
 
-    canvas.text (x0 + 2, y0 + 1, "HUB", colour::text, bg, true);
+    if (app.session != nullptr)
+        canvas.text (x + 2, 0, L"(" + app.session->name() + L" plays on \x00b7 esc goes back to it)", colour::dim, colour::headerBg);
+
+    int y = 2;
 
     if (s.isVoid())
     {
-        canvas.text (x0 + 7, y0 + 1, app.hubError, colour::error, bg, false, boxW - 9);
-        canvas.text (x0 + 2, y0 + 3, L"hub start runs it \x00b7 sessions join it by choosing the taw hub device (dev)", colour::dim, bg, false, boxW - 4);
+        canvas.text (1, y++, app.hubError, colour::error, -1, false, w - 2);
+        canvas.text (1, ++y, L"start runs the hub (it then starts at login) \x00b7 it owns the interface and routes between it, sessions and apps",
+                     colour::dim, -1, false, w - 2);
     }
     else
     {
-        const auto device = s["device"].toString() + L" \x00b7 " + juce::String ((double) s["sampleRate"] / 1000.0, 1) + L" kHz \x00b7 "
-                            + juce::String ((int) s["blockSize"]) + L" samples \x00b7 " + juce::String ((int) s["inputs"]) + " in, "
-                            + juce::String ((int) s["outputs"]) + " out";
-        canvas.text (x0 + 7, y0 + 1, device, colour::dim, bg, false, boxW - 9);
+        canvas.text (1, y, "interface", colour::dim);
+        canvas.text (12, y++, s["device"].toString() + L" \x00b7 " + juce::String ((double) s["sampleRate"] / 1000.0, 1) + L" kHz \x00b7 "
+                                  + juce::String ((int) s["blockSize"]) + L" samples \x00b7 " + juce::String ((int) s["inputs"]) + " in, "
+                                  + juce::String ((int) s["outputs"]) + " out",
+                     colour::text, -1, false, w - 13);
 
         // The sessions, on one line.
-        int x = x0 + 2;
-        x = canvas.text (x, y0 + 2, "sessions ", colour::dim, bg);
+        canvas.text (1, y, "sessions", colour::dim);
+        x = 12;
 
         if (auto* sessions = s["sessions"].getArray(); sessions == nullptr || sessions->isEmpty())
-            canvas.text (x, y0 + 2, L"none yet \x2014 a session joins by choosing the taw hub device (dev)", colour::faint, bg, false, x0 + boxW - 2 - x);
+            canvas.text (x, y, L"none yet \x2014 a session joins by choosing the taw hub device (dev)", colour::faint, -1, false, w - 13);
         else
             for (const auto& c : *sessions)
             {
@@ -2823,24 +2827,28 @@ void Ui::drawHubPanel (App& app)
                 const auto late = (juce::int64) c["late"];
                 const auto text = c["name"].toString() + (! on ? " (closed)" : late > 0 ? " (" + juce::String (late) + " late)" : juce::String());
 
-                if (x + (int) text.length() + 3 > x0 + boxW - 2)
+                if (x + (int) text.length() + 3 > w - 1)
                     break;
 
-                x = canvas.text (x, y0 + 2, text, on ? (late > 0 ? colour::error : colour::text) : colour::faint, bg);
-                x = canvas.text (x, y0 + 2, "   ", colour::dim, bg);
+                x = canvas.text (x, y, text, on ? (late > 0 ? colour::error : colour::text) : colour::faint);
+                x += 3;
             }
 
-        if (numRoutes == 0)
-            canvas.text (x0 + 2, y0 + 4, L"no routes \x2014 hub route in 1-2 > Song adds one", colour::dim, bg, false, boxW - 4);
+        y += 2;
+        canvas.text (1, y++, "routes", colour::dim);
 
-        const int first = juce::jlimit (0, std::max (0, numRoutes - listRows), app.hubPanelIndex - listRows / 2);
+        if (numRoutes == 0)
+            canvas.text (3, y, L"none \x2014 route in 1-2 > Song adds one", colour::faint, -1, false, w - 4);
+
+        const int listRows = std::max (1, h - 4 - y);
+        const int first = juce::jlimit (0, std::max (0, numRoutes - listRows), app.hubIndex - listRows / 2);
 
         for (int row = 0; row < listRows && first + row < numRoutes; ++row)
         {
-            const int i = first + row, y = y0 + 4 + row;
+            const int i = first + row, ry = y + row;
             const auto& r = routes->getReference (i);
-            const bool chosen = i == app.hubPanelIndex;
-            const int rowBg = chosen ? colour::selBg : bg;
+            const bool chosen = i == app.hubIndex;
+            const int rowBg = chosen ? colour::focusBg : -1;
             const auto from = r["from"].toString(), to = r["to"].toString();
 
             // Dim while an end is a session that isn't connected.
@@ -2851,23 +2859,32 @@ void Ui::drawHubPanel (App& app)
                     if ((c["key"].toString() == from || c["key"].toString() == to) && ! (bool) c["connected"])
                         live = false;
 
-            canvas.fill (x0 + 1, y, boxW - 2, L' ', -1, rowBg);
+            canvas.fill (1, ry, w - 2, L' ', -1, rowBg);
 
             if (chosen)
-                canvas.put (x0 + 1, y, L'\x25b8', colour::accent, rowBg);
+                canvas.put (1, ry, L'\x25b8', colour::accent, rowBg);
 
             const int fg = live ? colour::text : colour::faint;
-            canvas.text (x0 + 3, y, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, false, endW);
-            canvas.put (x0 + 4 + endW, y, L'\x2192', live ? colour::accent : colour::faint, rowBg);
-            canvas.text (x0 + 6 + endW, y, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, false, endW);
-            canvas.text (x0 + 8 + 2 * endW, y, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : colour::faint, rowBg);
+            canvas.text (3, ry, app.hubEndName (from, (int) r["fromChannel"], true), fg, rowBg, false, endW);
+            canvas.put (4 + endW, ry, L'\x2192', live ? colour::accent : colour::faint, rowBg);
+            canvas.text (6 + endW, ry, app.hubEndName (to, (int) r["toChannel"], false), fg, rowBg, false, endW);
+            canvas.text (8 + 2 * endW, ry, juce::String ((double) r["db"], 1) + " dB", live ? colour::dim : colour::faint, rowBg);
         }
     }
 
-    canvas.text (x0 + 2, y0 + boxH - 3, L"hub route in 1-2 > Song \x00b7 hub route Song > out 1-2 -6 \x00b7 hub unroute Song > out \x00b7 this: here",
-                 colour::dim, bg, false, boxW - 4);
-    canvas.text (x0 + 2, y0 + boxH - 2, L"\x2191\x2193 choose \x00b7 [ ] level \x00b7 del takes it out \x00b7 hub start / stop \x00b7 esc closes",
-                 colour::dim, bg, false, boxW - 4);
+    // The message, the command line, the keys.
+    if (app.message.isNotEmpty())
+        canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
+
+    x = canvas.text (1, h - 2, L"hub \x25b8 ", colour::accent);
+    x = canvas.text (x, h - 2, app.hubLine, colour::text, -1, true);
+    canvas.put (x, h - 2, L' ', -1, colour::text);
+
+    if (app.hubLine.isEmpty())
+        canvas.text (x + 2, h - 2, L"route in 1-2 > Song \x00b7 route Song > out 1-2 -6 \x00b7 unroute Song > out \x00b7 forget Song \x00b7 start \x00b7 stop",
+                     colour::faint, -1, false, w - x - 3);
+
+    canvas.text (1, h - 1, L"\x2191\x2193 choose \x00b7 [ ] level \x00b7 del takes it out \x00b7 enter runs the line \x00b7 esc back", colour::dim, -1, false, w - 2);
 }
 
 //==============================================================================
@@ -3053,9 +3070,14 @@ void Ui::drawTemplatePicker (App& app)
     }
 
     canvas.text (1, h - 2, "templates live in " + configFolder().getChildFile ("templates").getFullPathName() + L" \x00b7 add your own", colour::faint, -1, false, w - 2);
-    canvas.text (1, h - 1, numRecent > 0 ? L"\x2191\x2193 choose \x00b7 enter open / create \x00b7 type a name for a new session \x00b7 esc quit"
-                                         : L"type name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 esc quit",
-                 colour::dim);
+#if TAW_HUB
+    const juce::String hubKey (L" \x00b7 tab hub");
+#else
+    const juce::String hubKey;
+#endif
+    canvas.text (1, h - 1, (numRecent > 0 ? L"\x2191\x2193 choose \x00b7 enter open / create \x00b7 type a name for a new session \x00b7 esc quit"
+                                          : L"type name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 esc quit") + hubKey,
+                 colour::dim, -1, false, w - 2);
 
     if (app.message.isNotEmpty())
         canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);

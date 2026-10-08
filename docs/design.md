@@ -930,10 +930,15 @@ join it later through virtual devices.
   input to its inputs in order, its outputs 1-2 to the interface's 1-2); after that its routes
   are whatever they've been made. Session to session adds a block. The plan the audio thread
   runs is rebuilt on any change and handed over through a queue like the engine's graphs.
-- **In taw:** `hub` opens the panel (the interface, the sessions with their late blocks, closed
-  ones dim, every route; ↑↓, `[ ]` level, del takes one out). `hub route in 1-2 > Song`,
-  `hub route Song > out 1-2 -6`, `hub unroute Song > out`, `hub forget Song`; `this` is the
-  session here. Channels pair up (one to many spreads, many to one sums, none given: 1-2).
+- **In taw:** the hub has a page of its own (`Mode::Hub`), with or without a session: `taw hub`
+  from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), tab on
+  the start screen, `hub` in a session (which plays on meanwhile). It shows the interface, the
+  sessions with their late blocks (closed ones dim) and every route; ↑↓, `[ ]` level, del takes
+  one out, esc goes back. Its command line takes `route in 1-2 > Song`,
+  `route Song > out 1-2 -6`, `unroute Song > out`, `forget Song`, `start`, `stop` (`hub` in
+  front is fine, and in a session it's needed). `this` is the session here. Channels pair up
+  (one to many spreads, many to one sums, none given: 1-2). A taw with no session open joins
+  with no name and gets no routes until one opens.
 - **The hub going away:** sessions hear it, wait for it, and carry on when it's back (same rate
   and block), without choosing the device again.
 - **Tests:** `taw --hubtest` (an engine and server in process, a thread for the interface, two

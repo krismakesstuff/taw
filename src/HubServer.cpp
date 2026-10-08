@@ -181,7 +181,7 @@ void Server::received (Connection& c, const juce::var& m)
         }
 
         c.name = m["name"].toString();
-        c.key = m["key"].toString().isNotEmpty() ? m["key"].toString() : c.name;
+        c.key = m["key"].toString(); // empty: a taw with no session open (no routes until it has one)
         c.layout.numInputs = juce::jlimit (0, 64, juce::jmin ((int) m["inputs"], sessionInputs (hardwareInputs)));
         c.layout.numOutputs = juce::jlimit (0, 16, (int) m["outputs"]);
         c.layout.blockSize = block;
@@ -225,7 +225,7 @@ void Server::received (Connection& c, const juce::var& m)
     {
         // The session it's playing changed (taw opens its device before the session).
         c.name = m["name"].toString();
-        c.key = m["key"].toString().isNotEmpty() ? m["key"].toString() : c.name;
+        c.key = m["key"].toString(); // empty: a taw with no session open (no routes until it has one)
 
         if (c.joined)
         {
@@ -311,6 +311,9 @@ void Server::received (Connection& c, const juce::var& m)
 // other sessions'). From then on its routes are whatever they've been made.
 void Server::remember (const Connection& c)
 {
+    if (c.key.isEmpty())
+        return;
+
     if (known.contains (c.key))
     {
         names.set (c.key, c.name);
@@ -456,7 +459,9 @@ void Server::rebuild()
         if (! c->joined)
             continue;
 
-        clientOf[c->key] = (int) p->clients.size();
+        if (c->key.isNotEmpty())
+            clientOf[c->key] = (int) p->clients.size();
+
         p->clients.push_back ({ c->region, c->layout, sources });
         sources += c->layout.numOutputs;
     }

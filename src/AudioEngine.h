@@ -3,6 +3,7 @@
 #include "Automation.h"
 #include "Midi.h"
 #include "SpscQueue.h"
+#include "RenderPool.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -512,6 +513,13 @@ public:
     float worstBlockLoad() const noexcept { return worstLoad.load(); }
     void resetBlockLoad() noexcept { lateBlocks.store (0); worstLoad.store (0.0f); }
 
+    // Where a block's time goes (taw --loadtest): each track's share of the last block, in ms,
+    // and the mix's inserts. Off unless a test turns it on; read it between blocks.
+    bool profiling = false;
+    bool parallel = true; // tracks on several cores (taw --paralleltest compares it with one)
+    std::array<double, 256> profileTrackMs {};
+    double profileMixMs = 0.0;
+
     // MIDI: each input port feeds one queue (see MidiInputs). While recording, what the audio
     // thread passed on comes back with the playhead it arrived at.
     std::array<MidiQueue, MidiInputs::maxPorts>& midiInputQueues() { return midiIn; }
@@ -587,7 +595,8 @@ private:
     };
     SpscQueue<Audition, 256> auditions;
     std::array<Audition, 64> blockAuditions;         // this block's, audio thread only
-    std::array<MidiMsg, 512 + 64> mergedMidi;          // a track's live messages plus its auditions
+    static constexpr int mergedMidiSize = 512 + 64;
+    std::vector<MidiMsg> mergedMidi;                   // per track (they render in parallel): its live messages plus its auditions
     std::array<int, maxTracks> auditionsHeld {};      // notes on without their off yet, per track
     std::atomic<int> generation { 0 }, maxBlock { 8192 };
     std::atomic<double> liveRate { 0.0 };
@@ -618,6 +627,23 @@ private:
     std::array<AtomicPeak, 2> masterPeaks;
 
     juce::AudioBuffer<float> scratch; // see audioDeviceAboutToStart
+    juce::AudioBuffer<float> trackScratch; // left and right for each track: they render in parallel, then mix in order
+
+    // A block's tracks render on several cores (RenderPool): each into its own buffers, then
+    // they're mixed one after another, buses after what feeds them.
+    struct Block
+    {
+        const float* const* in;
+        int numIn, n, numLive, numAuditions, numBuses;
+        juce::int64 pos;
+        bool isRolling;
+        HostTransport transport;
+    };
+    Block block {};
+    std::array<int, maxTracks> parallelTracks {};
+    void renderTrack (int t, const Block&) noexcept; // its clips, plugin and inserts, into its buffers
+    void finishTrack (int t, const Block&, float* mixL, float* mixR, const float* silence) noexcept; // mixed, metered, recorded
+    std::unique_ptr<RenderPool> pool;
     juce::AudioBuffer<float> busScratch; // left and right for each bus
     std::array<float*, Graph::maxBuses * 2> busPtrs {};
 

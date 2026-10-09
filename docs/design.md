@@ -950,6 +950,22 @@ are made at 44.1 kHz, or the rate set in `settings` ("New session rate": 44.1, 4
 `timing.log` in the config folder lists each step of the last start and open with how long it
 took (and anything later that held a frame for over 150 ms), to find what made one slow.
 
+### Many cores, and late blocks
+The audio thread doesn't render the tracks alone: every track that isn't a bus renders on
+whichever core is free (one helper thread per spare physical core, at the audio thread's
+priority, MMCSS "Pro Audio" on Windows), each into its own buffers. Then, on the audio thread,
+in order, each is mixed into its bus or the mix, and the buses render once what feeds them is
+in. So a block takes about as long as its slowest track instead of all of them added up.
+`taw --paralleltest` checks it sounds exactly as on one core. Bounces render on their own
+thread, one track after another, as before.
+
+The transport says `load NN%` while playing: the slowest block so far against how long a block
+lasts. A block over 100% is a dropout (a click), counted in red; stopping says how many.
+`taw --loadtest <session> [buffer]` plays a copy of a session without the device, as fast as it
+renders, and prints the load (median, p99, worst), each track's share, and the worst blocks:
+from the start, across the loop wrap, and starting mid-song. The video decoder keeps to two
+threads at low priority so it doesn't crowd the audio.
+
 ## When things go wrong
 
 - **Edits are kept as you go.** `unsaved\session.json` is rewritten after every change (until you

@@ -119,6 +119,7 @@ public:
     // UI loop would.
     bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning() || ! pluginQueue.empty(); }
     void pumpBackgroundWork();
+    void buildPlayback() { rebuildGraph(); } // headless: the live graph now (its plugins queue to load)
     void pressKey (const Key& k) { handleKey (k); } // as if typed (taw --exec ":key o")
     juce::String screenText (int w, int h) { return ui.snapshot (*this, w, h); }
 

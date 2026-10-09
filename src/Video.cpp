@@ -1,4 +1,4 @@
-#include "Video.h"
+﻿#include "Video.h"
 
 #if JUCE_WINDOWS
  #define WIN32_LEAN_AND_MEAN
@@ -214,7 +214,8 @@ bool VideoDecoder::open (const juce::File& file, juce::String& error)
         return fail ("can't decode");
 
     // Frame threads: more frames a second, and a few frames' delay that only a seek notices.
-    d->codec->thread_count = juce::jlimit (1, 8, juce::SystemStats::getNumCpus());
+    // Two at most: more crowd the cores the audio needs (a picture to score to is small work).
+    d->codec->thread_count = 2;
     d->codec->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
 
     if (avcodec_open2 (d->codec, decoder, nullptr) < 0)
@@ -798,7 +799,7 @@ struct VideoPlayer::Impl final : private juce::Thread
         file = f;
         window.setName (f.getFileName() + juce::String (L" \x00b7 taw"));
         view.resized(); // the new picture's shape
-        startThread();
+        startThread (juce::Thread::Priority::low); // the audio comes first
         return true;
     }
 

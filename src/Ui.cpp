@@ -3014,7 +3014,7 @@ void Ui::drawTemplatePicker (App& app)
     const auto at = app.bouncePlaySeconds();
 
     areaHeading (canvas, leftX, y, "recent sessions", app.pickArea == Area::sessions);
-    areaHeading (canvas, rightX, y, "bounces", app.pickArea == Area::bounces);
+    areaHeading (canvas, rightX, y, "recent bounces", app.pickArea == Area::bounces);
 
     for (int r = 0; r <= listRows; ++r)
         canvas.put (rightX - 2, y + r, L'\x2502', colour::faint);

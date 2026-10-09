@@ -659,6 +659,8 @@ private:
     void renderTrack (int t, const Block&) noexcept; // its clips, plugin and inserts, into its buffers
     void finishTrack (int t, const Block&, float* mixL, float* mixR, const float* silence) noexcept; // mixed, metered, recorded
     std::unique_ptr<RenderPool> pool;
+    int poolWorkers = 0;                  // one per spare core, at most 7
+    juce::AudioWorkgroup deviceWorkgroup; // the device's, for the pool's workers (macOS)
     juce::AudioBuffer<float> busScratch; // left and right for each bus
     std::array<float*, Graph::maxBuses * 2> busPtrs {};
 

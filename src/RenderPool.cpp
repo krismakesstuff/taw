@@ -9,6 +9,11 @@
  #include <windows.h>
  #include <avrt.h>
  #pragma comment(lib, "avrt.lib")
+#elif defined(__APPLE__)
+ #include <mach/mach.h>
+ #include <mach/mach_time.h>
+ #include <mach/thread_policy.h>
+ #include <pthread.h>
 #endif
 
 #if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
@@ -20,10 +25,11 @@
 
 namespace taw
 {
-void RenderPool::start (int numWorkers)
+void RenderPool::start (int numWorkers, const Timing& t)
 {
     stop();
     quit.store (false);
+    timing = t;
 
     for (int i = 0; i < std::clamp (numWorkers, 0, 32); ++i)
         workers.emplace_back ([this] { work(); });
@@ -52,10 +58,31 @@ void RenderPool::work() noexcept
         AvSetMmThreadPriority (h, AVRT_PRIORITY_HIGH);
     else
         SetThreadPriority (GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+#elif defined(__APPLE__)
+    // As the audio thread: real time with a block's length as the period (as JUCE's real-time
+    // threads, with only a period), then in its workgroup, as Apple asks of an audio thread's
+    // helpers. Without a device (tests), normal priority.
+    juce::WorkgroupToken token;
+
+    if (timing.rate > 0.0 && timing.blockSize > 0)
+    {
+        mach_timebase_info_data_t base {};
+        mach_timebase_info (&base);
+        const auto period = (uint32_t) ((double) timing.blockSize / timing.rate * 1.0e9 * base.denom / base.numer);
+
+        thread_time_constraint_policy_data_t policy { period, period, period, true };
+        thread_policy_set (pthread_mach_thread_np (pthread_self()), THREAD_TIME_CONSTRAINT_POLICY,
+                           (thread_policy_t) &policy, THREAD_TIME_CONSTRAINT_POLICY_COUNT);
+
+        if (timing.workgroup)
+            timing.workgroup.join (token);
+    }
 #endif
 
 #if defined(__SSE__) || defined(_M_X64) || defined(_M_IX86)
     _mm_setcsr (_mm_getcsr() | 0x8040); // denormals flushed to zero, like the audio thread
+#elif defined(__aarch64__) || defined(_M_ARM64)
+    juce::FloatVectorOperations::disableDenormalisedNumberSupport(); // FPCR's flush to zero
 #endif
 
     for (;;)

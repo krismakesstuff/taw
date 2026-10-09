@@ -46,9 +46,11 @@ AudioEngine::AudioEngine()
     diskThread.startThread (juce::Thread::Priority::high);
     mergedMidi.resize ((size_t) maxTracks * mergedMidiSize);
 
-    // Helpers for the audio thread, one per spare core (the audio thread is the other).
+    // Helpers for the audio thread, one per spare core (the audio thread is the other). They
+    // start again with each device, for its timing (startRunning).
     pool = std::make_unique<RenderPool>();
-    pool->start (juce::jlimit (0, 7, juce::SystemStats::getNumPhysicalCpus() - 1));
+    poolWorkers = juce::jlimit (0, 7, juce::SystemStats::getNumPhysicalCpus() - 1);
+    pool->start (poolWorkers);
 
     deviceManager.addAudioCallback (this);
 }
@@ -278,11 +280,13 @@ std::vector<FinishedTake> AudioEngine::poll()
 //==============================================================================
 void AudioEngine::audioDeviceAboutToStart (juce::AudioIODevice* device)
 {
+    deviceWorkgroup = device->getWorkgroup(); // macOS: the render pool's workers join it
     startRunning (device->getCurrentSampleRate(), device->getCurrentBufferSizeSamples(), device->getActiveInputChannels().countNumberOfSetBits());
 }
 
 void AudioEngine::runWithoutDevice (double rate, int bufferSize, int inputs)
 {
+    deviceWorkgroup = {};
     startRunning (rate, bufferSize, inputs);
 }
 
@@ -293,6 +297,17 @@ void AudioEngine::renderWithoutDevice (float* const* out, int numOut, int numSam
 
 void AudioEngine::startRunning (double rate, int bufferSize, int inputs)
 {
+    // The workers again, for this device's timing (the audio callback isn't running yet). A
+    // workgroup can say how many threads it takes at once, the audio thread among them.
+#if JUCE_MAC
+    int workers = poolWorkers;
+
+    if (const auto most = deviceWorkgroup ? (int) deviceWorkgroup.getMaxParallelThreadCount() : 0; most > 0)
+        workers = juce::jmin (workers, most - 1);
+
+    pool->start (workers, { rate, bufferSize, deviceWorkgroup });
+#endif
+
     const auto blockSize = juce::jmax (bufferSize * 2, 8192);
     scratch.setSize (5, blockSize); // [0] (unused), [1] silence, [2] mix L, [3] mix R, [4] (unused)
     scratch.clear();

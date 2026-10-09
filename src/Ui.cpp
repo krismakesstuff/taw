@@ -2817,7 +2817,7 @@ void Ui::drawHubPage (App& app)
         if ((int) s["apps"] == 0)
             canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
         else
-            canvas.text (1, y + 1, L"an app set to taw 1 plays into taw1out (a row) and hears taw1in (a column)",
+            canvas.text (1, y + 1, L"rows come in, columns go out \x00b7 an app on taw 1 plays to taw1in, hears taw1out",
                          colour::dim, -1, false, w - 2);
 
         y += 3;
@@ -2837,7 +2837,7 @@ void Ui::drawHubPage (App& app)
         canvas.text (labelW - 5, top, L"to \x2192", colour::faint);
         canvas.text (1, top + 1, L"from \x2193", colour::faint);
 
-        // The columns' heads: a name, and under it what part of it ("1-2", "mic", "in").
+        // The columns' heads: a name, and under it what part of it ("out 1-2", "as mic", "→ track").
         for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
         {
             const auto& c = cols[(size_t) (firstCol + i)];

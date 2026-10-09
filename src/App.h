@@ -256,8 +256,8 @@ public:
     double hubAskedAt = 0.0;     // when, to ask again now and then while the page is up
     void refreshHub (bool now);
     juce::String hubEndName (const juce::String& key, int channel, bool source) const;
-    // An app device as a source, "taw1out" (what apps play out to taw 1), or as a destination,
-    // "taw1in" (what they hear from it); "Zoom" if it's named so.
+    // An app device as the hub sees it: as a source "taw1in" (what apps play to taw 1 comes in),
+    // as a destination "taw1out" (what goes out to apps hearing it); "Zoom" if it's named so.
     juce::String hubAppName (const juce::String& key, bool source) const;
     bool hubAppNamed (const juce::String& key) const;
     juce::String hubHardware (bool output) const; // the hub's interface that way: "MacBook Pro Speakers"

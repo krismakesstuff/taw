@@ -106,7 +106,7 @@ juce::String App::hubEndName (const juce::String& key, int channel, bool source)
 juce::String App::hubAppName (const juce::String& key, bool source) const
 {
     const auto label = hubStatus["labels"][juce::Identifier (key)].toString();
-    return label.isNotEmpty() ? label : "taw" + juce::String (hub::appNumber (key)) + (source ? "out" : "in");
+    return label.isNotEmpty() ? label : "taw" + juce::String (hub::appNumber (key)) + (source ? "in" : "out");
 }
 
 bool App::hubAppNamed (const juce::String& key) const
@@ -170,7 +170,8 @@ Result App::hubRoute (const juce::String& spec, bool add)
             }
         }
 
-        // As the page names them: "taw2out" (a source), "taw2in" (a destination), as "taw 2".
+        // As the page names them, from the hub's side: "taw2in" (a source: what apps play to
+        // taw 2 comes in), "taw2out" (a destination: out to apps hearing it), as "taw 2".
         if (const auto t = tokens[0].toLowerCase(); t.startsWith ("taw") && (t.endsWith ("out") || t.endsWith ("in")))
         {
             const bool out = t.endsWith ("out");
@@ -178,10 +179,10 @@ Result App::hubRoute (const juce::String& spec, bool add)
 
             if (n.length() == 1 && n.containsOnly ("123456789"))
             {
-                if (out != source)
+                if (out == source)
                 {
-                    error = tokens[0] + (out ? L" is what apps play out \x2014 a destination is taw" + n + "in"
-                                             : L" is what apps hear \x2014 a source is taw" + n + "out");
+                    error = tokens[0] + (out ? L" goes out to apps \x2014 a source is taw" + n + "in"
+                                             : L" comes in from apps \x2014 a destination is taw" + n + "out");
                     return {};
                 }
 
@@ -208,7 +209,7 @@ Result App::hubRoute (const juce::String& spec, bool add)
 
             if (tokens.size() > 3 || e.last > 2 || (c.isNotEmpty() && e.first < 1))
             {
-                error = L"an app device has 2 channels \x00b7 taw1out, taw1out L, taw1in 2";
+                error = L"an app device has 2 channels \x00b7 taw1in, taw1in L, taw1out 2";
                 return {};
             }
 
@@ -336,7 +337,7 @@ Result App::hubRoute (const juce::String& spec, bool add)
     const auto describe = [this] (const End& e, int first, int last, bool source)
     {
         if (hub::appNumber (e.key) > 0 && first == 1 && last == 2)
-            return hubAppName (e.key, source); // both sides: "taw1out", not "taw1out L-2"
+            return hubAppName (e.key, source); // both sides: "taw1in", not "taw1in L-2"
 
         auto s = hubEndName (e.key, first, source);
         return last > first ? s + "-" + juce::String (last) : s;
@@ -555,7 +556,7 @@ std::vector<App::HubEnd> App::hubRows() const
         const auto key = "taw " + juce::String (n);
         const auto it = hubUsers.find (key);
         const auto playing = it != hubUsers.end() ? it->second.playing.joinIntoString (", ") : juce::String();
-        const auto named = hubAppNamed (key) ? "taw" + juce::String (n) + "out " : juce::String();
+        const auto named = hubAppNamed (key) ? "taw" + juce::String (n) + "in " : juce::String();
         rows.push_back ({ key, 1, 2, hubAppName (key, true), named + (playing.isNotEmpty() ? L"\x25c2 " + playing : juce::String ("no app")), false, true });
     }
 
@@ -584,13 +585,13 @@ std::vector<App::HubEnd> App::hubCols() const
         const bool heard = it != hubUsers.end() && ! it->second.listening.isEmpty();
         // Named, its second line says which device it is; else who hears it, if anyone.
         cols.push_back ({ key, 1, 2, hubAppName (key, false),
-                          heard ? L"\x25b8" + it->second.listening[0] : hubAppNamed (key) ? "taw" + juce::String (n) + "in" : juce::String ("as mic"),
+                          heard ? L"\x25b8" + it->second.listening[0] : hubAppNamed (key) ? "taw" + juce::String (n) + "out" : juce::String ("as mic"),
                           false, true });
     }
 
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
-            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), "in", true, (bool) s["connected"] });
+            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), L"\x2192 track", true, (bool) s["connected"] });
 
     return cols;
 }

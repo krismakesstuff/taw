@@ -225,7 +225,7 @@ struct Graph
 
     int latency = 0; // delay compensation: how late everything reaches the mix, in samples
 
-    bool recording = false; // loops are ignored while recording (for now)
+    bool recording = false; // looping while recording: each pass is a take (App splits them)
     bool loop = false;
     juce::int64 loopStart = 0, loopEnd = 0;
     juce::uint64 serial = 0; // assigned by setGraph
@@ -497,6 +497,7 @@ public:
     bool isRolling() const noexcept { return rolling.load(); }
     juce::int64 countInRemaining() const noexcept { return rolling.load() ? countInLeft.load() : 0; } // samples
     juce::int64 playhead() const noexcept { return playPos.load(); }
+    int loopWrapCount() const noexcept { return loopWraps.load(); } // times the loop wrapped since play started
 
     // Where the playhead is going: a seek not yet applied by the audio thread, else the playhead.
     // Moves start from here so quick repeated key presses add up.
@@ -635,6 +636,7 @@ private:
     static void smooth (std::atomic<float>& average, std::atomic<float>* peak, float value, double blockSeconds) noexcept;
     std::atomic<float> worstLoad { 0.0f };
     std::atomic<juce::int64> playPos { 0 }, seekTo { -1 }, countInLeft { 0 };
+    std::atomic<int> loopWraps { 0 };
     std::atomic<int> numInputs { 0 };
 
     std::array<AtomicPeak, maxInputs> inputPeaks;

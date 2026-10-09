@@ -760,6 +760,7 @@ Result App::changeLane (int trackIndex, int index, const juce::String& param)
     lanes[(size_t) index] = param;
     setLaneList (track, lanes);
     track.setProperty (ids::lanes, true, nullptr);
+    closePlaylistLanes (track);
     focusTrack (trackIndex < 0 ? session->numTracks() : trackIndex);
     focusedLane = index;
 
@@ -781,7 +782,7 @@ juce::String App::focusedLaneParam()
     const auto lanes = lanesShown (ioTrack());
 
     if (lanes.empty())
-        return (focusedLane = -1), juce::String();
+        return (focusedLane = lanesUnder (ioTrack()) > 0 ? focusedLane : -1), juce::String(); // a playlist lane is no automation lane
 
     focusedLane = juce::jmin (focusedLane, (int) lanes.size() - 1); // undo can take lanes away
     return lanes[(size_t) focusedLane];
@@ -802,6 +803,7 @@ Result App::showLane (int trackIndex, const juce::String& param)
 
     setLaneList (track, lanes);
     track.setProperty (ids::lanes, true, nullptr); // open: a view, not an edit
+    closePlaylistLanes (track);
     focusTrack (trackIndex < 0 ? session->numTracks() : trackIndex);
     focusedLane = (int) (std::find (lanes.begin(), lanes.end(), param) - lanes.begin());
 
@@ -881,6 +883,9 @@ Result App::toggleLanes()
     auto track = automationOwner (who);
     const bool open = ! (bool) track[ids::lanes];
     track.setProperty (ids::lanes, open, nullptr); // a view, not an edit
+
+    if (open)
+        closePlaylistLanes (track); // automation or playlists under a track, never both
 
     if (! open)
     {

@@ -1027,7 +1027,9 @@ void Ui::drawTimeline (App& app)
     const int masterY = h - 6 - (int) mixLanes.size() * laneRows, tracksBottom = masterY - 1; // exclusive
     const int rowsPerTrack = fill ? std::max (1, tracksBottom - tracksTop) : s.trackHeight(); // "height", per session
     auto lanesOf = [&] (int track) { return fill ? std::vector<juce::String>() : app.lanesShown (track); };
-    auto blockRows = [&] (int track) { return rowsPerTrack + (int) lanesOf (track).size() * laneRows; };
+    // Open playlists go under their track instead, each as tall as the track.
+    auto playlistsOf = [&] (int track) { return fill ? std::vector<juce::ValueTree>() : app.playlistsShown (track); };
+    auto blockRows = [&] (int track) { return rowsPerTrack + (int) lanesOf (track).size() * laneRows + (int) playlistsOf (track).size() * rowsPerTrack; };
 
     // How many tracks fit from scroll on (at least one, cut short if it must be).
     auto fitFrom = [&] (int scroll)
@@ -1079,6 +1081,10 @@ void Ui::drawTimeline (App& app)
 
         for (int lane = 0; lane < (int) lanesOf (track).size(); ++lane)
             for (int r = 0; r < laneRows; ++r)
+                laneMap.rows.push_back ({ track, lane });
+
+        for (int lane = 0; lane < (int) playlistsOf (track).size(); ++lane)
+            for (int r = 0; r < rowsPerTrack; ++r)
                 laneMap.rows.push_back ({ track, lane });
     }
 
@@ -1202,7 +1208,7 @@ void Ui::drawTimeline (App& app)
     // Instrument tracks: each note a bar at its pitch. The lane spans the pitches in use, one per
     // half row when they fit (an octave or so in a short track) and sharing rows when they
     // don't. In fill view each row is one pitch, named on the left: a piano roll.
-    auto drawNotes = [&] (int i, const juce::ValueTree& t, int y, int laneBg, int panelBg, bool rowInTimeSelection)
+    auto drawNotes = [&] (int i, const juce::ValueTree& t, int y, int laneBg, int panelBg, bool rowInTimeSelection, bool live)
     {
         struct LaneNote
         {
@@ -1218,7 +1224,7 @@ void Ui::drawTimeline (App& app)
             notes.push_back ({ p.start * spb, p.end * spb, (int) p.node[ids::pitch], false });
 
         // The clips, in samples. The one a pass is recording into reaches to the playhead.
-        const bool recordingHere = std::find (app.midiRecordTracks.begin(), app.midiRecordTracks.end(), i) != app.midiRecordTracks.end();
+        const bool recordingHere = live && std::find (app.midiRecordTracks.begin(), app.midiRecordTracks.end(), i) != app.midiRecordTracks.end();
         const auto passClip = recordingHere && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
         std::vector<std::pair<double, double>> clipSpans;
 
@@ -1416,7 +1422,8 @@ void Ui::drawTimeline (App& app)
         };
 
         canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);
-        canvas.text (4, y, padRight (t[ids::name].toString(), 10), colour::text, bg);
+        // The main playlist's name, as Pro Tools shows it (the track's own until there are others).
+        canvas.text (4, y, padRight (Session::mainPlaylistName (t), 10), colour::text, bg);
 
         const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y;
         auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, flagY, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
@@ -1462,189 +1469,206 @@ void Ui::drawTimeline (App& app)
             chip (text, input + (stereo ? 1 : 0) > app.engine.numInputChannels() ? colour::error : typeColour);
         }
 
-        // Lane
-        struct LaneClip
+        // Lane: the track's clips at rowY, or (live false) one of its playlists in a lane under it,
+        // without what's recording.
+        auto drawContent = [&] (const juce::ValueTree& source, int rowY, int laneBg, bool rowInTimeSelection, bool live)
         {
-            const ClipData* data;
-            juce::int64 start, offset, length;
-        };
-
-        std::vector<LaneClip> laneClips;
-        std::vector<std::pair<double, float>> laneHits; // sample tracks: (position in samples, velocity)
-        std::vector<std::pair<double, double>> hitSpans;  // ...and their clips, in samples
-
-        if (sampleTrack)
-        {
-            for (const auto& h : Session::placedHits (t))
-                laneHits.push_back ({ h.beat * s.samplesPerBeat(), h.vel });
-
-            std::sort (laneHits.begin(), laneHits.end());
-
-            // The clip a pass is recording into reaches to the playhead.
-            const auto passClip = app.recording && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
-
-            for (const auto& c : Session::hitClips (t))
-                hitSpans.push_back ({ (double) c[ids::beat] * s.samplesPerBeat(),
-                                      std::max (Session::clipEnd (c) * s.samplesPerBeat(), c == passClip ? (double) playhead : 0.0) });
-        }
-        else
-        {
-            for (const auto& c : Session::clips (t))
-                if (auto it = app.clips.find (c[ids::file].toString()); it != app.clips.end())
-                    laneClips.push_back ({ &it->second, (juce::int64) c[ids::start], (juce::int64) c[ids::offset], (juce::int64) c[ids::length] });
-        }
-
-        const LiveTake* liveTake = nullptr;
-
-        for (const auto& l : app.live)
-            if (l.recorder->trackIndex == i && l.start >= 0)
-                liveTake = &l;
-
-        if (instrumentTrack)
-            drawNotes (i, t, y, laneBg, bg, rowInTimeSelection);
-        else
-        {
-            for (int c = 0; c < laneW; ++c)
+            struct LaneClip
             {
-                const auto t0 = origin + c * spc, t1 = t0 + spc;
-                wchar_t ch = L' ';
-                int fg = colour::wave, cellBg = laneBg;
-                bool inClip = false;
-                std::optional<WavePoint> wave; // a clip or take here: drawn per row by waveCell
-                wchar_t edgeCh = 0;            // a clip's first or last column
+                const ClipData* data;
+                juce::int64 start, offset, length;
+            };
 
-                const auto line = gridLevel (t0, t1);
+            std::vector<LaneClip> laneClips;
+            std::vector<std::pair<double, float>> laneHits; // sample tracks: (position in samples, velocity)
+            std::vector<std::pair<double, double>> hitSpans;  // ...and their clips, in samples
 
-                if (line > 0)
+            if (sampleTrack)
+            {
+                for (const auto& h : Session::placedHits (source))
+                    laneHits.push_back ({ h.beat * s.samplesPerBeat(), h.vel });
+
+                std::sort (laneHits.begin(), laneHits.end());
+
+                // The clip a pass is recording into reaches to the playhead.
+                const auto passClip = live && app.recording && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
+
+                for (const auto& c : Session::hitClips (source))
+                    hitSpans.push_back ({ (double) c[ids::beat] * s.samplesPerBeat(),
+                                          std::max (Session::clipEnd (c) * s.samplesPerBeat(), c == passClip ? (double) playhead : 0.0) });
+            }
+            else
+            {
+                for (const auto& c : Session::clips (source))
+                    if (auto it = app.clips.find (c[ids::file].toString()); it != app.clips.end())
+                        laneClips.push_back ({ &it->second, (juce::int64) c[ids::start], (juce::int64) c[ids::offset], (juce::int64) c[ids::length] });
+            }
+
+            const LiveTake* liveTake = nullptr;
+
+            for (const auto& l : app.live)
+                if (live && l.recorder->trackIndex == i && l.start >= 0)
+                    liveTake = &l;
+
+            if (instrumentTrack)
+                drawNotes (i, source, rowY, laneBg, bg, rowInTimeSelection, live);
+            else
+            {
+                for (int c = 0; c < laneW; ++c)
                 {
-                    ch = gridMark;
-                    fg = line == 2 ? colour::gridBar : colour::faint;
-                }
+                    const auto t0 = origin + c * spc, t1 = t0 + spc;
+                    wchar_t ch = L' ';
+                    int fg = colour::wave, cellBg = laneBg;
+                    bool inClip = false;
+                    std::optional<WavePoint> wave; // a clip or take here: drawn per row by waveCell
+                    wchar_t edgeCh = 0;            // a clip's first or last column
 
-                // Sample tracks read as a step sequencer: every column is a step, a hit shows its
-                // velocity as a shade, an empty step a faint dot (a grid mark on grid lines).
-                if (sampleTrack)
-                {
-                    ch = line > 0 ? gridMark : L'\x00b7';
-                    fg = line == 2 ? colour::dim : line == 1 ? colour::gridBar : colour::faint;
+                    const auto line = gridLevel (t0, t1);
 
-                    // Inside a clip: its shade (neighbours alternate) and an outline, top and
-                    // bottom, so a loop reads as one block.
-                    for (int k = (int) hitSpans.size(); --k >= 0;)
-                        if (t1 > hitSpans[(size_t) k].first + 0.5 && t0 < hitSpans[(size_t) k].second - 0.5)
+                    if (line > 0)
+                    {
+                        ch = gridMark;
+                        fg = line == 2 ? colour::gridBar : colour::faint;
+                    }
+
+                    // Sample tracks read as a step sequencer: every column is a step, a hit shows its
+                    // velocity as a shade, an empty step a faint dot (a grid mark on grid lines).
+                    if (sampleTrack)
+                    {
+                        ch = line > 0 ? gridMark : L'\x00b7';
+                        fg = line == 2 ? colour::dim : line == 1 ? colour::gridBar : colour::faint;
+
+                        // Inside a clip: its shade (neighbours alternate) and an outline, top and
+                        // bottom, so a loop reads as one block.
+                        for (int k = (int) hitSpans.size(); --k >= 0;)
+                            if (t1 > hitSpans[(size_t) k].first + 0.5 && t0 < hitSpans[(size_t) k].second - 0.5)
+                            {
+                                cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
+                                inClip = true;
+                                break;
+                            }
+
+                        auto it = std::lower_bound (laneHits.begin(), laneHits.end(), std::make_pair (t0 - 0.5, 0.0f));
+                        float vel = -1.0f;
+
+                        for (; it != laneHits.end() && it->first < t1 - 0.5; ++it)
+                            vel = std::max (vel, it->second);
+
+                        if (vel >= 0.0f)
                         {
+                            ch = vel >= 0.95f ? L'\x2588' : vel >= 0.7f ? L'\x2593' : vel >= 0.4f ? L'\x2592' : L'\x2591';
+                            fg = colour::hit;
+
+                            if (! inClip)
+                                cellBg = colour::clipBg;
+                        }
+                    }
+
+                    // The topmost clip in this column (later clips play over earlier ones). Neighbouring
+                    // clips alternate shades so each hit reads as its own block.
+                    for (int k = (int) laneClips.size(); --k >= 0;)
+                    {
+                        const auto& lc = laneClips[(size_t) k];
+                        const auto start = (double) lc.start, end = start + (double) lc.length;
+
+                        if (t1 > start && t0 < end)
+                        {
+                            const auto fileZero = lc.start - lc.offset; // timeline position of the file's first sample
+                            wave = waveRange (lc.data->overview, lc.data->audio.get(), fileZero, std::max (t0, start), std::min (t1, end));
+                            fg = colour::wave;
                             cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
                             inClip = true;
+
+                            // An outline (edges here, top and bottom lines below), so a clip's length
+                            // shows against empty space even where it's silent. Clips only a column or
+                            // two wide keep their waveform instead of edges.
+                            if (end - start >= 3.0 * spc)
+                            {
+                                if (start >= t0 && start < t1)
+                                    edgeCh = edges ? L'\x258f' : L'\x258c';
+                                else if (end > t0 && end <= t1)
+                                    edgeCh = edges ? L'\x2595' : L'\x2590';
+                            }
                             break;
                         }
-
-                    auto it = std::lower_bound (laneHits.begin(), laneHits.end(), std::make_pair (t0 - 0.5, 0.0f));
-                    float vel = -1.0f;
-
-                    for (; it != laneHits.end() && it->first < t1 - 0.5; ++it)
-                        vel = std::max (vel, it->second);
-
-                    if (vel >= 0.0f)
-                    {
-                        ch = vel >= 0.95f ? L'\x2588' : vel >= 0.7f ? L'\x2593' : vel >= 0.4f ? L'\x2592' : L'\x2591';
-                        fg = colour::hit;
-
-                        if (! inClip)
-                            cellBg = colour::clipBg;
                     }
-                }
 
-                // The topmost clip in this column (later clips play over earlier ones). Neighbouring
-                // clips alternate shades so each hit reads as its own block.
-                for (int k = (int) laneClips.size(); --k >= 0;)
-                {
-                    const auto& lc = laneClips[(size_t) k];
-                    const auto start = (double) lc.start, end = start + (double) lc.length;
-
-                    if (t1 > start && t0 < end)
+                    if (liveTake != nullptr)
                     {
-                        const auto fileZero = lc.start - lc.offset; // timeline position of the file's first sample
-                        wave = waveRange (lc.data->overview, lc.data->audio.get(), fileZero, std::max (t0, start), std::min (t1, end));
-                        fg = colour::wave;
-                        cellBg = k % 2 == 0 ? colour::clipBg : colour::clipAltBg;
-                        inClip = true;
+                        // Loop recording: this pass's part, folded back into the loop.
+                        auto takeStart = liveTake->start;
+                        auto from = (double) takeStart;
+                        const auto recorded = (juce::int64) liveTake->overview.size() * Recorder::overviewBlock;
 
-                        // An outline (edges here, top and bottom lines below), so a clip's length
-                        // shows against empty space even where it's silent. Clips only a column or
-                        // two wide keep their waveform instead of edges.
-                        if (end - start >= 3.0 * spc)
+                        if (const auto pass = app.loopRecEnd - app.loopRecStart; app.loopRecording && pass > 0)
                         {
-                            if (start >= t0 && start < t1)
-                                edgeCh = edges ? L'\x258f' : L'\x258c';
-                            else if (end > t0 && end <= t1)
-                                edgeCh = edges ? L'\x2595' : L'\x2590';
+                            takeStart -= (takeStart - app.loopRecStart + recorded) / pass * pass;
+                            from = std::max ((double) takeStart, (double) app.loopRecStart);
                         }
-                        break;
+
+                        const auto end = (double) (takeStart + recorded);
+
+                        if (t1 > from && t0 < end)
+                        {
+                            wave = waveRange (liveTake->overview, nullptr, takeStart, std::max (t0, from), t1);
+                            edgeCh = 0;
+                            inClip = false;
+                            fg = colour::liveWave;
+                            cellBg = colour::recBg;
+                        }
                     }
-                }
 
-                if (liveTake != nullptr)
-                {
-                    const auto end = (double) liveTake->start + (double) liveTake->overview.size() * Recorder::overviewBlock;
+                    if (rowInTimeSelection && inTimeSelection (t0, t1))
+                        cellBg = (cellBg == colour::clipBg || cellBg == colour::clipAltBg) ? colour::selClipBg : colour::selBg;
 
-                    if (t1 > (double) liveTake->start && t0 < end)
+                    // The playhead and the cursor colour the cell behind what's there, so a clip's edge
+                    // or a hit under them still shows; on an empty cell they're a thin line. The
+                    // playhead wins when they share a column.
+                    const bool playheadHere = rolling && c == playCol;
+                    const bool cursorHere = c == cursorCol && ! playheadHere;
+
+                    for (int r = 0; r < rowsPerTrack; ++r)
                     {
-                        wave = waveRange (liveTake->overview, nullptr, liveTake->start, t0, t1);
-                        edgeCh = 0;
-                        inClip = false;
-                        fg = colour::liveWave;
-                        cellBg = colour::recBg;
-                    }
-                }
+                        const auto cell = edgeCh == 0 && wave ? waveCell (*wave, r) : WaveCell { edgeCh != 0 ? edgeCh : ch, false };
+                        auto rowCh = cell.ch;
+                        auto rowFg = fg;
+                        auto rowBg = cellBg;
+                        const bool empty = ! cell.invert && (rowCh == L' ' || rowCh == gridMark);
 
-                if (rowInTimeSelection && inTimeSelection (t0, t1))
-                    cellBg = (cellBg == colour::clipBg || cellBg == colour::clipAltBg) ? colour::selClipBg : colour::selBg;
+                        if (playheadHere)
+                        {
+                            rowBg = colour::playheadBg;
 
-                // The playhead and the cursor colour the cell behind what's there, so a clip's edge
-                // or a hit under them still shows; on an empty cell they're a thin line. The
-                // playhead wins when they share a column.
-                const bool playheadHere = rolling && c == playCol;
-                const bool cursorHere = c == cursorCol && ! playheadHere;
+                            if (empty)
+                                rowCh = cursorMark, rowFg = app.recording ? colour::rec : colour::play;
+                        }
+                        else if (cursorHere && ! rolling)
+                        {
+                            rowBg = colour::cursorBg;
 
-                for (int r = 0; r < rowsPerTrack; ++r)
-                {
-                    const auto cell = edgeCh == 0 && wave ? waveCell (*wave, r) : WaveCell { edgeCh != 0 ? edgeCh : ch, false };
-                    auto rowCh = cell.ch;
-                    auto rowFg = fg;
-                    auto rowBg = cellBg;
-                    const bool empty = ! cell.invert && (rowCh == L' ' || rowCh == gridMark);
+                            if (empty)
+                                rowCh = cursorMark, rowFg = colour::accent;
+                        }
+                        else if (cursorHere && empty)
+                            rowCh = cursorMark, rowFg = colour::dim; // playing: the cursor is just a mark
 
-                    if (playheadHere)
-                    {
-                        rowBg = colour::playheadBg;
+                        if (cell.invert)
+                            std::swap (rowFg, rowBg);
 
-                        if (empty)
-                            rowCh = cursorMark, rowFg = app.recording ? colour::rec : colour::play;
-                    }
-                    else if (cursorHere && ! rolling)
-                    {
-                        rowBg = colour::cursorBg;
+                        canvas.put (laneX + c, rowY + r, rowCh, rowFg, rowBg);
 
-                        if (empty)
-                            rowCh = cursorMark, rowFg = colour::accent;
-                    }
-                    else if (cursorHere && empty)
-                        rowCh = cursorMark, rowFg = colour::dim; // playing: the cursor is just a mark
-
-                    if (cell.invert)
-                        std::swap (rowFg, rowBg);
-
-                    canvas.put (laneX + c, y + r, rowCh, rowFg, rowBg);
-
-                    // A clip's outline: its top along the first row, its bottom along the last.
-                    if (inClip)
-                    {
-                        canvas.at (laneX + c, y + r).over = r == 0;
-                        canvas.at (laneX + c, y + r).under = r == rowsPerTrack - 1;
+                        // A clip's outline: its top along the first row, its bottom along the last.
+                        if (inClip)
+                        {
+                            canvas.at (laneX + c, rowY + r).over = r == 0;
+                            canvas.at (laneX + c, rowY + r).under = r == rowsPerTrack - 1;
+                        }
                     }
                 }
             }
-        }
+        };
+
+        drawContent (t, y, laneBg, rowInTimeSelection, true);
 
         // A bus lane says what feeds it.
         if (busTrack)
@@ -1745,6 +1769,41 @@ void Ui::drawTimeline (App& app)
 
         for (int r = 0; r < rowsPerTrack; ++r)
             drawMeter (meterX + 6, y + r, 5, m.level, colour::meterBg);
+
+        // Playlists (shift+P), under the track as tall as it: each one's clips, and on the left
+        // its number (pl <n>), its name, and S lit while it's soloed in the main's place.
+        const auto playlists = playlistsOf (i);
+
+        for (int k = 0; k < (int) playlists.size(); ++k)
+        {
+            const auto& p = playlists[(size_t) k];
+            const int py = y + rowsPerTrack * (k + 1);
+            const bool focusedLane = focusedRow && app.focusedLane == k;
+            const int pbg = focusedLane ? colour::focusBg : -1;
+            const bool lastLane = k == (int) playlists.size() - 1;
+            const bool soloed = p[ids::solo];
+
+            for (int r = 0; r < rowsPerTrack; ++r)
+            {
+                canvas.fill (0, py + r, leftW, L' ', -1, pbg);
+                canvas.fill (meterX, py + r, meterPanel, L' ', -1, pbg);
+
+                if (io)
+                    canvas.fill (ioX, py + r, ioPanel, L' ', -1, pbg);
+
+                borders (py + r);
+                canvas.put (0, py + r, focusedLane && r == 0 ? L'\x25b8' : L'\x2502', focusedLane ? colour::accent : colour::faint, pbg);
+                canvas.put (2, py + r, r == 0 ? (lastLane ? L'\x2514' : L'\x251c') : (lastLane ? L' ' : L'\x2502'), colour::faint, pbg);
+            }
+
+            canvas.text (4, py, juce::String (k + 1), colour::dim, pbg);
+            canvas.text (4 + juce::String (k + 1).length() + 1, py, p[ids::name].toString(), focusedLane ? colour::text : colour::dim, pbg, focusedLane,
+                         leftW - 10 - juce::String (k + 1).length());
+            canvas.put (leftW - 3, py, soloed ? L'S' : L'\x00b7', soloed ? colour::play : colour::faint, pbg, soloed);
+
+            // The selection lights the lane you're on (its edits go to it).
+            drawContent (p, py, focusedLane ? colour::laneFocusBg : selectedRow ? colour::laneSelBg : -1, timeSel && (focusedLane || app.onTopLane()), false);
+        }
     }
 
     // Automation lanes, under the tracks that have them open: the curve as a filled graph (8
@@ -2155,6 +2214,10 @@ void Ui::drawHelp (App& app)
             { Pair, L"sel clip", L"select the clip here", L"snap 50", L"quantize hits (50%)" },
             { Pair, L"alt+shift+3", L"consolidate (cons)", L"alt+/", L"toggle a hit at cursor" },
             { Note, L"Automation goes with the clips: copy, cut, paste and duplicate carry it." },
+            { Pair, L"ctrl+p", L"new playlist (empty)", L"shift+P", L"playlists as lanes" },
+            { Pair, L"ctrl+alt+p", L"copy of the main", L"shift+S lane", L"plays in the main's place" },
+            { Pair, L"pl  pl 2", L"list / make it the main", L"alt+shift+\x2191", L"lane's selection to main" },
+            { Note, L"Loop on, recording: each pass a take, the last on the main." },
         } },
         { L"PLUGINS", {
             { Heading, L"INSTRUMENTS", nullptr, L"EFFECTS & ROUTING", nullptr },

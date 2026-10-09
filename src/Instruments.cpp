@@ -779,8 +779,7 @@ void App::drainRecordedMidi()
         if (session == nullptr || midiRecordTracks.empty())
             continue;
 
-        const auto spb = session->samplesPerBeat();
-        const auto played = juce::jmax (0.0, (double) heardPosition (m.pos) / spb);
+        const auto played = recordedBeat (m.pos, m.wraps);
         const auto& msg = m.msg;
         const int key = msg.channel() * 128 + msg.d1;
 
@@ -860,7 +859,7 @@ void App::finishHeldNotes (juce::int64 at)
 
     if (session != nullptr)
     {
-        const auto endBeat = juce::jmax (0.0, (double) heardPosition (at) / session->samplesPerBeat());
+        const auto endBeat = recordedBeat (at, engine.loopWrapCount());
 
         if (! heldNotes.empty())
         {

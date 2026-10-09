@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "stats", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -776,6 +776,16 @@ Result App::execute (const juce::String& line)
 
     // Automation: "2 lane cutoff" puts a lane for a parameter under track 2 (and goes to it);
     // "pt -6" puts a point at the cursor (or the selection at that level) on the lane you're on.
+    // Playlists: "pl" lists the focused track's; "pl new", "pl copy"; "pl 2" makes one the main;
+    // "pl del" deletes the one you're on. "3 pl ..." does it on track 3.
+    if (v == "pl")
+    {
+        if (p.hasSelector && ! p.tracks.empty() && p.tracks.front() != focused)
+            focusTrack (p.tracks.front());
+
+        return playlistCommand (p.args);
+    }
+
     if (v == "lane")
     {
         if (p.hasSelector && ! p.tracks.empty())

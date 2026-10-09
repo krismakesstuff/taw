@@ -10,6 +10,7 @@
 #include "Plugins.h"
 #include "Console.h"
 #include "Session.h"
+#include "SystemStats.h"
 #include "Timing.h"
 #include "Ui.h"
 #include "Video.h"
@@ -119,6 +120,7 @@ public:
     // UI loop would.
     bool hasBackgroundWork() const { return import != nullptr || bounce != nullptr || plugins.isScanning() || ! pluginQueue.empty(); }
     void pumpBackgroundWork();
+    void buildPlayback() { rebuildGraph(); } // headless: the live graph now (its plugins queue to load)
     void pressKey (const Key& k) { handleKey (k); } // as if typed (taw --exec ":key o")
     juce::String screenText (int w, int h) { return ui.snapshot (*this, w, h); }
 
@@ -231,7 +233,7 @@ public:
         juce::File bounceFile;
     };
     std::unique_ptr<Closing> closing;
-    void startClosing (bool thenQuit, bool save);
+    void startClosing (bool thenQuit, bool save, bool bounce = true); // bounce: last-saved, when it saves
     void stepClosing();
     Result finishClosing (std::optional<bool> saved = {}); // saved: a close that asked (true: it saved)
 
@@ -293,6 +295,14 @@ public:
     // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
     // opened, and the last message it sent, to see a controller is getting through.
     Result toggleMidiPanel();
+    // "stats": how hard the machine is working as you build the session: the audio's load,
+    // the CPU and memory, and each track's share (the heavy ones first). Keys go on to the
+    // session (space plays) except esc, which closes it.
+    Result toggleStats();
+    bool statsVisible = false;
+    bool handleStatsKey (const Key&);
+    SystemStats system; // sampled about once a second
+    double systemSampledAt = 0.0;
     bool midiPanelVisible = false;
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);

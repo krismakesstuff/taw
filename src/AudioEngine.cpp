@@ -44,6 +44,12 @@ AudioEngine::AudioEngine()
 {
     formatManager.registerBasicFormats();
     diskThread.startThread (juce::Thread::Priority::high);
+    mergedMidi.resize ((size_t) maxTracks * mergedMidiSize);
+
+    // Helpers for the audio thread, one per spare core (the audio thread is the other).
+    pool = std::make_unique<RenderPool>();
+    pool->start (juce::jlimit (0, 7, juce::SystemStats::getNumPhysicalCpus() - 1));
+
     deviceManager.addAudioCallback (this);
 }
 
@@ -288,8 +294,9 @@ void AudioEngine::renderWithoutDevice (float* const* out, int numOut, int numSam
 void AudioEngine::startRunning (double rate, int bufferSize, int inputs)
 {
     const auto blockSize = juce::jmax (bufferSize * 2, 8192);
-    scratch.setSize (5, blockSize); // [0] track L, [1] silence, [2] mix L, [3] mix R, [4] track R
+    scratch.setSize (5, blockSize); // [0] (unused), [1] silence, [2] mix L, [3] mix R, [4] (unused)
     scratch.clear();
+    trackScratch.setSize (maxTracks * 2, blockSize);
     busScratch.setSize (Graph::maxBuses * 2, blockSize);
 
     for (int ch = 0; ch < Graph::maxBuses * 2; ++ch)
@@ -329,6 +336,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
                 return;
 
             const auto load = (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * e.deviceRate / n);
+
+            const auto seconds = (double) n / e.deviceRate;
+            e.lastBlockMs.store (seconds * 1000.0, std::memory_order_relaxed);
+            smooth (e.loadAverage, &e.loadPeak, load, seconds);
 
             if (e.rolling.load (std::memory_order_relaxed))
             {
@@ -391,6 +402,166 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
     }
 
     renderPreview (out, numOut, numSamples);
+}
+
+// One track's own sound for this block, into its buffers: its input (monitoring) or its clips
+// and hits, pads, its instrument, its inserts. Runs on any core, alongside other tracks; it
+// touches only this track's things.
+// Averaged over about half a second; the peak falls away over about three.
+void AudioEngine::smooth (std::atomic<float>& average, std::atomic<float>* peak, float value, double blockSeconds) noexcept
+{
+    const auto a = (float) juce::jlimit (0.0, 1.0, blockSeconds / 0.5);
+    const auto avg = average.load (std::memory_order_relaxed);
+    average.store (avg + (value - avg) * a, std::memory_order_relaxed);
+
+    if (peak != nullptr)
+    {
+        const auto fall = (float) std::pow (0.05, blockSeconds / 3.0); // to 5% in 3 s
+        peak->store (juce::jmax (value, peak->load (std::memory_order_relaxed) * fall), std::memory_order_relaxed);
+    }
+}
+
+void AudioEngine::renderTrack (int t, const Block& b) noexcept
+{
+    const auto from = juce::Time::getHighResolutionTicks();
+    auto& tp = current->tracks[(size_t) t];
+    const auto n = b.n;
+    auto* trackL = trackScratch.getWritePointer (t * 2);
+    auto* trackR = trackScratch.getWritePointer (t * 2 + 1);
+    auto inputAt = [&] (int ch) { return ch >= 0 && ch < b.numIn ? b.in[ch] : nullptr; };
+    const float* input = inputAt (tp.inputChannel);
+    const float* inputR = tp.stereo ? inputAt (tp.inputChannel + 1) : input; // a stereo track's right input
+
+    juce::FloatVectorOperations::clear (trackL, n);
+    juce::FloatVectorOperations::clear (trackR, n);
+
+    // A track either monitors its input or plays its lane, never both.
+    if (tp.monitoringInput (b.isRolling))
+    {
+        if (input != nullptr)
+            juce::FloatVectorOperations::copy (trackL, input, n);
+
+        if (inputR != nullptr)
+            juce::FloatVectorOperations::copy (trackR, inputR, n);
+    }
+    else if (b.isRolling)
+    {
+        renderClips (tp, b.pos, n, trackL, trackR);
+        renderHits (tp, b.pos, n, trackL, trackR);
+        toMono (tp, trackL, trackR, n);
+    }
+
+    // A bus plays what was sent to it, stopped or rolling (an input monitored into it, a reverb tail).
+    if (tp.busIndex >= 0 && tp.busIndex < b.numBuses)
+    {
+        juce::FloatVectorOperations::copy (trackL, busPtrs[(size_t) tp.busIndex * 2], n);
+        juce::FloatVectorOperations::copy (trackR, busPtrs[(size_t) tp.busIndex * 2 + 1], n);
+    }
+
+    renderPads (tp, t, trackL, trackR, n);
+    automatePlugins (tp, b.pos);
+
+    if (tp.plugin != nullptr)
+    {
+        const MidiMsg* liveIn = tp.midiLive ? liveMidi.data() : nullptr;
+        int numLiveIn = tp.midiLive ? b.numLive : 0;
+
+        // Auditioned notes join the controller's. While one is down the track keeps a live
+        // input (even an empty one), or the plugin would let go of it at the next block.
+        if (b.numAuditions > 0 || auditionsHeld[(size_t) t] > 0)
+        {
+            auto* merged = mergedMidi.data() + (size_t) t * mergedMidiSize;
+            int m = 0;
+
+            for (int i = 0; i < numLiveIn && m < mergedMidiSize; ++i)
+                merged[m++] = liveIn[i];
+
+            for (int i = 0; i < b.numAuditions && m < mergedMidiSize; ++i)
+                if (blockAuditions[(size_t) i].track == t)
+                    merged[m++] = blockAuditions[(size_t) i].msg;
+
+            if (m > 0 || auditionsHeld[(size_t) t] > 0)
+            {
+                liveIn = merged;
+                numLiveIn = m;
+            }
+        }
+
+        tp.plugin->render (tp.sequence, b.transport, n, liveIn, numLiveIn, trackL, trackR);
+    }
+
+    // Effects run stopped too, so reverb tails ring out and monitored inputs go through them.
+    for (const auto& fx : tp.inserts)
+        fx->process (b.transport, n, trackL, trackR);
+
+    const auto ms = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - from) * 1000.0;
+
+    if (t < maxTracks)
+        smooth (trackAverage[(size_t) t], &trackPeak[(size_t) t], (float) ms, (double) n / deviceRate);
+
+    if (profiling)
+        profileTrackMs[(size_t) t] = ms;
+}
+
+// The track's buffers into its bus or the mix (fader, pan, sends), its meter, and what it's
+// recording. In order, one track at a time.
+void AudioEngine::finishTrack (int t, const Block& b, float* mixL, float* mixR, const float* silence) noexcept
+{
+    auto& tp = current->tracks[(size_t) t];
+    const auto n = b.n;
+    auto* trackL = trackScratch.getWritePointer (t * 2);
+    auto* trackR = trackScratch.getWritePointer (t * 2 + 1);
+    auto inputAt = [&] (int ch) { return ch >= 0 && ch < b.numIn ? b.in[ch] : nullptr; };
+    const float* input = inputAt (tp.inputChannel);
+    const float* inputR = tp.stereo ? inputAt (tp.inputChannel + 1) : input;
+    const bool monitoring = tp.monitoringInput (b.isRolling);
+
+    // Live: what you're playing right now (a monitored input, an armed instrument while stopped
+    // or recording) skips delay compensation.
+    const bool live = monitoring || (tp.midiLive && (! b.isRolling || current->recording));
+    mixTrack (tp, b.pos, trackL, trackR, n, busPtrs.data(), b.numBuses, mixL, mixR, live);
+
+    // The meter shows what you hear from the track: the input (pre-fader, for setting
+    // levels) while monitoring, otherwise its playback.
+    if (monitoring && input != nullptr)
+    {
+        const auto range = juce::FloatVectorOperations::findMinAndMax (input, n);
+        trackPeaks[(size_t) t].push (juce::jmax (range.getEnd(), -range.getStart()));
+    }
+    else
+    {
+        const auto l = juce::FloatVectorOperations::findMinAndMax (trackL, n);
+        const auto r = juce::FloatVectorOperations::findMinAndMax (trackR, n);
+        trackPeaks[(size_t) t].push (juce::jmax (l.getEnd(), -l.getStart(), r.getEnd(), -r.getStart()));
+    }
+
+    if (b.isRolling && tp.recorder != nullptr)
+    {
+        auto& rec = *tp.recorder;
+        const float* srcs[2] = { input != nullptr ? input : silence, inputR != nullptr ? inputR : silence };
+
+        if (rec.startSample.load (std::memory_order_relaxed) < 0)
+            rec.startSample.store (b.pos);
+
+        if (! rec.writer->write (srcs, n))
+            rec.droppedBlocks.fetch_add (1);
+
+        rec.samplesWritten.fetch_add (n);
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto l = srcs[0][i], r = rec.numChannels > 1 ? srcs[1][i] : l;
+            rec.ovPoint.lo = juce::jmin (rec.ovPoint.lo, l, r);
+            rec.ovPoint.hi = juce::jmax (rec.ovPoint.hi, l, r);
+
+            if (++rec.ovCount == Recorder::overviewBlock)
+            {
+                rec.overview.push (rec.ovPoint);
+                rec.ovPoint = {};
+                rec.ovCount = 0;
+            }
+        }
+    }
 }
 
 void AudioEngine::process (const float* const* in, int numIn, float* const* out, int numOut, int n)
@@ -465,8 +636,6 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
     transport.rolling = isRolling;
     transport.recording = isRolling && current->recording;
 
-    auto* trackL = scratch.getWritePointer (0);
-    auto* trackR = scratch.getWritePointer (4);
     auto* silence = scratch.getWritePointer (1);
     auto* mixL = scratch.getWritePointer (2);
     auto* mixR = scratch.getWritePointer (3);
@@ -481,131 +650,62 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
 
     const auto numTracks = (int) juce::jmin (current->tracks.size(), (size_t) maxTracks);
 
+    if (profiling)
+    {
+        profileTrackMs.fill (0.0);
+        profileMixMs = 0.0;
+    }
+
+    block = { in, numIn, n, numLive, numAuditions, numBuses, pos, isRolling, transport };
+
+    // First every track that isn't a bus, each on whichever core is free: they don't depend on
+    // one another (only on the inputs), and this is where the time goes (instruments, inserts).
+    int numParallel = 0;
+
+    for (int t = 0; t < numTracks; ++t)
+        if (current->tracks[(size_t) t].busIndex < 0)
+            parallelTracks[(size_t) numParallel++] = t;
+
+    if (parallel && pool != nullptr && pool->numWorkers() > 0 && numParallel > 1)
+        pool->run (numParallel, [] (void* e, int i)
+                   {
+                       auto& engine = *static_cast<AudioEngine*> (e);
+                       engine.renderTrack (engine.parallelTracks[(size_t) i], engine.block);
+                   },
+                   this);
+    else
+        for (int i = 0; i < numParallel; ++i)
+            renderTrack (parallelTracks[(size_t) i], block);
+
+    // Then in order: each mixed into its bus or the mix, so every bus is complete before it
+    // plays (a bus renders here, once what feeds it is in). A graph without an order runs them
+    // as listed.
+    const auto mixFrom = profiling ? juce::Time::getHighResolutionTicks() : 0;
+    double busMs = 0.0;
+
     for (int k = 0; k < numTracks; ++k)
     {
-        // Every track runs before the buses it feeds; a graph without an order runs them as listed.
         const auto t = current->order.size() == current->tracks.size() ? current->order[(size_t) k] : k;
 
         if (t < 0 || t >= numTracks)
             continue;
 
-        auto& tp = current->tracks[(size_t) t];
-        auto inputAt = [&] (int ch) { return ch >= 0 && ch < numIn ? in[ch] : nullptr; };
-        const float* input = inputAt (tp.inputChannel);
-        const float* inputR = tp.stereo ? inputAt (tp.inputChannel + 1) : input; // a stereo track's right input
-
-        juce::FloatVectorOperations::clear (trackL, n);
-        juce::FloatVectorOperations::clear (trackR, n);
-
-        // A track either monitors its input or plays its lane, never both.
-        const bool monitoring = tp.monitoringInput (isRolling);
-
-        if (monitoring)
+        if (current->tracks[(size_t) t].busIndex >= 0)
         {
-            if (input != nullptr)
-                juce::FloatVectorOperations::copy (trackL, input, n);
-
-            if (inputR != nullptr)
-                juce::FloatVectorOperations::copy (trackR, inputR, n);
-        }
-        else if (isRolling)
-        {
-            renderClips (tp, pos, n, trackL, trackR);
-            renderHits (tp, pos, n, trackL, trackR);
-            toMono (tp, trackL, trackR, n);
+            renderTrack (t, block);
+            busMs += profileTrackMs[(size_t) t];
         }
 
-        // A bus plays what was sent to it, stopped or rolling (an input monitored into it, a reverb tail).
-        if (tp.busIndex >= 0 && tp.busIndex < numBuses)
-        {
-            juce::FloatVectorOperations::copy (trackL, busPtrs[(size_t) tp.busIndex * 2], n);
-            juce::FloatVectorOperations::copy (trackR, busPtrs[(size_t) tp.busIndex * 2 + 1], n);
-        }
-
-        renderPads (tp, t, trackL, trackR, n);
-        automatePlugins (tp, pos);
-
-        if (tp.plugin != nullptr)
-        {
-            const MidiMsg* liveIn = tp.midiLive ? liveMidi.data() : nullptr;
-            int numLiveIn = tp.midiLive ? numLive : 0;
-
-            // Auditioned notes join the controller's. While one is down the track keeps a live
-            // input (even an empty one), or the plugin would let go of it at the next block.
-            if (numAuditions > 0 || auditionsHeld[(size_t) t] > 0)
-            {
-                int m = 0;
-
-                for (int i = 0; i < numLiveIn; ++i)
-                    mergedMidi[(size_t) m++] = liveIn[i];
-
-                for (int i = 0; i < numAuditions; ++i)
-                    if (blockAuditions[(size_t) i].track == t)
-                        mergedMidi[(size_t) m++] = blockAuditions[(size_t) i].msg;
-
-                if (m > 0 || auditionsHeld[(size_t) t] > 0)
-                {
-                    liveIn = mergedMidi.data();
-                    numLiveIn = m;
-                }
-            }
-
-            tp.plugin->render (tp.sequence, transport, n, liveIn, numLiveIn, trackL, trackR);
-        }
-
-        // Effects run stopped too, so reverb tails ring out and monitored inputs go through them.
-        for (const auto& fx : tp.inserts)
-            fx->process (transport, n, trackL, trackR);
-
-        // Live: what you're playing right now (a monitored input, an armed instrument while stopped
-        // or recording) skips delay compensation.
-        const bool live = monitoring || (tp.midiLive && (! isRolling || current->recording));
-        mixTrack (tp, pos, trackL, trackR, n, busPtrs.data(), numBuses, mixL, mixR, live);
-
-        // The meter shows what you hear from the track: the input (pre-fader, for setting
-        // levels) while monitoring, otherwise its playback.
-        if (monitoring && input != nullptr)
-        {
-            const auto range = juce::FloatVectorOperations::findMinAndMax (input, n);
-            trackPeaks[(size_t) t].push (juce::jmax (range.getEnd(), -range.getStart()));
-        }
-        else
-        {
-            const auto l = juce::FloatVectorOperations::findMinAndMax (trackL, n);
-            const auto r = juce::FloatVectorOperations::findMinAndMax (trackR, n);
-            trackPeaks[(size_t) t].push (juce::jmax (l.getEnd(), -l.getStart(), r.getEnd(), -r.getStart()));
-        }
-
-        if (isRolling && tp.recorder != nullptr)
-        {
-            auto& rec = *tp.recorder;
-            const float* srcs[2] = { input != nullptr ? input : silence, inputR != nullptr ? inputR : silence };
-
-            if (rec.startSample.load (std::memory_order_relaxed) < 0)
-                rec.startSample.store (pos);
-
-            if (! rec.writer->write (srcs, n))
-                rec.droppedBlocks.fetch_add (1);
-
-            rec.samplesWritten.fetch_add (n);
-
-            for (int i = 0; i < n; ++i)
-            {
-                const auto l = srcs[0][i], r = rec.numChannels > 1 ? srcs[1][i] : l;
-                rec.ovPoint.lo = juce::jmin (rec.ovPoint.lo, l, r);
-                rec.ovPoint.hi = juce::jmax (rec.ovPoint.hi, l, r);
-
-                if (++rec.ovCount == Recorder::overviewBlock)
-                {
-                    rec.overview.push (rec.ovPoint);
-                    rec.ovPoint = {};
-                    rec.ovCount = 0;
-                }
-            }
-        }
+        finishTrack (t, block, mixL, mixR, silence);
     }
 
+    const auto mixInsertsFrom = juce::Time::getHighResolutionTicks();
     mixInserts (*current, pos, transport, mixL, mixR, n);
+    smooth (mixAverage, nullptr, (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - mixInsertsFrom) * 1000.0),
+            (double) n / deviceRate);
+
+    if (profiling)
+        profileMixMs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - mixFrom) * 1000.0 - busMs;
 
     const auto l = juce::FloatVectorOperations::findMinAndMax (mixL, n);
     const auto r = juce::FloatVectorOperations::findMinAndMax (mixR, n);

@@ -2913,63 +2913,170 @@ void Ui::drawClosePrompt (App& app)
     canvas.text (x + 1, y0 + 5, "stay", colour::text, bg);
 }
 
-// The session screen's bounces tab: what taw bounced, newest first; enter plays one.
-void Ui::drawBouncesTab (App& app, int y)
+// The session screen, top to bottom: a new session (its name, where it goes, the templates),
+// then two columns: recent sessions on the left, the bounces taw made on the right (enter
+// plays one, without opening anything). Arrows move within the focused area, ctrl+arrows (or
+// tab) move between areas.
+static juce::String agoText (juce::Time t)
 {
+    const auto age = juce::Time::getCurrentTime() - t;
+    return age.inMinutes() < 60 ? juce::String ((int) age.inMinutes()) + " min ago"
+         : age.inHours() < 48   ? juce::String ((int) age.inHours()) + " h ago"
+                                : juce::String ((int) age.inDays()) + " days ago";
+}
+
+static juce::String clockText (double s)
+{
+    const auto t = juce::jmax (0, (int) s);
+    return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
+}
+
+// An area's heading: bright when it has the keys.
+static void areaHeading (Canvas& canvas, int x, int y, const juce::String& text, bool focused)
+{
+    canvas.text (x, y, text, focused ? colour::accent : colour::dim, -1, focused);
+}
+
+// The first row to show so the selected one stays in view.
+static int firstShown (int selected, int count, int rows)
+{
+    return juce::jlimit (0, juce::jmax (0, count - rows), selected - rows / 2);
+}
+
+void Ui::drawTemplatePicker (App& app)
+{
+    using Area = App::PickArea;
     const int w = canvas.width(), h = canvas.height();
-    const int n = (int) app.recentBounces.size();
-    const auto now = juce::Time::getCurrentTime();
-    const auto* player = app.bouncePlayer.get();
-    const auto at = app.bouncePlaySeconds();
+    const int numRecent = (int) app.recent.size(), numBounces = (int) app.recentBounces.size();
+    const int numTemplates = (int) app.templates.size();
 
-    auto ago = [&] (juce::Time t)
-    {
-        const auto age = now - t;
-        return age.inMinutes() < 60 ? juce::String ((int) age.inMinutes()) + " min ago"
-             : age.inHours() < 48   ? juce::String ((int) age.inHours()) + " h ago"
-                                    : juce::String ((int) age.inDays()) + " days ago";
-    };
+    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
+    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
+    canvas.text (5, 0, L"\x25b8 sessions", colour::text, colour::headerBg);
 
-    auto clock = [] (double s)
-    {
-        const auto t = juce::jmax (0, (int) s);
-        return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
-    };
+    // Which build, out of the way on the right: the version, the commit (+: changes on top of
+    // it) and when it was built.
+    const auto build = juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime();
+    canvas.text (std::max (16, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
 
-    if (n == 0)
+    // New session: its name, where it goes, then the template to start from.
+    int y = 2;
+    areaHeading (canvas, 1, y, "new session", app.pickArea == Area::templates);
+    canvas.text (14, y, "name", colour::dim);
+
     {
-        canvas.text (1, y, "no bounces yet", colour::dim);
-        canvas.text (1, y + 2, L"in a session, select a range and b bounces it \x00b7 saving as you close bounces last-saved", colour::faint, -1, false, w - 2);
+        const auto x = canvas.text (19, y, app.newSessionName, colour::text, -1, true);
+        canvas.put (x, y, L' ', -1, colour::text);
+
+        if (app.newSessionName.isEmpty())
+            canvas.text (x + 2, y, "(type a name, or enter for a dated one)", colour::faint, -1, false, w - x - 3);
+        else if (app.dateSessionNames && App::datedName (app.newSessionName) != app.newSessionName)
+            canvas.text (x + 1, y, App::datedName ("").trim(), colour::faint); // the date it will get
     }
-    else
-    {
-        canvas.text (1, y++, "recent bounces", colour::dim);
-        const int rows = juce::jmax (1, h - 6 - y);
-        const int first = juce::jlimit (0, juce::jmax (0, n - rows), app.bounceIndex - rows / 2);
 
-        for (int i = first; i < juce::jmin (n, first + rows); ++i, ++y)
+    canvas.text (14, ++y, "in", colour::dim);
+    canvas.text (19, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 21);
+    ++y;
+
+    // Templates: as many rows as fit, keeping room below for the lists.
+    {
+        const int rows = juce::jlimit (1, juce::jmax (1, numTemplates), (h - 12) / 2);
+        const int first = firstShown (app.templateIndex, numTemplates, rows);
+        const bool focused = app.pickArea == Area::templates;
+
+        for (int i = first; i < juce::jmin (numTemplates, first + rows); ++i, ++y)
         {
-            const auto& b = app.recentBounces[(size_t) i];
-            const bool sel = i == app.bounceIndex;
-            const bool playing = player != nullptr && player->file == b.file && at >= 0.0;
-            const int bg = sel ? colour::focusBg : -1;
+            const auto& t = app.templates[(size_t) i];
+            const bool sel = i == app.templateIndex;
+            const int bg = sel && focused ? colour::focusBg : -1;
 
             canvas.fill (1, y, w - 2, L' ', -1, bg);
 
             if (sel)
-                canvas.put (1, y, L'\x25b8', colour::accent, bg);
+                canvas.put (3, y, L'\x25b8', focused ? colour::accent : colour::faint, bg);
 
-            if (playing)
-                canvas.put (2, y, L'\x266a', colour::accent, bg);
+            canvas.text (5, y, padRight (t.name, 14), sel ? colour::text : colour::dim, bg, sel && focused);
 
-            const auto name = b.file.getFileNameWithoutExtension();
-            canvas.text (4, y, padRight (name, 30), playing ? colour::accent : colour::text, bg, sel, 30);
-            canvas.text (35, y, padRight (b.session, 22), colour::dim, bg, false, 22);
-            canvas.text (58, y, padRight (ago (b.time), 12), colour::faint, bg, false, w - 59);
+            juce::StringArray tracks;
+            for (const auto& c : t.tree)
+                if (c.hasType (ids::TRACK))
+                    tracks.add (c[ids::name].toString() + ((int) c[ids::input] > 0 ? L" \x2190 in" + c[ids::input].toString() : juce::String()));
+
+            canvas.text (20, y, tracks.isEmpty() ? juce::String ("empty") : tracks.joinIntoString ("  "), colour::faint, bg, false, w - 22);
         }
     }
 
-    // What's playing: where, and how far through.
+    // Two columns: recent sessions | bounces.
+    ++y;
+    const int colW = (w - 4) / 2, leftX = 1, rightX = leftX + colW + 2; // a divider between, a space each side
+    const int listRows = juce::jmax (1, h - 5 - (y + 1));
+    const auto* player = app.bouncePlayer.get();
+    const auto at = app.bouncePlaySeconds();
+
+    areaHeading (canvas, leftX, y, "recent sessions", app.pickArea == Area::sessions);
+    areaHeading (canvas, rightX, y, "bounces", app.pickArea == Area::bounces);
+
+    for (int r = 0; r <= listRows; ++r)
+        canvas.put (rightX - 2, y + r, L'\x2502', colour::faint);
+
+    ++y;
+
+    if (numRecent == 0)
+        canvas.text (leftX + 2, y, "none yet", colour::faint);
+
+    {
+        const bool focused = app.pickArea == Area::sessions;
+        const int first = firstShown (app.sessionIndex, numRecent, listRows);
+
+        for (int i = first, row = y; i < juce::jmin (numRecent, first + listRows); ++i, ++row)
+        {
+            const auto& dir = app.recent[(size_t) i];
+            const bool sel = i == app.sessionIndex;
+            const int bg = sel && focused ? colour::focusBg : -1;
+            const int nameW = juce::jmax (8, colW - 14);
+
+            canvas.fill (leftX, row, colW - 1, L' ', -1, bg);
+
+            if (sel)
+                canvas.put (leftX, row, L'\x25b8', focused ? colour::accent : colour::faint, bg);
+
+            canvas.text (leftX + 2, row, padRight (dir.getFileName(), nameW), colour::text, bg, sel && focused, nameW);
+            canvas.text (leftX + 3 + nameW, row, agoText (dir.getChildFile ("session.json").getLastModificationTime()), colour::dim, bg, false,
+                         colW - nameW - 4);
+        }
+    }
+
+    if (numBounces == 0)
+        canvas.text (rightX + 2, y, L"none yet \x00b7 b bounces, saving as you close bounces last-saved", colour::faint, -1, false, colW - 2);
+
+    {
+        const bool focused = app.pickArea == Area::bounces;
+        const int first = firstShown (app.bounceIndex, numBounces, listRows);
+        const int ageW = 11, nameW = juce::jmax (8, (colW - ageW - 5) * 3 / 5), sessionW = juce::jmax (0, colW - ageW - nameW - 5);
+
+        for (int i = first, row = y; i < juce::jmin (numBounces, first + listRows); ++i, ++row)
+        {
+            const auto& b = app.recentBounces[(size_t) i];
+            const bool sel = i == app.bounceIndex;
+            const bool playing = player != nullptr && player->file == b.file && at >= 0.0;
+            const int bg = sel && focused ? colour::focusBg : -1;
+
+            canvas.fill (rightX, row, w - 1 - rightX, L' ', -1, bg);
+
+            if (sel)
+                canvas.put (rightX, row, L'\x25b8', focused ? colour::accent : colour::faint, bg);
+
+            if (playing)
+                canvas.put (rightX + 1, row, L'\x266a', colour::accent, bg);
+
+            canvas.text (rightX + 2, row, padRight (b.file.getFileNameWithoutExtension(), nameW), playing ? colour::accent : colour::text, bg,
+                         sel && focused, nameW);
+            canvas.text (rightX + 3 + nameW, row, padRight (b.session, sessionW), colour::dim, bg, false, sessionW);
+            canvas.text (rightX + 4 + nameW + sessionW, row, agoText (b.time), colour::faint, bg, false, ageW);
+        }
+    }
+
+    // The bounce playing: where, and how far through.
     if (player != nullptr)
     {
         const auto len = app.bounceLengthSeconds();
@@ -2980,7 +3087,7 @@ void Ui::drawBouncesTab (App& app, int y)
             canvas.text (x + 2, h - 4, L"loading\x2026", colour::dim);
         else
         {
-            x = canvas.text (x + 2, h - 4, clock (juce::jmax (0.0, at)) + " / " + clock (len), colour::dim);
+            x = canvas.text (x + 2, h - 4, clockText (juce::jmax (0.0, at)) + " / " + clockText (len), colour::dim);
             const int barW = juce::jmax (0, w - 2 - (x + 2));
             const int filled = len > 0.0 && at >= 0.0 ? (int) (barW * at / len) : 0;
 
@@ -2988,39 +3095,6 @@ void Ui::drawBouncesTab (App& app, int y)
                 canvas.put (x + 2 + i, h - 4, i < filled ? L'\x2501' : L'\x2500', i < filled ? colour::accent : colour::faint);
         }
     }
-
-    canvas.text (1, h - 1, L"\x2191\x2193 choose \x00b7 enter play/stop \x00b7 \x2190\x2192 seek \x00b7 o open its session \x00b7 r reveal \x00b7 tab sessions",
-                 colour::dim, -1, false, w - 2);
-}
-
-void Ui::drawTemplatePicker (App& app)
-{
-    const int w = canvas.width(), h = canvas.height();
-    const int numRecent = (int) app.recent.size();
-    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
-    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
-
-    // Two tabs: the sessions, and the bounces taw made (tab switches).
-    {
-        int x = 5;
-
-        for (const bool bounces : { false, true })
-        {
-            const bool on = app.bouncesTab == bounces;
-
-            if (on)
-                canvas.put (x, 0, L'\x25b8', colour::accent, colour::headerBg);
-
-            x = canvas.text (x + 2, 0, bounces ? "bounces" : "sessions", on ? colour::text : colour::dim, colour::headerBg, on) + 1;
-        }
-
-        canvas.text (x + 1, 0, "(tab)", colour::faint, colour::headerBg);
-    }
-
-    // Which build, out of the way on the right: the version, the commit (+: changes on top of
-    // it) and when it was built.
-    const auto build = juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime();
-    canvas.text (std::max (32, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
 
     // Bounces still going in the background (a session saved and closed), else the last word.
     if (! app.backgroundBounces.empty())
@@ -3039,89 +3113,15 @@ void Ui::drawTemplatePicker (App& app)
     }
     else if (app.message.isNotEmpty())
     {
-        canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::dim, -1, false, w - 2);
-    }
-
-    if (app.bouncesTab)
-    {
-        drawBouncesTab (app, 2);
-        return;
-    }
-
-    int y = 2;
-
-    // Recent sessions: name, how long ago, where.
-    if (numRecent > 0)
-    {
-        canvas.text (1, y++, "recent", colour::dim);
-        const auto now = juce::Time::getCurrentTime();
-        const int maxRows = std::max (1, std::min (numRecent, h - 15));
-
-        for (int i = 0; i < maxRows; ++i, ++y)
-        {
-            const auto& dir = app.recent[(size_t) i];
-            const bool sel = i == app.pickIndex;
-            const int bg = sel ? colour::focusBg : -1;
-
-            canvas.fill (1, y, w - 2, L' ', -1, bg);
-            if (sel)
-                canvas.put (1, y, L'\x25b8', colour::accent, bg);
-
-            const auto age = now - dir.getChildFile ("session.json").getLastModificationTime();
-            const auto ago = age.inMinutes() < 60 ? juce::String ((int) age.inMinutes()) + " min ago"
-                           : age.inHours() < 48   ? juce::String ((int) age.inHours()) + " h ago"
-                                                  : juce::String ((int) age.inDays()) + " days ago";
-
-            canvas.text (3, y, padRight (dir.getFileName(), 24), colour::text, bg, sel);
-            canvas.text (28, y, padRight (ago, 12), colour::dim, bg);
-            canvas.text (41, y, dir.getParentDirectory().getFullPathName(), colour::faint, bg, false, w - 43);
-        }
-
-        ++y;
-    }
-
-    canvas.text (1, y++, "new session", colour::dim);
-    canvas.text (3, y, "name", colour::dim);
-
-    const auto x = canvas.text (9, y, app.newSessionName, colour::text, -1, true);
-    canvas.put (x, y, L' ', -1, colour::text);
-
-    if (app.newSessionName.isEmpty())
-        canvas.text (x + 2, y, "(type a name, or enter for a dated one)", colour::faint);
-    else if (app.dateSessionNames && App::datedName (app.newSessionName) != app.newSessionName)
-        canvas.text (x + 1, y, App::datedName ("").trim(), colour::faint); // the date it will get
-
-    canvas.text (3, ++y, "in", colour::dim);
-    canvas.text (9, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 11);
-    y += 2;
-    canvas.text (1, y++, "template", colour::dim);
-
-    for (int i = 0; i < (int) app.templates.size() && y < h - 4; ++i, ++y)
-    {
-        const auto& t = app.templates[(size_t) i];
-        const bool sel = numRecent + i == app.pickIndex;
-        const int bg = sel ? colour::focusBg : -1;
-
-        canvas.fill (1, y, w - 2, L' ', -1, bg);
-        if (sel)
-            canvas.put (1, y, L'\x25b8', colour::accent, bg);
-
-        canvas.text (3, y, padRight (t.name, 14), colour::text, bg, sel);
-
-        juce::StringArray tracks;
-        for (const auto& c : t.tree)
-            if (c.hasType (ids::TRACK))
-                tracks.add (c[ids::name].toString() + ((int) c[ids::input] > 0 ? L" \x2190 in" + c[ids::input].toString() : juce::String()));
-
-        canvas.text (18, y, tracks.isEmpty() ? juce::String ("empty") : tracks.joinIntoString ("  "), colour::dim, bg, false, w - 20);
-    }
-
-    canvas.text (1, h - 2, "templates live in " + configFolder().getChildFile ("templates").getFullPathName() + L" \x00b7 add your own", colour::faint, -1, false, w - 2);
-    canvas.text (1, h - 1, numRecent > 0 ? L"\x2191\x2193 choose \x00b7 enter open / create \x00b7 type a name for a new session \x00b7 tab bounces \x00b7 esc quit"
-                                         : L"type name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 esc quit",
-                 colour::dim);
-
-    if (app.message.isNotEmpty())
         canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
+    }
+
+    const juce::String areas (L"ctrl+arrows area");
+    const auto hint = app.pickArea == Area::bounces
+                          ? L"enter play/stop \x00b7 \x2190\x2192 seek \x00b7 o its session \x00b7 r reveal \x00b7 " + areas
+                      : app.pickArea == Area::sessions
+                          ? L"\x2191\x2193 choose \x00b7 enter open \x00b7 type: new session \x00b7 " + areas + L" \x00b7 esc quit"
+                          : L"type a name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 " + areas + L" \x00b7 esc quit";
+    canvas.text (1, h - 1, hint, colour::dim, -1, false, w - 2);
 }
 } // namespace taw

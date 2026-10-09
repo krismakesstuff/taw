@@ -1,6 +1,6 @@
-// The session screen's bounces: last-saved.mp3 bouncing in the background after a close, and
-// the bounces tab, which lists what taw bounced (newest first) and plays them without opening
-// anything. Tab switches between it and the sessions.
+﻿// The session screen's bounces: last-saved.mp3 bouncing in the background after a close, and
+// the session screen's bounces list, which shows what taw bounced (newest first) and plays them
+// without opening anything.
 
 #include "App.h"
 
@@ -33,7 +33,7 @@ void App::pollBackgroundBounces()
             rememberBounce (b->file(), name, folder);
 
             if (session == nullptr)
-                say (Result::good (name + L" \x00b7 " + b->file().getFileName() + L" bounced \x00b7 tab: bounces"));
+                say (Result::good (name + L" \x00b7 " + b->file().getFileName() + L" bounced"));
         }
         else if (! b->wasCancelled())
         {
@@ -111,7 +111,7 @@ void App::loadRecentBounces()
             bounceIndex = i;
 }
 
-void App::handleBouncesTabKey (const Key& k)
+void App::handleBouncesKey (const Key& k)
 {
     const auto n = (int) recentBounces.size();
     const auto c = k.code == Key::Char ? juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch) : 0;
@@ -120,25 +120,19 @@ void App::handleBouncesTabKey (const Key& k)
 
     switch (k.code)
     {
-        case Key::Up:   bounceIndex = juce::jmax (0, bounceIndex - 1); return;
-        case Key::Down: bounceIndex = juce::jmax (0, juce::jmin (n - 1, bounceIndex + 1)); return;
+        case Key::Up:
+            if (bounceIndex == 0)
+                movePickArea (PickArea::templates); // off the top: the area above
+            else
+                --bounceIndex;
+            return;
+        case Key::Down:  bounceIndex = juce::jmax (0, juce::jmin (n - 1, bounceIndex + 1)); return;
         case Key::Left:  seekBounce (bouncePlaySeconds() - (k.shift ? 30.0 : 5.0)); return;
         case Key::Right: seekBounce (bouncePlaySeconds() + (k.shift ? 30.0 : 5.0)); return;
         case Key::Home:  seekBounce (0.0); return;
-        case Key::Tab:
-            bouncesTab = false;
-            return;
-        case Key::Escape:
-            if (bouncePlayer != nullptr)
-                stopBounce();
-            else
-                bouncesTab = false;
-            return;
         case Key::Enter:
-            if (sel == nullptr)
-                return;
-
-            playingSel ? stopBounce() : playBounce (sel->file);
+            if (sel != nullptr)
+                playingSel ? stopBounce() : playBounce (sel->file);
             return;
         default:
             break;
@@ -151,14 +145,16 @@ void App::handleBouncesTabKey (const Key& k)
         if (! Session::existsIn (sel->folder))
             say (Result::fail ("can't find the session " + sel->session + " came from"));
         else
-        {
-            stopBounce();
-            bouncesTab = false;
             startOpening (sel->folder);
-        }
     }
     else if (c == 'r' && sel != nullptr)
         sel->file.revealToUser();
+    else if (c >= 32)
+    {
+        // Anything else starts a new session's name, like it does from the sessions.
+        newSessionName += juce::String::charToString ((juce::juce_wchar) k.ch);
+        pickArea = PickArea::templates;
+    }
 }
 
 void App::playBounce (const juce::File& file)

@@ -720,7 +720,9 @@ void App::proceedToSession()
     if (recent.size() > 12)
         recent.resize (12);
 
-    pickIndex = recent.empty() ? defaultTemplateRow() : 0;
+    sessionIndex = 0;
+    templateIndex = defaultTemplateRow();
+    pickArea = recent.empty() ? PickArea::templates : PickArea::sessions; // enter reopens the newest
     mode = Mode::TemplatePicker;
     loadRecentBounces();
 }
@@ -729,9 +731,9 @@ int App::defaultTemplateRow() const
 {
     for (int i = 0; i < (int) templates.size(); ++i)
         if (templates[(size_t) i].name == "1mic")
-            return (int) recent.size() + i;
+            return i;
 
-    return (int) recent.size();
+    return 0;
 }
 
 juce::String App::datedName (const juce::String& name)
@@ -4038,7 +4040,6 @@ void App::stepOpening()
 void App::handleTemplatePickerKey (const Key& k)
 {
     const auto numRecent = (int) recent.size();
-    const auto n = numRecent + (int) templates.size();
 
     // Quitting was waiting on a bounce: esc again quits now (the bounce is dropped), any
     // other key means stay.
@@ -4053,43 +4054,103 @@ void App::handleTemplatePickerKey (const Key& k)
         say (Result::good (L"staying \x00b7 the bounce carries on"));
     }
 
-    if (bouncesTab)
+    const auto numTemplates = (int) templates.size(), numBounces = (int) recentBounces.size();
+
+    // Between areas: ctrl+arrows, the way they sit on screen (or tab, round them all).
+    if (k.ctrl && (k.code == Key::Up || k.code == Key::Down || k.code == Key::Left || k.code == Key::Right))
     {
-        handleBouncesTabKey (k);
+        if (k.code == Key::Up)
+            movePickArea (PickArea::templates);
+        else if (k.code == Key::Left)
+            movePickArea (PickArea::sessions);
+        else if (k.code == Key::Right)
+            movePickArea (PickArea::bounces);
+        else if (pickArea == PickArea::templates)
+            movePickArea (numRecent > 0 || numBounces == 0 ? PickArea::sessions : PickArea::bounces);
+
         return;
     }
 
+    if (k.code == Key::Tab)
+    {
+        movePickArea (pickArea == PickArea::templates ? PickArea::sessions : pickArea == PickArea::sessions ? PickArea::bounces : PickArea::templates);
+        return;
+    }
+
+    // The playing bounce stops before esc means quit.
+    if (k.code == Key::Escape)
+    {
+        if (bouncePlayer != nullptr)
+            stopBounce();
+        else
+            quit();
+
+        return;
+    }
+
+    if (k.code == Key::Backspace)
+    {
+        newSessionName = newSessionName.dropLastCharacters (1);
+        return;
+    }
+
+    if (pickArea == PickArea::bounces)
+    {
+        handleBouncesKey (k);
+        return;
+    }
+
+    const bool inTemplates = pickArea == PickArea::templates;
+    auto& index = inTemplates ? templateIndex : sessionIndex;
+    const auto count = inTemplates ? numTemplates : numRecent;
+
     switch (k.code)
     {
-        case Key::Tab:       bouncesTab = true; loadRecentBounces(); return;
-        case Key::Up:        pickIndex = juce::jmax (0, pickIndex - 1); return;
-        case Key::Down:      pickIndex = juce::jmin (n - 1, pickIndex + 1); return;
-        case Key::Backspace: newSessionName = newSessionName.dropLastCharacters (1); return;
-        case Key::Escape:    quit(); return;
+        // Off the end of a list: into the area beyond it.
+        case Key::Up:
+            if (! inTemplates && index == 0)
+                movePickArea (PickArea::templates);
+            else
+                index = juce::jmax (0, index - 1);
+            return;
+        case Key::Down:
+            if (inTemplates && index >= count - 1)
+                movePickArea (PickArea::sessions);
+            else
+                index = juce::jmax (0, juce::jmin (count - 1, index + 1));
+            return;
         case Key::Enter:
             if (opening != nullptr)
                 return; // already opening one
 
-            if (pickIndex < numRecent)
-                startOpening (recent[(size_t) pickIndex]);
-            else if (pickIndex < n)
-            {
-                say (createSession (templates[(size_t) (pickIndex - numRecent)]));
-            }
+            if (! inTemplates && index < numRecent)
+                startOpening (recent[(size_t) index]);
+            else if (inTemplates && index < numTemplates)
+                say (createSession (templates[(size_t) index]));
             return;
         case Key::Char:
             if (k.ch >= 32)
             {
+                // Typing a name means a new session: the templates take the keys.
                 newSessionName += juce::String::charToString ((juce::juce_wchar) k.ch);
-
-                // Typing a name means a new session: jump from the recent list to the templates.
-                if (pickIndex < numRecent)
-                    pickIndex = defaultTemplateRow();
+                pickArea = PickArea::templates;
             }
             return;
         default:
             return;
     }
+}
+
+// Into another area of the session screen (an empty list is skipped over).
+void App::movePickArea (PickArea to)
+{
+    if (to == PickArea::sessions && recent.empty())
+        return;
+
+    if (to == PickArea::bounces && recentBounces.empty())
+        return;
+
+    pickArea = to;
 }
 
 //==============================================================================

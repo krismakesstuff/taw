@@ -257,14 +257,18 @@ public:
     bool quitAfterBounces = false;
     void pollBackgroundBounces();
 
-    // The session screen's second tab: bounces taw made, newest first, to audition without
-    // opening anything.
+    // The session screen's areas: templates (a new session) on top, then recent sessions and
+    // the bounces taw made side by side (newest first, to audition without opening anything).
+    // Arrows move within the focused area; ctrl+arrows (or tab) move between areas.
+    enum class PickArea { templates, sessions, bounces };
+    PickArea pickArea = PickArea::sessions;
+    int templateIndex = 0, sessionIndex = 0;
     struct RecentBounce { juce::File file; juce::String session; juce::File folder; juce::Time time; };
     std::vector<RecentBounce> recentBounces;
-    bool bouncesTab = false;
     int bounceIndex = 0;
     void loadRecentBounces();
-    void handleBouncesTabKey (const Key&);
+    void movePickArea (PickArea to);
+    void handleBouncesKey (const Key&); // the bounces area's own keys (play, seek, open, reveal)
     // The bounce playing on the session screen: decoded on a thread, then played by the
     // engine's preview voice from any point.
     struct BouncePlayer

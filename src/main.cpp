@@ -626,11 +626,30 @@ int main (int argc, char** argv)
             check (mp3.getSize() > 10000, "save: bounces\\last-saved.mp3 written");
             std::printf ("       %s  %lld bytes  %s\n", mp3.getFullPathName().toRawUTF8(), (long long) mp3.getSize(), app->message.toRawUTF8());
 
-            // The session screen: its bounces tab lists it, and it plays.
-            app->bouncesTab = true;
-            app->loadRecentBounces();
-            check (! app->recentBounces.empty() && app->recentBounces.front().file == mp3, "the bounces tab lists it");
+            // The session screen: the bounces list has it (newest, so first), and it plays.
+            check (! app->recentBounces.empty() && app->recentBounces.front().file == mp3 && app->bounceIndex == 0, "the bounces list has it, selected");
+
+            // Areas: ctrl+arrows move between them, the way they sit on screen.
+            using Area = taw::App::PickArea;
+            auto key = [&] (taw::Key::Code code, bool ctrl)
+            {
+                taw::Key k;
+                k.code = code;
+                k.ctrl = ctrl;
+                app->pressKey (k);
+                return app->pickArea;
+            };
+            check (app->pickArea == Area::sessions, "the session screen starts in the recent sessions");
+            check (key (taw::Key::Right, true) == Area::bounces, "ctrl+right: bounces");
+            check (key (taw::Key::Left, true) == Area::sessions, "ctrl+left: sessions");
+            check (key (taw::Key::Up, true) == Area::templates, "ctrl+up: templates");
+            check (key (taw::Key::Down, true) == Area::sessions, "ctrl+down: sessions");
+            const auto before = app->sessionIndex;
+            key (taw::Key::Down, false);
+            check (app->sessionIndex == juce::jmin (before + 1, (int) app->recent.size() - 1) && app->pickArea == Area::sessions, "down: the next session");
+            key (taw::Key::Right, true);
             std::printf ("%s", app->screenText (100, 24).toRawUTF8());
+            std::printf ("%s", app->screenText (70, 16).toRawUTF8());
             app->playBounce (mp3);
 
             while (! app->bouncePlayer->loaded.load())

@@ -906,7 +906,7 @@ counts what's left. Opening a plugin's window, or bounce, loads what it needs at
 (`close`, or quitting with a session open) does the same in reverse: each plugin unloaded (its
 state saved, if you chose to save) under a closing box.
 
-### Saving, last-saved, and the bounces tab
+### Saving, last-saved, and the session screen
 Saving is something you do (`ctrl+s`), not something taw does behind you. Edits go to the
 session's `unsaved\` folder as you make them (the session as it is now, and plugin states
 written when a window closes or a plugin is removed); `session.json` and `plugins\` change only
@@ -926,12 +926,16 @@ If taw crashes or the window is closed on unsaved changes, they stay in `unsaved
 open picks them up, says so, and they're still unsaved until you save. Headless runs (`--exec`)
 save to `session.json` as they go, as before.
 
-The session screen has two tabs (`tab` switches): sessions, and bounces. The bounces tab lists
-what taw bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json`
-in the config folder), plus whatever is in the recent sessions' `bounces\` folders. `enter` (or
-`space`) plays one through the output, decoded on a thread, without opening anything; `←→` seek
-5 s (shift: 30), `home` goes back to the start, `esc` stops, `o` opens the session it came
-from, `r` shows the file in Explorer.
+The session screen: a new session at the top (type its name; the templates under it), then two
+columns, recent sessions on the left and bounces on the right. Arrows move within the area
+that has the keys (off the end of a list, into the area beyond); `ctrl+arrows` move between
+areas the way they sit on screen (`tab` goes round them), so you never scroll through one list
+to reach another. Typing a name takes you to the templates. The bounces list shows what taw
+bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json` in the
+config folder), plus whatever is in the recent sessions' `bounces` folders. `enter` (or
+`space`) plays one through the output, decoded on a thread, without opening anything; `left`
+and `right` seek 5 s (shift: 30), `home` goes back to the start, `esc` stops it, `o` opens the
+session it came from, `r` shows the file in Explorer.
 
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
 (opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long

@@ -746,6 +746,13 @@ int main (int argc, char** argv)
 
         run ("from the start", (juce::int64) (from * rate), seconds);
 
+        // The stats panel as it stood at the end of that.
+        app->toggleStats();
+        juce::Thread::sleep (300);
+        app->system.sample();
+        std::printf ("\n%s", app->screenText (100, 32).toRawUTF8());
+        app->toggleStats();
+
         if ((bool) s.tree()[taw::ids::loop])
         {
             const auto loopEnd = (juce::int64) s.tree()[taw::ids::loopEnd];

@@ -515,6 +515,17 @@ public:
 
     // Where a block's time goes (taw --loadtest): each track's share of the last block, in ms,
     // and the mix's inserts. Off unless a test turns it on; read it between blocks.
+    // Load as you work (the stats panel, the transport's dsp): how much of each block's time
+    // the audio takes, smoothed over about half a second, and the highest in the last few
+    // seconds; each track's time (ms per block) likewise. Measured stopped too: plugins run.
+    float dspLoad() const noexcept { return loadAverage.load (std::memory_order_relaxed); }
+    float dspPeak() const noexcept { return loadPeak.load (std::memory_order_relaxed); }
+    float trackMs (int t) const noexcept { return t >= 0 && t < maxTracks ? trackAverage[(size_t) t].load (std::memory_order_relaxed) : 0.0f; }
+    float trackPeakMs (int t) const noexcept { return t >= 0 && t < maxTracks ? trackPeak[(size_t) t].load (std::memory_order_relaxed) : 0.0f; }
+    float mixMs() const noexcept { return mixAverage.load (std::memory_order_relaxed); }
+    double blockMs() const noexcept { return lastBlockMs.load (std::memory_order_relaxed); } // how long a block lasts
+    int helperThreads() const noexcept { return pool != nullptr ? pool->numWorkers() : 0; }
+
     bool profiling = false;
     bool parallel = true; // tracks on several cores (taw --paralleltest compares it with one)
     std::array<double, 256> profileTrackMs {};
@@ -618,6 +629,10 @@ private:
 
     std::atomic<bool> rolling { false }, deviceRunning { false };
     std::atomic<int> lateBlocks { 0 };
+    std::atomic<float> loadAverage { 0.0f }, loadPeak { 0.0f }, mixAverage { 0.0f };
+    std::atomic<double> lastBlockMs { 0.0 };
+    std::array<std::atomic<float>, maxTracks> trackAverage {}, trackPeak {};
+    static void smooth (std::atomic<float>& average, std::atomic<float>* peak, float value, double blockSeconds) noexcept;
     std::atomic<float> worstLoad { 0.0f };
     std::atomic<juce::int64> playPos { 0 }, seekTo { -1 }, countInLeft { 0 };
     std::atomic<int> numInputs { 0 };

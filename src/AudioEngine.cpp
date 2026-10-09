@@ -337,6 +337,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
 
             const auto load = (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - start) * e.deviceRate / n);
 
+            const auto seconds = (double) n / e.deviceRate;
+            e.lastBlockMs.store (seconds * 1000.0, std::memory_order_relaxed);
+            smooth (e.loadAverage, &e.loadPeak, load, seconds);
+
             if (e.rolling.load (std::memory_order_relaxed))
             {
                 if (load > 1.0f)
@@ -403,9 +407,23 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
 // One track's own sound for this block, into its buffers: its input (monitoring) or its clips
 // and hits, pads, its instrument, its inserts. Runs on any core, alongside other tracks; it
 // touches only this track's things.
+// Averaged over about half a second; the peak falls away over about three.
+void AudioEngine::smooth (std::atomic<float>& average, std::atomic<float>* peak, float value, double blockSeconds) noexcept
+{
+    const auto a = (float) juce::jlimit (0.0, 1.0, blockSeconds / 0.5);
+    const auto avg = average.load (std::memory_order_relaxed);
+    average.store (avg + (value - avg) * a, std::memory_order_relaxed);
+
+    if (peak != nullptr)
+    {
+        const auto fall = (float) std::pow (0.05, blockSeconds / 3.0); // to 5% in 3 s
+        peak->store (juce::jmax (value, peak->load (std::memory_order_relaxed) * fall), std::memory_order_relaxed);
+    }
+}
+
 void AudioEngine::renderTrack (int t, const Block& b) noexcept
 {
-    const auto from = profiling ? juce::Time::getHighResolutionTicks() : 0;
+    const auto from = juce::Time::getHighResolutionTicks();
     auto& tp = current->tracks[(size_t) t];
     const auto n = b.n;
     auto* trackL = trackScratch.getWritePointer (t * 2);
@@ -476,8 +494,13 @@ void AudioEngine::renderTrack (int t, const Block& b) noexcept
     for (const auto& fx : tp.inserts)
         fx->process (b.transport, n, trackL, trackR);
 
+    const auto ms = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - from) * 1000.0;
+
+    if (t < maxTracks)
+        smooth (trackAverage[(size_t) t], &trackPeak[(size_t) t], (float) ms, (double) n / deviceRate);
+
     if (profiling)
-        profileTrackMs[(size_t) t] = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - from) * 1000.0;
+        profileTrackMs[(size_t) t] = ms;
 }
 
 // The track's buffers into its bus or the mix (fader, pan, sends), its meter, and what it's
@@ -676,7 +699,10 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         finishTrack (t, block, mixL, mixR, silence);
     }
 
+    const auto mixInsertsFrom = juce::Time::getHighResolutionTicks();
     mixInserts (*current, pos, transport, mixL, mixR, n);
+    smooth (mixAverage, nullptr, (float) (juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - mixInsertsFrom) * 1000.0),
+            (double) n / deviceRate);
 
     if (profiling)
         profileMixMs = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - mixFrom) * 1000.0 - busMs;

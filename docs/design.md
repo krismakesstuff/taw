@@ -959,8 +959,14 @@ in. So a block takes about as long as its slowest track instead of all of them a
 `taw --paralleltest` checks it sounds exactly as on one core. Bounces render on their own
 thread, one track after another, as before.
 
-The transport says `load NN%` while playing: the slowest block so far against how long a block
-lasts. A block over 100% is a dropout (a click), counted in red; stopping says how many.
+The transport always says `dsp NN%`: how much of each block's time the audio takes (averaged
+over half a second; plugins run stopped too, so it's live while you build). Playing, `peak NN%`
+joins it: the slowest block this pass. A block over 100% is a dropout (a click), counted in red;
+stopping says how many. `stats` opens a panel with the rest: dsp now, its high point in the last
+3 s and this pass's worst; the block length and how many cores the tracks share; the machine's
+CPU (and taw's share), taw's memory and what's free; and every track's time per block, heaviest
+first, as a bar of one block with its recent peak marked, plus the mix's inserts. Keys still
+reach the session while it's up (space plays); esc or `stats` closes it.
 `taw --loadtest <session> [buffer]` plays a copy of a session without the device, as fast as it
 renders, and prints the load (median, p99, worst), each track's share, and the worst blocks:
 from the start, across the loop wrap, and starting mid-song. The video decoder keeps to two

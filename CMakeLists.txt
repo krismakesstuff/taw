@@ -50,6 +50,7 @@ target_sources(taw PRIVATE
     src/AlsImport.cpp
     src/SessionScreen.cpp
     src/RenderPool.cpp
+    src/SystemStats.cpp
     src/AutomationEdit.cpp
     src/TrackMenu.cpp
     src/Midi.cpp

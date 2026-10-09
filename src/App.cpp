@@ -569,6 +569,13 @@ int App::run()
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
         pollBackgroundBounces();
+
+        // The machine's load, for the stats panel: once a second is plenty.
+        if (const auto now = juce::Time::getMillisecondCounterHiRes(); statsVisible && now - systemSampledAt > 1000.0)
+        {
+            system.sample();
+            systemSampledAt = now;
+        }
         pollImport();
         { timing::Scope t ("slow: library", 150.0); pollIndexing(); }
 
@@ -3591,7 +3598,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k)
+    if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k)
         || handleSettingsKey (k) || handleIoKey (k))
         return;
 

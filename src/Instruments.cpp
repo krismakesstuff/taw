@@ -366,6 +366,29 @@ Result App::toggleMidiPanel()
                                                          : juce::String (L"play your controller: its row lights up"));
 }
 
+Result App::toggleStats()
+{
+    statsVisible = ! statsVisible;
+
+    if (statsVisible)
+    {
+        midiPanelVisible = helpVisible = settingsVisible = pluginPickerVisible = false;
+        system.sample();
+        systemSampledAt = juce::Time::getMillisecondCounterHiRes();
+    }
+
+    return Result::good (statsVisible ? juce::String (L"stats \x00b7 keys still work (space plays) \x00b7 esc or stats closes") : juce::String());
+}
+
+bool App::handleStatsKey (const Key& k)
+{
+    if (! statsVisible || ! commandLine.isEmpty() || k.code != Key::Escape)
+        return false;
+
+    statsVisible = false;
+    return true;
+}
+
 bool App::handleMidiPanelKey (const Key& k)
 {
     if (! midiPanelVisible || midiInputs == nullptr || ! commandLine.isEmpty())

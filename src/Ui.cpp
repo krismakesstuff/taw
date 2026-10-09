@@ -325,7 +325,7 @@ void Ui::drawMain (App& app)
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
-        || app.settingsVisible)
+        || app.settingsVisible || app.statsVisible)
         laneMap.valid = false;
 
     if (app.helpVisible)
@@ -342,6 +342,131 @@ void Ui::drawMain (App& app)
         drawMidiPanel (app);
     else if (app.settingsVisible && app.session != nullptr)
         drawSettings (app);
+    else if (app.statsVisible && app.session != nullptr)
+        drawStats (app);
+}
+
+// "stats": the audio's load, the machine's, and each track's share, heaviest first.
+void Ui::drawStats (App& app)
+{
+    const auto& s = *app.session;
+    auto& e = app.engine;
+    const auto& sys = app.system;
+    const int w = canvas.width(), h = canvas.height();
+    // Below the transport when there's room, so its dsp stays in sight.
+    const int boxW = std::min (w - 4, 88), x0 = (w - boxW) / 2, y0 = h >= 24 ? 4 : 1, bg = colour::headerBg;
+    const int vx = x0 + 11; // where the values start, after the labels
+    const int numTracks = s.numTracks();
+    const auto blockMs = e.blockMs();
+
+    std::vector<int> order;
+    for (int t = 0; t < numTracks; ++t)
+        if (e.trackPeakMs (t) > 0.01f)
+            order.push_back (t);
+
+    std::sort (order.begin(), order.end(), [&] (int a, int b) { return e.trackMs (a) > e.trackMs (b); });
+
+    const int maxRows = juce::jmax (1, h - y0 - 12);
+    const int rows = juce::jmin ((int) order.size(), maxRows);
+    const int boxH = 10 + juce::jmax (1, rows) + 1;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const auto pct = [] (float v) { return juce::String (juce::roundToInt (v * 100.0f)) + "%"; };
+    const auto loadColour = [] (float v) { return v > 0.8f ? colour::error : v > 0.5f ? colour::meterYellow : colour::text; };
+    const juce::String dot (L" \x00b7 ");
+
+    canvas.text (x0 + 2, y0 + 1, "STATS", colour::text, bg, true);
+    canvas.text (x0 + 9, y0 + 1, "how hard taw and the machine are working", colour::dim, bg, false, boxW - 11);
+
+    // The audio: this block's share of its time, the high point lately, this pass's worst.
+    int y = y0 + 3;
+    canvas.text (x0 + 2, y, "audio", colour::dim, bg);
+    int x = canvas.text (vx, y, "dsp " + pct (e.dspLoad()), loadColour (e.dspLoad()), bg, true);
+    x = canvas.text (x, y, dot + "peak " + pct (e.dspPeak()) + " (3 s)", loadColour (e.dspPeak()), bg);
+
+    if (const auto worst = e.worstBlockLoad(); worst > 0.0f)
+    {
+        x = canvas.text (x, y, dot + "this pass worst " + pct (worst), loadColour (worst), bg);
+        const auto late = e.lateBlockCount();
+        canvas.text (x, y, dot + juce::String (late) + (late == 1 ? " dropout" : " dropouts"), late > 0 ? colour::error : colour::dim, bg, late > 0);
+    }
+
+    ++y;
+    juce::String block;
+
+    if (auto* d = e.devices().getCurrentAudioDevice())
+        block << juce::String (d->getCurrentSampleRate() / 1000.0, 1) << "k / " << d->getCurrentBufferSizeSamples() << " = ";
+
+    block << juce::String (blockMs, 1) << " ms a block" << dot << "tracks on " << (1 + e.helperThreads()) << " cores";
+    canvas.text (vx, y, block, colour::dim, bg, false, boxW - 13);
+
+    // The machine.
+    y += 2;
+    canvas.text (x0 + 2, y, "machine", colour::dim, bg);
+
+    if (sys.cpu >= 0.0f)
+    {
+        x = canvas.text (vx, y, "cpu " + pct (sys.cpu), loadColour (sys.cpu), bg, true);
+        x = canvas.text (x, y, " (" + juce::String (sys.threads) + " threads)" + dot + "taw " + pct (sys.tawCpu), colour::dim, bg);
+        x = canvas.text (x, y, dot + "taw memory " + juce::String (sys.tawMemoryMB / 1024.0, 1) + " GB", colour::dim, bg);
+        canvas.text (x, y, dot + juce::String (sys.freeMemoryMB / 1024.0, 1) + " of " + juce::String (juce::roundToInt (sys.totalMemoryMB / 1024.0)) + " GB free",
+                     sys.freeMemoryMB < 2048.0 ? colour::meterYellow : colour::dim, bg, false, x0 + boxW - x - 2);
+    }
+    else
+    {
+        canvas.text (vx, y, L"measuring\x2026", colour::faint, bg);
+    }
+
+    // Each track's time in a block, heaviest first: the bar is its share of one block.
+    y += 2;
+    const int nameW = juce::jmin (40, boxW - 36), barW = 14;
+    canvas.text (x0 + 2, y, "tracks", colour::dim, bg);
+    canvas.text (x0 + 4 + nameW + barW + 2, y, "  avg   peak ms", colour::dim, bg);
+    ++y;
+
+    if (order.empty())
+        canvas.text (x0 + 4, y, "nothing taking time yet", colour::faint, bg);
+
+    for (int i = 0; i < rows; ++i, ++y)
+    {
+        const auto t = order[(size_t) i];
+        const auto tr = s.track (t);
+        const auto plugin = tr[ids::pluginName].toString();
+        auto name = juce::String (t + 1) + " " + tr[ids::name].toString() + (plugin.isNotEmpty() ? " [" + plugin + "]" : juce::String());
+        int fx = 0;
+
+        for (int slot = 0; slot < Session::numSends; ++slot)
+            fx += Session::insert (tr, slot).isValid() && ! (bool) Session::insert (tr, slot)[ids::bypass] ? 1 : 0;
+
+        if (fx > 0)
+            name << " +" << fx << " fx";
+
+        const auto avg = e.trackMs (t), peak = e.trackPeakMs (t);
+        const auto share = blockMs > 0.0 ? (float) (avg / blockMs) : 0.0f;
+        const auto peakShare = blockMs > 0.0 ? (float) (peak / blockMs) : 0.0f;
+        canvas.text (x0 + 4, y, padRight (name, nameW), colour::text, bg, false, nameW);
+
+        const int filled = juce::jlimit (0, barW, juce::roundToInt (share * barW));
+        const int peakAt = juce::jlimit (0, barW - 1, juce::roundToInt (peakShare * barW));
+
+        for (int b = 0; b < barW; ++b)
+            canvas.put (x0 + 5 + nameW + b, y, b < filled ? L'\x2588' : b == peakAt ? L'\x2502' : L'\x2591',
+                        b < filled ? loadColour (share) : b == peakAt ? loadColour (peakShare) : colour::faint, bg);
+
+        canvas.text (x0 + 6 + nameW + barW, y, juce::String (avg, 2).paddedLeft (' ', 6) + juce::String (peak, 2).paddedLeft (' ', 7),
+                     colour::dim, bg);
+    }
+
+    if ((int) order.size() > rows)
+        canvas.text (x0 + 4, y++, "+" + juce::String ((int) order.size() - rows) + " more", colour::faint, bg);
+
+    canvas.text (x0 + 4, y, padRight ("mix inserts", nameW), colour::dim, bg, false, nameW);
+    canvas.text (x0 + 6 + nameW + barW, y, juce::String (e.mixMs(), 2).paddedLeft (' ', 6), colour::dim, bg);
+
+    canvas.text (x0 + 2, y0 + boxH - 1, L"a bar is a track's share of one block (they share the cores) \x00b7 esc or stats closes", colour::faint, bg, false,
+                 boxW - 4);
 }
 
 void Ui::drawTitle (App& app)
@@ -485,14 +610,18 @@ void Ui::drawTransport (App& app)
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
     }
 
-    // How hard the audio is working this pass: the slowest block's share of its time. Over 100%
-    // is a dropout, counted in red.
-    if (const auto load = app.engine.worstBlockLoad(); load > 0.0f)
+    // How hard the audio is working: its share of each block's time, always (plugins run
+    // stopped too). Playing, the slowest block this pass joins it; over 100% is a dropout,
+    // counted in red. stats has the rest.
+    if (app.engine.isDeviceRunning())
     {
         gap();
         const auto late = app.engine.lateBlockCount();
-        add ("load " + juce::String (juce::roundToInt (load * 100.0f)) + "%",
-             late > 0 ? colour::error : load > 0.7f ? colour::meterYellow : colour::faint);
+        const auto worst = rolling ? app.engine.worstBlockLoad() : 0.0f;
+        const auto high = juce::jmax (app.engine.dspPeak(), worst);
+        add ("dsp " + juce::String (juce::roundToInt (app.engine.dspLoad() * 100.0f)) + "%"
+                 + (worst > 0.0f ? " peak " + juce::String (juce::roundToInt (worst * 100.0f)) + "%" : juce::String()),
+             late > 0 ? colour::error : high > 0.7f ? colour::meterYellow : colour::faint);
 
         if (late > 0)
             add (" " + juce::String (late) + (late == 1 ? " dropout" : " dropouts"), colour::error, bg, true);
@@ -2051,7 +2180,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"count 4", L"count-in clicks (off)", L"bounces off", L"...don't open after" },
             { Pair, L"count always", L"...on play too", L"bv", L"bounce with video (mp4)" },
             { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"bv cue 3", L"named (no sel: all)" },
-            { Pair, L"dev  panel", L"audio device / driver", L"", L"" },
+            { Pair, L"dev  panel", L"audio device / driver", L"stats", L"load: dsp, cpu, tracks" },
             { Pair, L"dark  light", L"themes (also: grey)", L"", L"" },
             { Pair, L"project", L"the session's settings", L"", L"" },
 #if JUCE_WINDOWS

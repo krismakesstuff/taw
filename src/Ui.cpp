@@ -295,8 +295,10 @@ void Ui::render (App& app)
         }
     }
 
+    // The cursor hidden again with every frame: the console shows it again by itself (a resize,
+    // another window taking focus), and it would sit wherever the last row drawn ended.
     if (! frame.empty())
-        app.console.write (frame);
+        app.console.write (L"\x1b[?25l" + frame);
 }
 
 //==============================================================================

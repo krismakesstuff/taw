@@ -323,7 +323,7 @@ bool App::handleClosePromptKey (const Key& k)
 
 // Closing (close, or quitting): recording stopped and the engine silent at once, then each
 // plugin's state saved and the plugin let go of, a few per frame, under the closing box.
-// save: the changes kept, and last-saved.mp3 bounced from the session's own plugins once
+// save: the changes kept, and <session>-last-saved.mp3 bounced from the session's own plugins once
 // it's closed. Otherwise they're dropped (and it bounces only if it was saved this visit with
 // nothing changed since, so the file is always what's saved).
 void App::startClosing (bool thenQuit, bool save, bool bounce)
@@ -368,7 +368,7 @@ void App::startClosing (bool thenQuit, bool save, bool bounce)
             }
     }
 
-    // last-saved.mp3, from bar 1 to the end plus a couple of seconds to ring out. The graph
+    // <session>-last-saved.mp3, from bar 1 to the end plus a couple of seconds to ring out. The graph
     // takes the session's own plugins (they'd be unloaded now anyway), so nothing reloads.
     if (const auto end = session->contentEnd(); bounceIt && end > 0)
     {
@@ -388,7 +388,7 @@ void App::startClosing (bool thenQuit, bool save, bool bounce)
         const auto rate = juce::roundToInt (sampleRate());
         const bool mp3 = rate == 32000 || rate == 44100 || rate == 48000;
         closing->bounceFile = session->folder().getChildFile (session->tree()[ids::bounceFolder].toString())
-                                  .getChildFile (juce::String ("last-saved") + (mp3 ? ".mp3" : ".wav"));
+                                  .getChildFile (juce::File::createLegalFileName (session->name() + "-last-saved") + (mp3 ? ".mp3" : ".wav"));
     }
 }
 

@@ -915,7 +915,7 @@ last worked on, not what you last opened. The title bar says `unsaved` while the
 
 Closing or quitting with changes (edits, or a plugin window opened and its settings changed
 since the save) asks: `s` saves and bounces, `o` saves without bouncing, `d` drops the changes (`unsaved\` is deleted),
-`esc` stays. Saving as you close bounces `bounces\last-saved.mp3` (WAV at rates MP3 can't do),
+`esc` stays. Saving as you close bounces `bounces\<session>-last-saved.mp3` (WAV at rates MP3 can't do),
 bar 1 to the end of the last clip plus two seconds, over the last one. It bounces in the
 background with the session's own plugins (they were about to be unloaded anyway, so nothing
 reloads), and the session screen comes up at once, with a lit BOUNCING label and a progress

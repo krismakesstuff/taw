@@ -860,8 +860,8 @@ int main (int argc, char** argv)
                 juce::Thread::sleep (20);
             }
 
-            const auto mp3 = dir.getChildFile ("bounces").getChildFile ("last-saved.mp3");
-            check (mp3.getSize() > 10000, "save: bounces\\last-saved.mp3 written");
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile (dir.getFileName() + "-last-saved.mp3");
+            check (mp3.getSize() > 10000, "save: bounces\\<session>-last-saved.mp3 written");
             std::printf ("       %s  %lld bytes  %s\n", mp3.getFullPathName().toRawUTF8(), (long long) mp3.getSize(), app->message.toRawUTF8());
 
             // The session screen: the bounces list has it (newest, so first), and it plays.
@@ -901,7 +901,7 @@ int main (int argc, char** argv)
 
         // "Save only": session.json, no bounce.
         {
-            const auto mp3 = dir.getChildFile ("bounces").getChildFile ("last-saved.mp3");
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile (dir.getFileName() + "-last-saved.mp3");
             const auto bounced = mp3.getLastModificationTime();
             auto app = open();
             app->execute ("bpm " + juce::String (bpm0 + 10));

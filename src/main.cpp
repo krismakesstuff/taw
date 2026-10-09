@@ -887,9 +887,34 @@ int main (int argc, char** argv)
             const auto before = app->sessionIndex;
             key (taw::Key::Down, false);
             check (app->sessionIndex == juce::jmin (before + 1, (int) app->recent.size() - 1) && app->pickArea == Area::sessions, "down: the next session");
+            // Each recent session's size at a glance.
+            {
+                const auto it = std::find (app->recent.begin(), app->recent.end(), dir);
+                const auto i = (size_t) (it - app->recent.begin());
+                check (it != app->recent.end() && i < app->recentSummaries.size() && app->recentSummaries[i].ok
+                           && app->recentSummaries[i].tracks == app->recentSummaries[i].tracks && app->recentSummaries[i].bpm == bpm0 + 9,
+                       "recent sessions: tracks, bpm, plugins, length");
+                std::printf ("%s", app->screenText (140, 20).toRawUTF8());
+            }
+
             key (taw::Key::Right, true);
             std::printf ("%s", app->screenText (100, 24).toRawUTF8());
             std::printf ("%s", app->screenText (70, 16).toRawUTF8());
+            // The sessions folder: a client's drive. Nowhere to put it fails; a new folder on a
+            // drive that's there is made. (The real setting goes back as it was.)
+            {
+                const auto old = app->sessionsFolder;
+                const auto drive = scratch.getChildFile ("client drive");
+                check (! app->setSessionsFolder (drive.getChildFile ("sessions")).ok, "sessions folder: somewhere that isn't there fails");
+                drive.createDirectory();
+                const auto r = app->setSessionsFolder (drive.getChildFile ("sessions"));
+                check (r.ok && drive.getChildFile ("sessions").isDirectory() && app->newSessionParent == drive.getChildFile ("sessions"),
+                       "sessions folder: made, and new sessions go there");
+                std::printf ("       %s\n", r.message.toRawUTF8());
+                app->sessionsFolder = old;
+                app->saveSettings();
+            }
+
             app->playBounce (mp3);
 
             while (! app->bouncePlayer->loaded.load())

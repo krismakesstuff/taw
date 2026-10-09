@@ -3107,8 +3107,22 @@ void Ui::drawTemplatePicker (App& app)
             canvas.text (x + 1, y, App::datedName ("").trim(), colour::faint); // the date it will get
     }
 
+    // Where they go: ctrl+l types a new place over it, ctrl+o picks one.
     canvas.text (14, ++y, "in", colour::dim);
-    canvas.text (19, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 21);
+
+    if (app.editingFolder)
+    {
+        const auto x = canvas.text (19, y, app.folderEdit, app.folderEditFresh ? colour::dim : colour::text, app.folderEditFresh ? colour::selBg : -1,
+                                    true, w - 40);
+        canvas.put (x, y, L' ', -1, colour::text);
+        canvas.text (x + 2, y, L"enter sets it \x00b7 esc leaves it", colour::faint, -1, false, w - x - 3);
+    }
+    else
+    {
+        const auto x = canvas.text (19, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 50);
+        canvas.text (x + 2, y, L"ctrl+o choose \x00b7 ctrl+l type", colour::faint, -1, false, w - x - 3);
+    }
+
     ++y;
 
     // Templates: as many rows as fit, keeping room below for the lists.
@@ -3166,7 +3180,7 @@ void Ui::drawTemplatePicker (App& app)
             const auto& dir = app.recent[(size_t) i];
             const bool sel = i == app.sessionIndex;
             const int bg = sel && focused ? colour::focusBg : -1;
-            const int nameW = juce::jmax (8, colW - 14);
+            const int ageW = 11, nameW = juce::jlimit (8, 22, colW - ageW - 4 - 18), metaW = juce::jmax (0, colW - nameW - ageW - 4);
 
             canvas.fill (leftX, row, colW - 1, L' ', -1, bg);
 
@@ -3174,8 +3188,36 @@ void Ui::drawTemplatePicker (App& app)
                 canvas.put (leftX, row, L'\x25b8', focused ? colour::accent : colour::faint, bg);
 
             canvas.text (leftX + 2, row, padRight (dir.getFileName(), nameW), colour::text, bg, sel && focused, nameW);
-            canvas.text (leftX + 3 + nameW, row, agoText (dir.getChildFile ("session.json").getLastModificationTime()), colour::dim, bg, false,
-                         colW - nameW - 4);
+
+            // Its size at a glance: tracks, tempo, plugins, length.
+            if (i < (int) app.recentSummaries.size() && app.recentSummaries[(size_t) i].ok && metaW > 0)
+            {
+                const auto& m = app.recentSummaries[(size_t) i];
+                const auto secs = juce::roundToInt (m.seconds);
+                const juce::String pieces[] = { juce::String (m.tracks) + " tr", juce::String (juce::roundToInt (m.bpm)) + " bpm",
+                                                juce::String (m.plugins) + " fx",
+                                                secs > 0 ? juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2) : juce::String() };
+                juce::String meta;
+
+                // As many as fit, in that order.
+                for (const auto& piece : pieces)
+                {
+                    if (piece.isEmpty())
+                        continue;
+
+                    const auto next = meta.isEmpty() ? piece : meta + "  " + piece;
+
+                    if (next.length() > metaW - 1)
+                        break;
+
+                    meta = next;
+                }
+
+                canvas.text (leftX + 3 + nameW, row, meta, colour::faint, bg, false, metaW);
+            }
+
+            canvas.text (leftX + 3 + nameW + metaW, row, agoText (dir.getChildFile ("session.json").getLastModificationTime()), colour::dim, bg, false,
+                         ageW);
         }
     }
 

@@ -56,6 +56,16 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
     loadSettings();
     timing::mark ("settings read");
 
+    // Started plainly (not at a session or a new one by name): new sessions go in the folder
+    // you chose, if it's there (a drive that's been unplugged isn't).
+    if (openDir == juce::File() && newSessionName.isEmpty() && sessionsFolder != juce::File())
+    {
+        if (sessionsFolder.isDirectory())
+            newSessionParent = sessionsFolder;
+        else
+            say (Result::fail ("the sessions folder " + sessionsFolder.getFullPathName() + L" isn't there (a drive unplugged?) \x00b7 ctrl+o picks another"));
+    }
+
     // If taw crashes, keep what's open on the way down (as unsaved changes, with a person
     // driving: the next open offers them).
     safety::setEmergencySave ([] (void* app)
@@ -731,6 +741,11 @@ void App::proceedToSession()
 
     if (recent.size() > 12)
         recent.resize (12);
+
+    recentSummaries.clear();
+
+    for (const auto& dir : recent)
+        recentSummaries.push_back (Session::summarise (dir));
 
     sessionIndex = 0;
     templateIndex = defaultTemplateRow();
@@ -3072,6 +3087,9 @@ void App::loadSettings()
         browserAxisX = browserAxisY = 0; // a half-saved pair: the sound-alike map
 
     dateSessionNames = (bool) json.getProperty ("dateNames", true);
+
+    if (const auto folder = json["sessionsFolder"].toString(); folder.isNotEmpty())
+        sessionsFolder = juce::File (folder);
     newRate = newSessionRate();
 
     if (json.hasProperty ("auditionDb"))
@@ -3089,6 +3107,9 @@ void App::saveSettings() const
     o->setProperty ("io", ioVisible);
     o->setProperty ("auditionDb", auditionDb);
     o->setProperty ("dateNames", dateSessionNames);
+
+    if (sessionsFolder != juce::File())
+        o->setProperty ("sessionsFolder", sessionsFolder.getFullPathName());
     o->setProperty ("newRate", newRate);
     o->setProperty ("browser", browserVisible);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
@@ -4067,6 +4088,24 @@ void App::handleTemplatePickerKey (const Key& k)
     }
 
     const auto numTemplates = (int) templates.size(), numBounces = (int) recentBounces.size();
+
+    // The sessions folder: typed, or picked in Windows' dialog.
+    if (handleFolderEditKey (k))
+        return;
+
+    if (k.code == Key::Char && k.ctrl && ! k.alt && (k.ch == 'o' || k.ch == 'l'))
+    {
+        if (k.ch == 'o')
+            browseSessionsFolder();
+        else
+        {
+            editingFolder = true;
+            folderEdit = newSessionParent.getFullPathName();
+            folderEditFresh = true;
+        }
+
+        return;
+    }
 
     // Between areas: ctrl+arrows, the way they sit on screen (or tab, round them all); plain
     // left and right too (shift and alt with them seek the bounce playing).

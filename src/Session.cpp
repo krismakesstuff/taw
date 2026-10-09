@@ -270,6 +270,48 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
     return s;
 }
 
+Session::Summary Session::summarise (const juce::File& dir)
+{
+    Summary s;
+    juce::String error;
+    const auto tree = readSessionFile (dir.getChildFile ("session.json"), error);
+
+    if (! tree.isValid())
+        return s;
+
+    s.ok = true;
+    s.bpm = tree.getProperty (ids::bpm, 120.0);
+    const double rate = tree.getProperty (ids::sampleRate, 44100.0);
+    const double samplesPerBeat = rate * 60.0 / juce::jmax (1.0, s.bpm);
+    juce::int64 end = 0;
+
+    for (const auto& c : tree)
+        s.plugins += c.hasType (ids::INSERT) ? 1 : 0; // the mix's
+
+    for (const auto& t : tree)
+    {
+        if (! t.hasType (ids::TRACK))
+            continue;
+
+        ++s.tracks;
+        s.plugins += t[ids::pluginName].toString().isNotEmpty() ? 1 : 0;
+        const bool sampleTrack = isSampleTrack (t);
+
+        for (const auto& c : t)
+        {
+            s.plugins += c.hasType (ids::INSERT) ? 1 : 0;
+
+            if (! sampleTrack && c.hasType (ids::CLIP))
+                end = juce::jmax (end, (juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
+            else if (isBeatClip (c))
+                end = juce::jmax (end, (juce::int64) std::llround (clipEnd (c) * samplesPerBeat));
+        }
+    }
+
+    s.seconds = rate > 0.0 ? (double) end / rate : 0.0;
+    return s;
+}
+
 bool Session::save() const
 {
     const auto json = juce::JSON::toString (treeToVar (state), juce::JSON::FormatOptions{}.withSpacing (juce::JSON::Spacing::multiLine));

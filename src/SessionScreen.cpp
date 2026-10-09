@@ -254,3 +254,64 @@ double App::bounceLengthSeconds() const
     return bouncePlayer->audio->getNumSamples() / bouncePlayer->rate;
 }
 } // namespace taw
+
+namespace taw
+{
+// New sessions go here from now on, and the screen lists the sessions in it. A folder that
+// isn't there yet is made, as long as the place it would go is.
+Result App::setSessionsFolder (const juce::File& folder)
+{
+    if (folder == juce::File() || ! juce::File::isAbsolutePath (folder.getFullPathName()))
+        return Result::fail ("that's not a folder");
+
+    if (! folder.isDirectory())
+    {
+        if (! folder.getParentDirectory().isDirectory())
+            return Result::fail ("no such place: " + folder.getParentDirectory().getFullPathName());
+
+        if (! folder.createDirectory())
+            return Result::fail ("couldn't make " + folder.getFullPathName());
+    }
+
+    sessionsFolder = newSessionParent = folder;
+    saveSettings();
+    proceedToSession(); // the list, with the sessions there
+    return Result::good ("new sessions go in " + folder.getFullPathName() + " (ctrl+o or ctrl+l changes it)");
+}
+
+void App::browseSessionsFolder()
+{
+    folderChooser = std::make_unique<juce::FileChooser> ("Where new sessions go", newSessionParent);
+    folderChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                [this] (const juce::FileChooser& chooser)
+                                {
+                                    if (const auto folder = chooser.getResult(); folder != juce::File())
+                                        say (setSessionsFolder (folder));
+                                });
+}
+
+// ctrl+l: the path typed (or pasted) over the old one; enter takes it, esc leaves it.
+bool App::handleFolderEditKey (const Key& k)
+{
+    if (! editingFolder)
+        return false;
+
+    const bool fresh = std::exchange (folderEditFresh, false);
+
+    if (k.code == Key::Escape)
+        editingFolder = false;
+    else if (k.code == Key::Enter)
+    {
+        editingFolder = false;
+        say (setSessionsFolder (juce::File (expandHome (folderEdit.trim().unquoted()))));
+    }
+    else if (k.code == Key::Backspace)
+        folderEdit = fresh ? juce::String() : folderEdit.dropLastCharacters (1);
+    else if (k.code == Key::Char && ! k.ctrl && k.ch >= 32)
+        folderEdit = (fresh ? juce::String() : folderEdit) + juce::String::charToString ((juce::juce_wchar) k.ch);
+    else
+        folderEditFresh = fresh; // anything else leaves it as it was
+
+    return true;
+}
+} // namespace taw

@@ -17,6 +17,15 @@ public:
 
     static bool existsIn (const juce::File& dir) { return dir.getChildFile ("session.json").existsAsFile(); }
 
+    // A saved session at a glance, without opening it (the session screen): how big it is.
+    struct Summary
+    {
+        bool ok = false;
+        int tracks = 0, plugins = 0; // plugins: instruments and inserts, the mix's too
+        double bpm = 0.0, seconds = 0.0; // seconds: to the end of the last clip
+    };
+    static Summary summarise (const juce::File& dir);
+
     bool save() const;
 
     // Edits wait in unsaved\ (the session as it is, and plugin states) until a save, so

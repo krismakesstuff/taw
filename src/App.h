@@ -270,6 +270,19 @@ public:
     int bounceIndex = 0;
     void loadRecentBounces();
     void movePickArea (PickArea to);
+    std::vector<Session::Summary> recentSummaries; // beside recent: tracks, bpm, plugins, length
+
+    // Where new sessions go (and whose sessions the screen lists alongside the recent ones):
+    // kept in settings.json, so a client's drive stays the place until you change it. ctrl+o
+    // picks a folder in Windows' dialog; ctrl+l types (or pastes) a path.
+    juce::File sessionsFolder; // settings.json; empty: wherever taw was started
+    Result setSessionsFolder (const juce::File&);
+    void browseSessionsFolder();
+    std::unique_ptr<juce::FileChooser> folderChooser;
+    bool editingFolder = false;
+    juce::String folderEdit;
+    bool folderEditFresh = false; // the path shown is the old one: typing replaces it
+    bool handleFolderEditKey (const Key&);
     void handleBouncesKey (const Key&); // the bounces area's own keys (play, seek, open, reveal)
     // The bounce playing on the session screen: decoded on a thread, then played by the
     // engine's preview voice from any point.

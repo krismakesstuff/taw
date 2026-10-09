@@ -938,6 +938,17 @@ config folder), plus whatever is in the recent sessions' `bounces` folders. `ent
 and `shift+right` seek 5 s (alt: 30), `home` goes back to the start, `esc` stops it, `o` opens the
 session it came from, `r` shows the file in Explorer.
 
+Each recent session shows its size at a glance, in grey between its name and when it was last
+saved: tracks, tempo, plugins (instruments and inserts, the mix's too) and length (to the end
+of the last clip), as many as the column fits, read from its `session.json` without opening it.
+
+**Where sessions go.** New sessions are made in the folder on the `in` line, and the screen lists
+the sessions in it alongside the recent ones. `ctrl+o` picks another in Windows' folder dialog;
+`ctrl+l` types (or pastes) a path over it, `enter` sets it, `esc` leaves it. A folder that isn't
+there yet is made, if the drive or folder it would go in is. It's kept in `settings.json`
+(`sessionsFolder`), so a client's drive stays the place until you change it; plain `taw` starts
+there, and says so if the drive has been unplugged (then it's wherever taw was started).
+
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
 (opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long
 again when the driver asks to be restarted; its MIDI ports wait the whole time. So: a box says

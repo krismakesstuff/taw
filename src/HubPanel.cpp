@@ -76,10 +76,21 @@ bool App::sessionOnHub() const
     return false;
 }
 
+// The hub's hardware, one way: the status says "Speakers + Microphone" (two devices) or one name.
+juce::String App::hubHardware (bool output) const
+{
+    const auto device = hubStatus["device"].toString();
+
+    if (! device.contains (" + "))
+        return device;
+
+    return output ? device.upToFirstOccurrenceOf (" + ", false, false) : device.fromFirstOccurrenceOf (" + ", false, false);
+}
+
 juce::String App::hubEndName (const juce::String& key, int channel, bool source) const
 {
     if (key == interfaceKey)
-        return (source ? "in " : "out ") + juce::String (channel);
+        return hubHardware (! source) + (source ? " in " : " out ") + juce::String (channel);
 
     if (hub::appNumber (key) > 0)
         return hubAppName (key, source) + (channel == 1 ? " L" : channel == 2 ? " R" : " " + juce::String (channel));
@@ -537,7 +548,7 @@ std::vector<App::HubEnd> App::hubRows() const
     std::vector<HubEnd> rows;
 
     for (int i = 1; i <= (int) hubStatus["inputs"]; ++i)
-        rows.push_back ({ interfaceKey, i, 1, "in " + juce::String (i), {}, false, true });
+        rows.push_back ({ interfaceKey, i, 1, hubHardware (false).upToFirstOccurrenceOf (" ", false, false) + " in " + juce::String (i), {}, false, true });
 
     for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
     {
@@ -561,8 +572,10 @@ std::vector<App::HubEnd> App::hubCols() const
     const int outputs = hubStatus["outputs"];
 
     for (int c = 1; c <= outputs; c += 2)
-        cols.push_back ({ interfaceKey, c, juce::jmin (2, outputs - c + 1), "out",
-                          c < outputs ? juce::String (c) + "-" + juce::String (c + 1) : juce::String (c), false, true });
+        // Headed by the hardware's first word ("MacBook", "Scarlett"), so it isn't taken for
+        // the Mac's own output.
+        cols.push_back ({ interfaceKey, c, juce::jmin (2, outputs - c + 1), hubHardware (true).upToFirstOccurrenceOf (" ", false, false),
+                          "out " + (c < outputs ? juce::String (c) + "-" + juce::String (c + 1) : juce::String (c)), false, true });
 
     for (int n = 1; n <= (int) hubStatus["apps"]; ++n)
     {
@@ -944,5 +957,6 @@ juce::String App::hubAppName (const juce::String& key, bool) const { return key;
 bool App::hubAppNamed (const juce::String&) const { return false; }
 void App::refreshHub (bool) {}
 juce::String App::hubEndName (const juce::String&, int, bool) const { return {}; }
+juce::String App::hubHardware (bool) const { return {}; }
 #endif
 } // namespace taw

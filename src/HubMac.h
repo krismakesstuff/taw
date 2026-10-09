@@ -17,7 +17,7 @@ inline constexpr int appChannels = 2 * appDevices; // the hidden device's channe
 bool driverInstalled();
 
 // Who uses the app devices right now, by name ("taw 1"): the apps playing into one and those
-// recording from it ("Google Chrome", for its helper processes too), and "Mac's output" or "Mac's input" when it's
+// recording from it ("Google Chrome", for its helper processes too), and "system output" or "system input" when it's
 // the system's output or input. macOS only lists an app while its audio runs.
 struct DeviceUsers
 {

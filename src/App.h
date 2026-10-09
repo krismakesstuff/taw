@@ -260,6 +260,7 @@ public:
     // "taw1in" (what they hear from it); "Zoom" if it's named so.
     juce::String hubAppName (const juce::String& key, bool source) const;
     bool hubAppNamed (const juce::String& key) const;
+    juce::String hubHardware (bool output) const; // the hub's interface that way: "MacBook Pro Speakers"
 
     // Who uses each app device now ("taw 1"): the apps playing into it, and those hearing it as
     // their mic (macOS only lists an app while its audio runs). Asked with the status.

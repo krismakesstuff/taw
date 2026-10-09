@@ -235,7 +235,7 @@ std::map<juce::String, DeviceUsers> appDeviceUsers()
         const auto deviceName = stringProperty (device, kAudioObjectPropertyName);
 
         if (deviceName.startsWith ("taw ") && deviceName != "taw hub")
-            (output ? users[deviceName].playing : users[deviceName].listening).add (output ? "Mac's output" : "Mac's input");
+            (output ? users[deviceName].playing : users[deviceName].listening).add (output ? "system output" : "system input");
     }
 
     return users;

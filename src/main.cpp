@@ -852,6 +852,7 @@ int main (int argc, char** argv)
             check (! work.exists(), "save: unsaved\\ is gone");
             check (bpmOnDisk() == bpm0 + 9, "save: session.json has the edit");
             check (app->backgroundBounces.size() == 1, "save: last-saved is bouncing");
+            std::printf ("%s", app->screenText (100, 12).toRawUTF8());
 
             while (! app->backgroundBounces.empty())
             {
@@ -898,6 +899,18 @@ int main (int argc, char** argv)
             app->stopBounce();
         }
 
+        // "Save only": session.json, no bounce.
+        {
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile ("last-saved.mp3");
+            const auto bounced = mp3.getLastModificationTime();
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 10));
+            app->pumpBackgroundWork();
+            close (*app, "o");
+            check (bpmOnDisk() == bpm0 + 10, "save only: session.json has the edit");
+            check (app->backgroundBounces.empty() && mp3.getLastModificationTime() == bounced, "save only: no bounce");
+        }
+
         // Nothing changed: closing doesn't ask.
         {
             auto app = open();
@@ -913,7 +926,7 @@ int main (int argc, char** argv)
         }
 
         check (work.getChildFile ("session.json").existsAsFile(), "window closed on changes: kept in unsaved\\");
-        check (bpmOnDisk() == bpm0 + 9, "...and session.json not changed");
+        check (bpmOnDisk() == bpm0 + 10, "...and session.json not changed");
 
         {
             auto app = open();

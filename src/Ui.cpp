@@ -610,23 +610,6 @@ void Ui::drawTransport (App& app)
         add ("count " + s->tree()[ids::countIn].toString(), colour::dim);
     }
 
-    // How hard the audio is working: its share of each block's time, always (plugins run
-    // stopped too). Playing, the slowest block this pass joins it; over 100% is a dropout,
-    // counted in red. stats has the rest.
-    if (app.engine.isDeviceRunning())
-    {
-        gap();
-        const auto late = app.engine.lateBlockCount();
-        const auto worst = rolling ? app.engine.worstBlockLoad() : 0.0f;
-        const auto high = juce::jmax (app.engine.dspPeak(), worst);
-        add ("dsp " + juce::String (juce::roundToInt (app.engine.dspLoad() * 100.0f)) + "%"
-                 + (worst > 0.0f ? " peak " + juce::String (juce::roundToInt (worst * 100.0f)) + "%" : juce::String()),
-             late > 0 ? colour::error : high > 0.7f ? colour::meterYellow : colour::faint);
-
-        if (late > 0)
-            add (" " + juce::String (late) + (late == 1 ? " dropout" : " dropouts"), colour::error, bg, true);
-    }
-
     // Automation write armed: mapped controllers moved while playing are recorded.
     if (app.writeOn)
     {
@@ -674,6 +657,25 @@ void Ui::drawTransport (App& app)
         x = canvas.text (x, y, p.text, p.fg, p.bg, p.bold);
 
     canvas.put (x, y, L' ', -1, bg);
+
+    // How hard the audio is working, off the bar on the right in plain grey: its share of each
+    // block's time, always (plugins run stopped too). Playing, the slowest block this pass joins
+    // it; over 100% is a dropout, counted in red. stats has the rest.
+    if (app.engine.isDeviceRunning())
+    {
+        const auto late = app.engine.lateBlockCount();
+        const auto worst = rolling ? app.engine.worstBlockLoad() : 0.0f;
+        const auto text = "dsp " + juce::String (juce::roundToInt (app.engine.dspLoad() * 100.0f)) + "%"
+                          + (worst > 0.0f ? " peak " + juce::String (juce::roundToInt (worst * 100.0f)) + "%" : juce::String());
+        const auto drops = late > 0 ? " " + juce::String (late) + (late == 1 ? " dropout" : " dropouts") : juce::String();
+        const int dx = w - 1 - text.length() - drops.length();
+
+        if (dx > x + 2) // only where the bar leaves room
+        {
+            const int end = canvas.text (dx, y, text, colour::dim);
+            canvas.text (end, y, drops, colour::error, -1, true);
+        }
+    }
 }
 
 void Ui::drawMeter (int x, int y, int width, float level, int bg)
@@ -3026,7 +3028,7 @@ void Ui::drawClosePrompt (App& app)
     const int w = canvas.width();
     const int boxW = std::min (w - 4, 64), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
 
-    for (int y = 0; y < 7; ++y)
+    for (int y = 0; y < 8; ++y)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
     const juce::String title (app.closePrompt->thenQuit ? "QUIT" : "CLOSE");
@@ -3036,10 +3038,12 @@ void Ui::drawClosePrompt (App& app)
 
     int x = canvas.text (x0 + 2, y0 + 4, "s", colour::accent, bg, true);
     x = canvas.text (x + 1, y0 + 4, "save, and bounce last-saved", colour::text, bg, false, boxW - 4);
-    x = canvas.text (x0 + 2, y0 + 5, "d", colour::accent, bg, true);
-    canvas.text (x + 1, y0 + 5, "don't save", colour::text, bg);
-    x = canvas.text (x0 + 20, y0 + 5, "esc", colour::accent, bg, true);
-    canvas.text (x + 1, y0 + 5, "stay", colour::text, bg);
+    x = canvas.text (x0 + 2, y0 + 5, "o", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 5, "save only, no bounce", colour::text, bg);
+    x = canvas.text (x0 + 2, y0 + 6, "d", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 6, "don't save", colour::text, bg);
+    x = canvas.text (x0 + 26, y0 + 6, "esc", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 6, "stay", colour::text, bg);
 }
 
 // The session screen, top to bottom: a new session (its name, where it goes, the templates),
@@ -3225,20 +3229,29 @@ void Ui::drawTemplatePicker (App& app)
         }
     }
 
-    // Bounces still going in the background (a session saved and closed), else the last word.
+    // Bounces still going in the background (a session saved and closed): a lit label and a
+    // bar, so it's plain it's working (and, quitting, that taw waits for it). Else the last word.
     if (! app.backgroundBounces.empty())
     {
         const auto& b = *app.backgroundBounces.front();
-        auto text = "bouncing " + app.backgroundBounceNames.front() + L" \x00b7 " + b.file().getFileName() + " "
-                    + juce::String (juce::roundToInt (b.progress() * 100.0f)) + "%";
+        const auto progress = juce::jlimit (0.0f, 1.0f, b.progress());
+        int x = canvas.text (1, h - 3, L" \x25cf BOUNCING ", 231, colour::marker, true); // as a bounce in a session
+        x = canvas.text (x + 1, h - 3, app.backgroundBounceNames.front() + L" \x00b7 " + b.file().getFileName(), colour::text, -1, true, w / 2);
 
         if (app.backgroundBounces.size() > 1)
-            text << " (+" << (int) app.backgroundBounces.size() - 1 << " more)";
+            x = canvas.text (x, h - 3, " (+" + juce::String ((int) app.backgroundBounces.size() - 1) + " more)", colour::dim);
+
+        const auto pct = " " + juce::String (juce::roundToInt (progress * 100.0f)) + "%";
+        const int barW = juce::jmax (0, w - 2 - (x + 1) - pct.length());
+        const int filled = (int) (barW * progress);
+
+        for (int i = 0; i < barW; ++i)
+            canvas.put (x + 1 + i, h - 3, i < filled ? L'\x2588' : L'\x2591', i < filled ? colour::marker : colour::faint);
+
+        canvas.text (x + 1 + barW, h - 3, pct, colour::marker, -1, true);
 
         if (app.quitAfterBounces)
-            text << L" \x00b7 taw quits when it's done \x00b7 esc quits now \x00b7 any key stays";
-
-        canvas.text (1, h - 3, text, app.quitAfterBounces ? colour::text : colour::dim, -1, false, w - 2);
+            canvas.text (1, h - 2, L"taw quits when it's done \x00b7 esc quits now (the bounce is dropped) \x00b7 any other key stays", colour::text, -1, false, w - 2);
     }
     else if (app.message.isNotEmpty())
     {

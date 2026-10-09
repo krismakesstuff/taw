@@ -300,6 +300,11 @@ bool App::handleClosePromptKey (const Key& k)
         closePrompt.reset();
         startClosing (thenQuit, true);
     }
+    else if (c == 'o')
+    {
+        closePrompt.reset();
+        startClosing (thenQuit, true, false); // save only: no last-saved this time
+    }
     else if (c == 'd' || c == 'n')
     {
         closePrompt.reset();
@@ -321,7 +326,7 @@ bool App::handleClosePromptKey (const Key& k)
 // save: the changes kept, and last-saved.mp3 bounced from the session's own plugins once
 // it's closed. Otherwise they're dropped (and it bounces only if it was saved this visit with
 // nothing changed since, so the file is always what's saved).
-void App::startClosing (bool thenQuit, bool save)
+void App::startClosing (bool thenQuit, bool save, bool bounce)
 {
     if (recording || engine.isRolling())
     {
@@ -335,7 +340,7 @@ void App::startClosing (bool thenQuit, bool save)
         }
     }
 
-    const bool bounceIt = save || (savedThisVisit && ! hasUnsavedChanges());
+    const bool bounceIt = save ? bounce : savedThisVisit && ! hasUnsavedChanges();
 
     // The video window's place, for next time (not an edit worth asking about).
     if (save && video != nullptr)

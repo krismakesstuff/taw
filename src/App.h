@@ -233,7 +233,7 @@ public:
         juce::File bounceFile;
     };
     std::unique_ptr<Closing> closing;
-    void startClosing (bool thenQuit, bool save);
+    void startClosing (bool thenQuit, bool save, bool bounce = true); // bounce: last-saved, when it saves
     void stepClosing();
     Result finishClosing (std::optional<bool> saved = {}); // saved: a close that asked (true: it saved)
 

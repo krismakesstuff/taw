@@ -257,7 +257,7 @@ records the selected tracks, else whatever is armed.
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device |
 | `panel` | open the ASIO driver control panel |
-| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; go back to the sessions; quit (`q` alone is a view key). With unsaved changes, closing and quitting ask: `s` save (and bounce last-saved), `d` don't save, `esc` stay |
+| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; go back to the sessions; quit (`q` alone is a view key). With unsaved changes, closing and quitting ask: `s` save (and bounce last-saved), `o` save only, `d` don't save, `esc` stay |
 
 ### Rolling keys
 
@@ -914,11 +914,12 @@ when you save. So the sessions list, sorted by when `session.json` last changed,
 last worked on, not what you last opened. The title bar says `unsaved` while there are edits.
 
 Closing or quitting with changes (edits, or a plugin window opened and its settings changed
-since the save) asks: `s` saves and bounces, `d` drops the changes (`unsaved\` is deleted),
+since the save) asks: `s` saves and bounces, `o` saves without bouncing, `d` drops the changes (`unsaved\` is deleted),
 `esc` stays. Saving as you close bounces `bounces\last-saved.mp3` (WAV at rates MP3 can't do),
 bar 1 to the end of the last clip plus two seconds, over the last one. It bounces in the
 background with the session's own plugins (they were about to be unloaded anyway, so nothing
-reloads), and the session screen comes up at once; its bottom line shows the progress. A close
+reloads), and the session screen comes up at once, with a lit BOUNCING label and a progress
+bar near the bottom. A close
 without changes bounces too if you saved during the visit. Quitting waits for the bounce on the
 session screen (any key stays, esc quits now and drops it).
 
@@ -959,7 +960,7 @@ in. So a block takes about as long as its slowest track instead of all of them a
 `taw --paralleltest` checks it sounds exactly as on one core. Bounces render on their own
 thread, one track after another, as before.
 
-The transport always says `dsp NN%`: how much of each block's time the audio takes (averaged
+Right of the transport bar, in grey, `dsp NN%` is always shown: how much of each block's time the audio takes (averaged
 over half a second; plugins run stopped too, so it's live while you build). Playing, `peak NN%`
 joins it: the slowest block this pass. A block over 100% is a dropout (a click), counted in red;
 stopping says how many. `stats` opens a panel with the rest: dsp now, its high point in the last

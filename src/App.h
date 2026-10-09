@@ -460,7 +460,10 @@ public:
     juce::File lastBounce;                          // this session's latest finished bounce
     bool interactive = false;                       // run() is driving (not taw --exec): may open other windows
     const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
-    void openDevicePicker();
+    // forHub: the hub's interface instead (CoreAudio only, not the driver's devices); enter
+    // gives it to the hub, esc goes back to the hub's page.
+    void openDevicePicker (bool forHub = false);
+    bool pickingHubInterface = false;
     Result showControlPanel();
     // Quitting saves and closes the session first: on screen, in steps under the closing box.
     void quit()

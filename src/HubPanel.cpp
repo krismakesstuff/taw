@@ -434,10 +434,20 @@ Result App::hubCommand (const juce::String& rest)
         return Result::good ("the hub forgot " + args + " and its " + juce::String ((int) answer["removed"]) + " routes");
     }
 
-    // interface: the devices there are; interface MacBook Pro Speakers (+ MacBook Pro Microphone):
-    // the hub's own interface, by name or the start of one. The hub restarts with it.
+    // interface: a picker, like dev's (from a session's command line, over the hub's page);
+    // interface MacBook Pro Speakers (+ MacBook Pro Microphone): the hub's own interface, by
+    // name or the start of one. The hub restarts with it.
     if (word == "interface" || word == "if")
     {
+        if (args.isEmpty())
+        {
+            if (mode != Mode::Hub)
+                openHubPage();
+
+            openDevicePicker (true);
+            return Result::good();
+        }
+
         juce::StringArray outputs, inputs;
 
         for (auto* type : engine.devices().getAvailableDeviceTypes())
@@ -452,12 +462,6 @@ Result App::hubCommand (const juce::String& rest)
             for (int i = list->size(); --i >= 0;)
                 if (list->getReference (i).startsWith ("taw ")) // the driver's own: a loop
                     list->remove (i);
-
-        if (args.isEmpty())
-        {
-            const juce::String dot (L" \x00b7 ");
-            return Result::good ("outputs: " + outputs.joinIntoString (dot) + "   inputs: " + inputs.joinIntoString (dot));
-        }
 
         auto pick = [] (const juce::StringArray& names, const juce::String& typed) -> juce::String
         {
@@ -481,10 +485,10 @@ Result App::hubCommand (const juce::String& rest)
         auto input = typedIn.isNotEmpty() ? pick (inputs, typedIn) : juce::String();
 
         if (output.isEmpty())
-            return Result::fail ("no one output called " + typedOut + L" \x00b7 interface lists them");
+            return Result::fail ("no one output called " + typedOut + L" \x00b7 i picks one");
 
         if (typedIn.isNotEmpty() && input.isEmpty())
-            return Result::fail ("no one input called " + typedIn + L" \x00b7 interface lists them");
+            return Result::fail ("no one input called " + typedIn + L" \x00b7 i picks one");
 
         if (typedIn.isEmpty() && inputs.contains (output))
             input = output; // an interface with both
@@ -918,6 +922,13 @@ void App::handleHubPageKey (const Key& k)
             if (! typing && (k.ch == '[' || k.ch == ']'))
             {
                 say (hubLevel (k.ch == ']' ? 1.0 : -1.0));
+                return;
+            }
+
+            // i: the hub's interface, in a picker.
+            if (! typing && (k.ch == 'i' || k.ch == 'I'))
+            {
+                openDevicePicker (true);
                 return;
             }
 

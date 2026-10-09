@@ -2812,7 +2812,7 @@ void Ui::drawHubPage (App& app)
         canvas.text (1, y, "interface", colour::dim);
         // The rate and block first: the device's name can be long (two devices).
         x = canvas.text (12, y, juce::String ((double) s["sampleRate"] / 1000.0, 1) + "k/" + juce::String ((int) s["blockSize"]), colour::dim);
-        canvas.text (x + 2, y++, s["device"].toString() + L" \x00b7 interface lists others", colour::text, -1, false, w - x - 3);
+        canvas.text (x + 2, y++, s["device"].toString() + L" \x00b7 i changes it", colour::text, -1, false, w - x - 3);
 
         if ((int) s["apps"] == 0)
             canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
@@ -2862,7 +2862,7 @@ void Ui::drawHubPage (App& app)
             if (rowChosen)
                 canvas.put (1, ry, L'\x25b8', colour::accent);
 
-            x = canvas.text (3, ry, row.name, rowChosen ? colour::text : (row.live ? colour::text : colour::faint), -1, rowChosen, labelW - 3);
+            x = canvas.text (3, ry, row.name, rowChosen ? colour::accent : (row.live ? colour::text : colour::faint), -1, rowChosen, labelW - 3);
 
             if (row.sub.isNotEmpty() && x + 1 < labelW)
                 canvas.text (x + 1, ry, row.sub, colour::faint, -1, false, labelW - x - 1);
@@ -2958,10 +2958,10 @@ void Ui::drawHubPage (App& app)
     canvas.put (x, h - 2, L' ', -1, colour::text);
 
     if (app.hubLine.isEmpty())
-        canvas.text (x + 2, h - 2, L"or type: route in 1 > Song 3 \x00b7 name taw 1 Zoom \x00b7 interface \x00b7 forget Song \x00b7 start \x00b7 stop",
+        canvas.text (x + 2, h - 2, L"or type: route in 1 > Song 3 \x00b7 name taw 1 Zoom \x00b7 forget Song \x00b7 start \x00b7 stop",
                      colour::faint, -1, false, w - x - 3);
 
-    canvas.text (1, h - 1, L"\x2190\x2191\x2193\x2192 move \x00b7 space on/off \x00b7 [ ] level \x00b7 shift+\x2190\x2192 which inputs \x00b7 n name \x00b7 esc back",
+    canvas.text (1, h - 1, L"\x2190\x2191\x2193\x2192 move \x00b7 space on/off \x00b7 [ ] dB \x00b7 shift+\x2190\x2192 inputs \x00b7 i interface \x00b7 n name \x00b7 esc back",
                  colour::dim, -1, false, w - 2);
 }
 
@@ -2971,7 +2971,11 @@ void Ui::drawDevicePicker (App& app)
     const int w = canvas.width(), h = canvas.height();
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
-    canvas.text (5, 0, L"\x25b8 audio device", colour::text, colour::headerBg);
+    canvas.text (5, 0, app.pickingHubInterface ? L"\x25b8 hub \x25b8 interface" : L"\x25b8 audio device", colour::text, colour::headerBg);
+
+    if (app.pickingHubInterface)
+        canvas.text (1, 2, L"Choose the hardware the hub plays through and hears (it restarts on it; sessions on the hub follow).", colour::dim, -1, false, w - 2);
+    else
 #if JUCE_WINDOWS
     canvas.text (1, 2, "Choose the interface taw records and plays through. ASIO gives the lowest latency.", colour::dim);
 #else

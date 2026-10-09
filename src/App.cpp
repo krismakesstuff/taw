@@ -610,20 +610,35 @@ juce::String App::headsetWarning()
 //==============================================================================
 // Devices
 
-void App::openDevicePicker()
+void App::openDevicePicker (bool forHub)
 {
     auto& dm = engine.devices();
     deviceChoices.clear();
     pickIndex = 0;
+    pickingHubInterface = forHub;
 
     const auto* current = dm.getCurrentAudioDevice();
-    const auto currentInput = dm.getAudioDeviceSetup().inputDeviceName;
+    // What's chosen now: this taw's device, or the hub's interface.
+    const auto currentType = forHub ? juce::String ("CoreAudio") : current != nullptr ? current->getTypeName() : juce::String();
+    const auto currentOutput = forHub ? hubHardware (true) : current != nullptr ? current->getName() : juce::String();
+    const auto currentInput = forHub ? hubHardware (false) : dm.getAudioDeviceSetup().inputDeviceName;
 
     for (auto* type : dm.getAvailableDeviceTypes())
     {
+        if (forHub && type->getTypeName() != "CoreAudio")
+            continue;
+
         type->scanForDevices();
-        const auto outputs = type->getDeviceNames (false);
-        const auto inputs = type->getDeviceNames (true);
+        auto outputs = type->getDeviceNames (false);
+        auto inputs = type->getDeviceNames (true);
+
+        // The hub can't play through its own driver's devices: a loop.
+        if (forHub)
+            for (auto* list : { &outputs, &inputs })
+                for (int i = list->size(); --i >= 0;)
+                    if (list->getReference (i).startsWith ("taw "))
+                        list->remove (i);
+
         const auto defaultInput = inputs[juce::jmax (0, type->getDefaultDeviceIndex (true))];
 
         // Where outputs and inputs are separate devices (CoreAudio), ←→ picks the input: a
@@ -633,20 +648,17 @@ void App::openDevicePicker()
         if (type->hasSeparateInputsAndOutputs())
         {
             choosable = inputs;
-            choosable.add ({}); // none
+
+            if (! forHub) // the hub keeps an input
+                choosable.add ({}); // none
         }
 
         for (const auto& o : outputs)
         {
             auto in = inputs.contains (o) ? o : defaultInput;
 
-            if (current != nullptr && current->getTypeName() == type->getTypeName() && current->getName() == o)
-            {
-                pickIndex = (int) deviceChoices.size();
-
-                if (choosable.contains (currentInput))
-                    in = currentInput; // as it is now
-            }
+            if (currentType == type->getTypeName() && currentOutput == o && choosable.contains (currentInput))
+                in = currentInput; // as it is now
 
             deviceChoices.push_back ({ type->getTypeName(), o, in, choosable });
         }
@@ -655,10 +667,9 @@ void App::openDevicePicker()
     // Put ASIO first: it's what a dedicated interface should be using. (macOS has only CoreAudio.)
     std::stable_partition (deviceChoices.begin(), deviceChoices.end(), [] (const auto& c) { return c.type == "ASIO"; });
 
-    if (current != nullptr)
-        for (int i = 0; i < (int) deviceChoices.size(); ++i)
-            if (deviceChoices[(size_t) i].type == current->getTypeName() && deviceChoices[(size_t) i].output == current->getName())
-                pickIndex = i;
+    for (int i = 0; i < (int) deviceChoices.size(); ++i)
+        if (deviceChoices[(size_t) i].type == currentType && deviceChoices[(size_t) i].output == currentOutput)
+            pickIndex = i;
 
     mode = Mode::DevicePicker;
 }
@@ -3764,13 +3775,22 @@ void App::handleDevicePickerKey (const Key& k)
 
             return;
         case Key::Escape:
-            if (engine.devices().getCurrentAudioDevice() != nullptr)
+            if (std::exchange (pickingHubInterface, false))
+                mode = Mode::Hub;
+            else if (engine.devices().getCurrentAudioDevice() != nullptr)
                 proceedToSession();
             else
                 quit();
             return;
         case Key::Enter:
-            if (n > 0)
+            if (n > 0 && pickingHubInterface)
+            {
+                const auto& c = deviceChoices[(size_t) pickIndex];
+                say (hubCommand ("interface " + c.output + " + " + c.input));
+                pickingHubInterface = false;
+                mode = Mode::Hub;
+            }
+            else if (n > 0)
             {
                 const auto r = chooseDevice (deviceChoices[(size_t) pickIndex]);
                 say (r);
@@ -3781,7 +3801,7 @@ void App::handleDevicePickerKey (const Key& k)
             return;
         case Key::Char:
             if (k.ch == 'r' || k.ch == 'R')
-                openDevicePicker(); // rescan, e.g. after plugging the interface in
+                openDevicePicker (pickingHubInterface); // rescan, e.g. after plugging the interface in
             else if (k.ch >= '1' && k.ch <= '9' && k.ch - '1' < n)
                 pickIndex = k.ch - '1';
             return;

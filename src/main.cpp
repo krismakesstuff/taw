@@ -2011,6 +2011,13 @@ int main (int argc, char** argv)
         args.clear();
 #else
     const bool hubPage = false;
+
+    // Not a session called hub by mistake (taw ./hub is one).
+    if (args.size() == 1 && args[0] == "hub")
+    {
+        std::printf ("the audio hub runs on macOS only so far\n");
+        return 1;
+    }
 #endif
 
     const auto cwd = juce::File::getCurrentWorkingDirectory();

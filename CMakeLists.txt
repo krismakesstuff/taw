@@ -87,7 +87,13 @@ endif()
 
 if (APPLE)
     target_sources(taw PRIVATE src/TerminalSetup.cpp src/MacFocus.mm)
+endif()
 
+# The audio hub (docs/plan-audio-hub.md): macOS only so far. Off builds taw as it is on
+# Windows, without it (the hub command and page say so).
+option(TAW_WITH_HUB "Build the audio hub (macOS only so far)" ${APPLE})
+
+if (APPLE AND TAW_WITH_HUB)
     # The hub's virtual devices: taw.driver, a CoreAudio plug-in ("taw 1" to "taw 4", and the
     # hidden "taw hub"), built beside taw; taw --install-driver puts it where coreaudiod looks.
     add_library(taw_driver MODULE driver/TawDriver.c)
@@ -106,7 +112,7 @@ if (APPLE)
         VERBATIM)
     add_dependencies(taw taw_driver)
 
-    # The audio hub (docs/plan-audio-hub.md): macOS first; its shared memory is POSIX.
+    # The hub itself; its shared memory is POSIX.
     target_sources(taw PRIVATE src/Hub.cpp src/HubDevice.cpp src/HubServer.cpp src/HubShared.cpp src/HubMac.mm)
     target_link_libraries(taw PRIVATE "-framework AVFoundation")
     target_compile_definitions(taw PRIVATE TAW_HUB=1)

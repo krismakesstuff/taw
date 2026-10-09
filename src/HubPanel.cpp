@@ -1033,5 +1033,6 @@ bool App::hubAppNamed (const juce::String&) const { return false; }
 void App::refreshHub (bool) {}
 juce::String App::hubEndName (const juce::String&, int, bool) const { return {}; }
 juce::String App::hubHardware (bool) const { return {}; }
+bool App::sessionOnHub() const { return false; }
 #endif
 } // namespace taw

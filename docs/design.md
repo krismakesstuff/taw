@@ -919,9 +919,10 @@ join it later through virtual devices.
   block size, and how many inputs a session gets.
 - **Its interface:** `hub-device.xml` once it has one (written the first time it starts),
   else the device taw sessions saved (unless that's the hub itself), else the default; never
-  one of the driver's own devices (that would be a loop). `interface` on the hub page lists
-  the devices, `interface MacBook Pro Speakers + MacBook Pro Microphone` sets it (an output,
-  and an input when it's another device) and restarts the hub.
+  one of the driver's own devices (that would be a loop). `i` on the hub page (or `interface`)
+  opens a picker, outputs and inputs side by side (←→ between them, ↑↓ choose, "● current"
+  marks what the hub has, enter uses both); `interface MacBook Pro Speakers + MacBook Pro
+  Microphone` sets it typed (the start of a name will do). Either restarts the hub on it.
 - **Apps: taw.driver** (`driver/TawDriver.c`), a CoreAudio AudioServerPlugIn built beside
   taw. Any app can pick "taw 1" to "taw 4" (stereo both ways) as its speaker or mic. The hub
   reaches them through a hidden 8-channel device, "taw hub": its inputs 2N-1, 2N are what apps
@@ -959,21 +960,29 @@ join it later through virtual devices.
   runs is rebuilt on any change and handed over through a queue like the engine's graphs.
 - **In taw:** the hub has a page of its own (`Mode::Hub`), with or without a session: `taw hub`
   from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), tab on
-  the start screen, `hub` in a session (which plays on meanwhile). It shows the interface and a
-  matrix: rows are where sound comes from (the interface's inputs one by one, the app devices
-  and sessions' outputs as stereo), columns where it goes (the interface's outputs in pairs, the
-  app devices' mics, sessions' inputs). Arrows move, space turns a cell on or off (stereo to
-  stereo side by side, mono to both sides; into a session on the input of the same number for
-  an interface input, else the first free pair after the interface's), `[ ]` its level,
-  shift+←→ which of a session's inputs it lands on, del takes it out, `n` names the app device
-  (`name taw 1 Zoom`: a label in taw, kept in hub.json; route commands take it too). A cell is
-  ● on, · off, the inputs it lands on in a session column, ~ when typed routes don't fit the
-  shape, ─ an app device or session into itself. The line under it says what the cell does.
-  It scrolls both ways. Esc goes back. Its command line takes `route in 1-2 > Song`,
-  `route Song > out 1-2 -6`, `unroute Song > out`, `forget Song`, `start`, `stop` (`hub` in
-  front is fine, and in a session it's needed). `this` is the session here. Channels pair up
-  (one to many spreads, many to one sums, none given: 1-2). A taw with no session open joins
-  with no name and gets no routes until one opens.
+  the start screen, `hub` in a session (which plays on meanwhile; one that isn't on the hub is
+  told to pick taw hub in `dev`). It shows the interface and a matrix named from the hub's
+  side: rows come in, columns go out. Rows are the interface's inputs one by one ("MacBook in
+  1": the hardware by its first word, so it isn't taken for the Mac's own output), the app
+  devices as `taw1in` (what apps play to taw 1) and sessions' outputs as stereo; columns are
+  the interface's outputs in pairs ("MacBook / out 1-2"), the app devices as `taw1out` (what
+  apps hear with taw 1 as their mic) and sessions' inputs. Beside an app device: who uses it
+  now (macOS's process list, a helper as its app, "system output" when the Mac's sound is set
+  to it; an app shows only while its audio runs). The chosen row and column are in the accent.
+  Arrows move, space turns a cell on or off (stereo to stereo side by side, mono to both sides;
+  into a session on the input of the same number for an interface input, else the first free
+  pair after the interface's), `[ ]` its level, shift+←→ which of a session's inputs it lands
+  on (a track there takes them with `i`), del takes it out, `n` names the app device (`name
+  taw 1 Zoom`: a label in taw, kept in hub.json; route commands take it too), `i` the
+  interface. A cell is ● on, · off, the inputs it lands on in a session column, ~ when typed
+  routes don't fit the shape, ─ an app device or session into itself. The line under it says
+  what the cell does. It scrolls both ways. Esc goes back. Its command line takes `route in
+  1-2 > Song`, `route taw1in > Song`, `route Song > out 1-2 -6`, `unroute Song > out`, `forget
+  Song`, `start`, `stop` (`hub` in front is fine, and in a session it's needed). `this` is the
+  session here. Channels pair up (one to many spreads, many to one sums, none given: 1-2). A
+  taw with no session open joins with no name and gets no routes until one opens.
+- **Without the hub** (Windows so far, or `-DTAW_WITH_HUB=OFF`): the hub command and page say
+  it's macOS only, `taw hub` too (rather than making a session called hub).
 - **The hub going away:** sessions hear it, wait for it, and carry on when it's back (same rate
   and block), without choosing the device again.
 - **Tests:** `taw --hubtest` (an engine and server in process, a thread for the interface, two

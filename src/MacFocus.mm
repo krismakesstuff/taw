@@ -61,4 +61,13 @@ void activateTerminal()
         }
     }
 }
+
+int frontmostApp()
+{
+    @autoreleasepool
+    {
+        auto* app = [NSWorkspace sharedWorkspace].frontmostApplication;
+        return app != nil ? (int) app.processIdentifier : 0;
+    }
+}
 } // namespace taw::macFocus

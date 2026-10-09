@@ -137,6 +137,9 @@ public:
     // End of the last clip or hit on any track.
     juce::int64 contentEnd() const;
 
+    // Lets go of the session's lock (.taw-lock: one taw at a time has a session open).
+    ~Session();
+
 private:
     Session (juce::File folder, juce::ValueTree tree) : dir (std::move (folder)), state (std::move (tree)) {}
 
@@ -159,7 +162,6 @@ struct Template
 
 juce::File configFolder();
 std::vector<Template> loadTemplates();
-
 // Recently opened session folders, newest first, only those that still exist.
 std::vector<juce::File> loadRecentSessions();
 void rememberSession (const juce::File& folder);

@@ -1,7 +1,17 @@
 # Plan: the taw audio hub
 
-Status: planned, not started (2026-10-07). Written so another agent can pick it up. Read
-`docs/design.md` first (Threads, Recording, Routing and inserts, Delay compensation).
+Status (2026-10-09), macOS:
+- **Built:** steps 0 and 1, the hub's own page (a routing matrix, an interface picker, who
+  uses each app device), and step 3's virtual devices (taw.driver, "taw 1" to "taw 4").
+  App → taw 1 → hub → taw 2 → app is checked with `--apptest`.
+- **Next:** trying it with Zoom, then step 2 (process taps).
+- **Windows:** builds without the hub (`TAW_WITH_HUB` is off there); step 0 (the session
+  lock, settings merging) and `dev`'s input choice work there. See "Windows: what the hub
+  needs" below.
+- **Where to read:** "Step 1 as built" below, and the Hub section of `docs/design.md`.
+
+Written so another agent can pick it up. Read `docs/design.md` first (Threads, Recording,
+Routing and inserts, Delay compensation, Hub).
 
 ## Why
 
@@ -31,6 +41,72 @@ sessions connect to it as clients, and it routes between the hardware, the sessi
 For 3 and 4 the design must not paint us into a corner (see "Later" at the end), but
 nothing is built for them yet.
 
+## macOS first (decided with the user, 2026-10-08)
+
+The hub is built and tried on macOS first, because there the virtual device (step 3) is a
+user-space driver instead of a signed kernel driver. What the user wants to try: an app's
+audio into taw, taw's mix out to an app (Zoom, a dedicated feed), and apps routed to each
+other, Voicemeeter-style. Windows follows with the same hub and routing, minus the driver
+(VB-Cable stands in there). Where this section and the steps below disagree, this section
+wins on macOS.
+
+**Order on macOS:** step 0, step 1, then the virtual devices (step 3, pulled forward), then
+app capture with process taps (step 2). MIDI stays out for now.
+
+**Decisions:**
+
+- **Sessions connect over shared memory** (the "taw hub" device type in step 1), not through
+  the driver. Considered and turned down: sessions using driver devices as their audio
+  device, which needs no client code but adds a buffer of latency and does nothing for
+  Windows.
+- **The hub is always on.** A launchd user agent (`~/Library/LaunchAgents`, RunAtLoad,
+  KeepAlive) starts it at login, so routes between apps work with no taw open. taw installs
+  it (`taw --install-hub`, no admin), offering to the first time `hub` is used. This
+  replaces "started on demand, exits 30 s after the last client" on macOS. `hub stop` and
+  `hub start` unload and load the agent.
+- **Only chosen apps go through the hub.** It isn't the Mac's default output; system sounds
+  and other apps play to the interface as usual.
+- **Virtual devices: several stereo ones**, "taw 1" to "taw 4", each a speaker (apps play
+  into it) and a mic (apps record what the hub sends it). Apps like Zoom only use channels
+  1-2, so each needs a device of its own.
+- **App capture: devices first, process taps later.**
+
+**The driver** (`taw.driver`, an AudioServerPlugIn built in this repo, starting from
+Apple's NullAudio sample; installed to `/Library/Audio/Plug-Ins/HAL` by
+`taw --install-driver`, which asks for an admin password and restarts coreaudiod; ad-hoc
+signed is enough on the user's own Mac):
+
+- coreaudiod runs plug-ins sandboxed, as its own user: it can't reach a per-user agent. So
+  the driver talks to nothing. Each "taw N" has a hidden partner, "taw N (hub)"
+  (`kAudioDevicePropertyIsHidden`). The partner's input is what apps play into taw N; the
+  partner's output is what apps record from taw N. Plain loopback in the driver.
+- The hub opens one private aggregate device: the interface (clock master) plus the hidden
+  partners, with drift correction on the partners. One IO callback runs the whole matrix.
+- Rates 44.1, 48, 88.2 and 96 kHz; the hub sets the partners to the interface's rate. The
+  driver reports its buffering as latency.
+- With the hub stopped the devices still run, silent.
+
+**Routing nodes on macOS:** interface inputs and outputs, taw 1-4 (as speaker sources and
+mic destinations), sessions' inputs and outputs, later taps. App to app is a route from
+taw 1's speaker to taw 2's mic.
+
+**Shared-memory transport on macOS** (step 1): `shm_open` for the region; the per-block
+signal with `os_sync_wait_on_address` on a counter in it (macOS 14.4+, shared flag), since
+macOS lacks timed POSIX semaphores. Look into the client's render thread joining the hub's
+audio workgroup (`os_workgroup`, its port sent from the hub), or Apple Silicon may run it on
+efficiency cores and it misses blocks.
+
+**Check first in step 1: permissions.** A launchd agent isn't under the terminal, so macOS
+asks about the microphone (the interface's inputs) for the hub itself. A bare binary may get
+no prompt at all. The hub probably needs to be a minimal app bundle ("taw hub.app", same
+code, `NSMicrophoneUsageDescription` and later `NSAudioCaptureUsageDescription` for taps)
+that the agent runs. Prove opening the interface's inputs from the agent before building on
+it.
+
+**Step 2 on macOS:** Core Audio process taps (macOS 14.2+). A tap joins the hub's
+aggregate, where CoreAudio corrects its drift, so macOS needs no `DriftResampler` (Windows
+still does). Adding or removing one restarts the hub's device: a short gap.
+
 ## How things are today (what to read)
 
 - `src/AudioEngine.h/.cpp`: `AudioEngine` is a `juce::AudioIODeviceCallback`. Its
@@ -59,6 +135,17 @@ nothing is built for them yet.
 
 ## Step 0: groundwork (small, do first)
 
+Done (2026-10-08):
+- The lock lives in `Session`: `load` and `create` take it, the destructor drops it. Every
+  way in is covered, including `--exec` and the tests.
+- Locks name computers by hardware id (`SystemStats::getUniqueDeviceID`), because a Mac's
+  hostname changes with the network.
+- `safety::tawRunning` and `safety::thisProcess` are the exported checks.
+- `saveSettings` merges the keys it changed.
+- Every config write was already atomic: JUCE's `replaceWithText` and `XmlElement::writeTo`
+  write a temporary file and rename it. The library index is written whole: two taws indexing
+  at once means the last one wins, which is acceptable.
+
 1. **Session lock.** On opening, write `<session>/.taw-lock` (pid, host, time). If it
    names a live taw (`isTawRunning` in `Safety.cpp`, private to it now: export it), refuse with "open in another taw
    (pid N)". Offer read-only later if wanted. A stale lock (dead pid) is taken over. Removed
@@ -68,6 +155,63 @@ nothing is built for them yet.
    each write and write atomically (temp file, then rename).
 
 ## Step 1: the hub
+
+### Step 1 as built (macOS, 2026-10-08)
+
+What `docs/design.md` (Hub) describes. Where it differs from the plan below:
+- **Control:** a local TCP socket (`InterprocessConnectionServer` on 127.0.0.1, its port in
+  `hub-info.json`), not a named pipe. JUCE's named pipes are one connection each.
+- **Sessions' inputs:** at least 8, more than the interface has when it's small.
+- **Hub commands:** `hub forget <session>`, because sessions seen once stay in `hub.json`.
+- **Permission (checked):** a launchd agent running "taw hub.app" gets the microphone prompt
+  and keeps the answer.
+- **Rebuilds:** a rebuild re-signs the bundle ad hoc, and macOS asks again. A fixed local
+  signing identity would stop that (not done: it means a certificate in the login keychain;
+  ask).
+
+Not done yet in step 1:
+- **requestRate:** a session at another rate plays off-speed on the hub, as it would on a
+  device at the wrong rate.
+- **Workgroups:** joining the hub's audio workgroup isn't done. No late blocks so far in tests
+  at 256 samples.
+- **The UI, checked in a pseudo-terminal:**
+  - A session on "taw hub" joins, and its I/O line shows the hub.
+  - The hub page works from `taw hub`, from tab on the start screen, and from `hub` in a
+    session.
+- **The hub's interface:** chosen with `i` on the page, a picker (`hub-device.xml`).
+
+### Windows: what the hub needs (not started)
+
+What's portable already: `HubServer` (routes, the plan, the engine), `HubPanel` (the page
+and commands, apart from who uses an app device), `HubDevice` (the "taw hub" device type)
+apart from its waiting, and the JSON control socket (`juce::InterprocessConnection`). What
+isn't, file by file:
+- **`HubShared.cpp`:** `shm_open` → `CreateFileMapping` / `MapViewOfFile` on a named
+  mapping; `os_sync_wait_on_address` → a named auto-reset event per client each way
+  (`WaitOnAddress` doesn't cross processes).
+- **`Hub.cpp` (starting at login):** launchd → a per-user Run key or a Task Scheduler logon
+  task; no admin either way. The "taw hub.app" bundle is macOS only (it's there for the mic
+  permission); on Windows the hub is taw.exe --hub.
+- **`HubDevice.cpp`:** the render thread's real-time priority → MMCSS
+  (`AvSetMmThreadCharacteristics ("Pro Audio")`).
+- **The interface:** ASIO, one device both ways, which is the case the hub exists for (ASIO
+  takes one program at a time; the hub is that program).
+- **App devices:** no driver (see "Later"). VB-Cable or Voicemeeter's devices stand in, but
+  they're WASAPI devices on their own clock beside an ASIO interface, so they need the
+  `DriftResampler` from step 2 before they can be hub ends.
+- **Who uses an app device:** `IAudioSessionManager2` per device in place of macOS's process
+  list.
+- **`TAW_HUB` on Windows:** once the above is in, `TAW_WITH_HUB` turns on for WIN32 too.
+
+Step 3 on macOS, as built:
+- **Taken from the design:** what the "macOS first" section describes, with one hidden
+  8-channel device in place of a hidden partner per device.
+- **Rates:** 8 to 96 kHz; the low ones are for Bluetooth headsets.
+- **To watch:**
+  - The driver's rate is shared by every taw device, so an app picking another rate moves
+    all of them. So far the aggregate's drift correction carries a hub at another rate.
+  - The round trip app → hub → app was 111 ms on a 16 kHz headset at 512 samples. An
+    interface at 48 kHz with smaller blocks will be much less.
 
 ### Processes
 

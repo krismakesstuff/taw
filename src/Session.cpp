@@ -1,4 +1,5 @@
 ﻿#include "Session.h"
+#include "Safety.h"
 
 namespace taw
 {
@@ -148,6 +149,61 @@ static void applyDefaults (juce::ValueTree& s)
     }
 }
 
+//==============================================================================
+// The session lock: <session>/.taw-lock names the taw that has it open (pid, computer, since
+// when), so two taws never save over each other. A lock whose taw is gone (it crashed) is
+// taken over. One from another computer (a shared or synced folder) can't be checked, so it
+// stands until it's removed.
+static juce::File lockFile (const juce::File& dir) { return dir.getChildFile (".taw-lock"); }
+
+static bool takeLock (const juce::File& dir, juce::String& error)
+{
+    const auto file = lockFile (dir);
+    const auto host = juce::SystemStats::getComputerName(); // for people; it can change with the network
+    const auto machine = juce::SystemStats::getUniqueDeviceID();
+
+    if (file.existsAsFile())
+    {
+        const auto lock = juce::JSON::parse (file);
+        const auto pid = (juce::uint32) (juce::int64) lock["pid"];
+        const auto since = juce::Time ((juce::int64) lock["time"]).formatted ("%d %b %H:%M");
+
+        if (lock["machine"].toString() != machine)
+        {
+            error = dir.getFileName() + L" is open in taw on " + lock["host"].toString() + " (since " + since
+                    + L") \x00b7 if it isn't any more, delete " + file.getFullPathName();
+            return false;
+        }
+
+        if (pid != safety::thisProcess() && safety::tawRunning (pid))
+        {
+            error = dir.getFileName() + " is open in another taw (pid " + juce::String (pid) + ", since " + since + ")";
+            return false;
+        }
+    }
+
+    auto* o = new juce::DynamicObject();
+    o->setProperty ("pid", (juce::int64) safety::thisProcess());
+    o->setProperty ("host", host);
+    o->setProperty ("machine", machine);
+    o->setProperty ("time", juce::Time::currentTimeMillis());
+
+    if (! file.replaceWithText (juce::JSON::toString (juce::var (o))))
+    {
+        error = "could not write " + file.getFullPathName();
+        return false;
+    }
+
+    return true;
+}
+
+Session::~Session()
+{
+    // Only this taw's own lock: one taken over since (this one hung, say) isn't ours to remove.
+    if (const auto file = lockFile (dir); (juce::uint32) (juce::int64) juce::JSON::parse (file)["pid"] == safety::thisProcess())
+        file.deleteFile();
+}
+
 std::unique_ptr<Session> Session::create (const juce::File& dir, const juce::ValueTree& templateTree,
                                           double sampleRate, juce::String& error)
 {
@@ -162,6 +218,9 @@ std::unique_ptr<Session> Session::create (const juce::File& dir, const juce::Val
         error = "could not create " + dir.getFullPathName();
         return {};
     }
+
+    if (! takeLock (dir, error))
+        return {};
 
     auto tree = templateTree.isValid() ? templateTree.createCopy() : juce::ValueTree (ids::SESSION);
     tree.setProperty (ids::name, dir.getFileName(), nullptr);
@@ -203,6 +262,10 @@ static juce::ValueTree readSessionFile (const juce::File& file, juce::String& er
 
 std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& error)
 {
+    // Before anything is read or repaired: another taw may be saving it.
+    if (existsIn (dir) && ! takeLock (dir, error))
+        return {};
+
     const auto file = dir.getChildFile ("session.json");
     auto tree = readSessionFile (file, error);
     juce::String note;
@@ -247,7 +310,10 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
         }
 
         if (! tree.isValid())
+        {
+            lockFile (dir).deleteFile(); // not opened after all
             return {};
+        }
     }
 
     if ((int) tree.getProperty (ids::version, 1) < 2)

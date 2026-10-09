@@ -52,6 +52,7 @@ target_sources(taw PRIVATE
     src/RenderPool.cpp
     src/SystemStats.cpp
     src/AutomationEdit.cpp
+    src/HubPanel.cpp
     src/TrackMenu.cpp
     src/Midi.cpp
     src/MidiEditor.cpp
@@ -91,6 +92,46 @@ if (APPLE)
     target_sources(taw PRIVATE src/TerminalSetup.cpp src/MacFocus.mm)
 endif()
 
+# The audio hub (docs/plan-audio-hub.md): macOS only so far. Off builds taw as it is on
+# Windows, without it (the hub command and page say so).
+option(TAW_WITH_HUB "Build the audio hub (macOS only so far)" ${APPLE})
+
+if (APPLE AND TAW_WITH_HUB)
+    # The hub's virtual devices: taw.driver, a CoreAudio plug-in ("taw 1" to "taw 4", and the
+    # hidden "taw hub"), built beside taw; taw --install-driver puts it where coreaudiod looks.
+    add_library(taw_driver MODULE driver/TawDriver.c)
+    configure_file(driver/Info.plist ${CMAKE_BINARY_DIR}/generated/DriverInfo.plist @ONLY)
+    set_target_properties(taw_driver PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION driver
+        OUTPUT_NAME taw
+        C_STANDARD 11
+        LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/taw_artefacts/$<CONFIG>)
+    target_compile_options(taw_driver PRIVATE -Wall -Wextra)
+    target_link_libraries(taw_driver PRIVATE "-framework CoreAudio" "-framework CoreFoundation")
+    add_custom_command(TARGET taw_driver POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_BINARY_DIR}/generated/DriverInfo.plist $<TARGET_BUNDLE_CONTENT_DIR:taw_driver>/Info.plist
+        COMMAND codesign --force --sign - $<TARGET_BUNDLE_DIR:taw_driver>
+        VERBATIM)
+    add_dependencies(taw taw_driver)
+
+    # The hub itself; its shared memory is POSIX.
+    target_sources(taw PRIVATE src/Hub.cpp src/HubDevice.cpp src/HubServer.cpp src/HubShared.cpp src/HubMac.mm)
+    target_link_libraries(taw PRIVATE "-framework AVFoundation")
+    target_compile_definitions(taw PRIVATE TAW_HUB=1)
+
+    # The hub runs from "taw hub.app" beside taw: the same binary in a bundle of its own, so
+    # macOS asks about the microphone for it (it runs from launchd, not a terminal).
+    configure_file(cmake/HubInfo.plist ${CMAKE_BINARY_DIR}/generated/HubInfo.plist @ONLY)
+    set(TAW_HUB_APP "$<TARGET_FILE_DIR:taw>/taw hub.app")
+    add_custom_command(TARGET taw POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${TAW_HUB_APP}/Contents/MacOS"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_BINARY_DIR}/generated/HubInfo.plist "${TAW_HUB_APP}/Contents/Info.plist"
+        COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:taw> "${TAW_HUB_APP}/Contents/MacOS/taw"
+        COMMAND codesign --force --sign - "${TAW_HUB_APP}"
+        VERBATIM)
+endif()
+
 if (WIN32)
     target_compile_definitions(taw PRIVATE JUCE_ASIO=1 JUCE_WASAPI=1 JUCE_DIRECTSOUND=1 NOMINMAX
         JUCE_USE_WINDOWS_MEDIA_FORMAT=1) # import m4a/aac/wma through Windows
@@ -115,6 +156,30 @@ if (WIN32)
     add_custom_command(TARGET taw POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ffmpeg_SOURCE_DIR}/LICENSE $<TARGET_FILE_DIR:taw>/FFMPEG-LICENSE.txt)
     target_compile_definitions(taw PRIVATE TAW_VIDEO=1)
+endif()
+
+if (APPLE)
+    # FFmpeg's libraries from Homebrew (brew install ffmpeg). Weak-linked: without them taw still
+    # starts, just without video. Without them at build time, video is left out.
+    find_path(TAW_FFMPEG_INCLUDE libavformat/avformat.h
+        HINTS /opt/homebrew/opt/ffmpeg/include /usr/local/opt/ffmpeg/include)
+    set(TAW_FFMPEG_FOUND ${TAW_FFMPEG_INCLUDE})
+    foreach(lib avformat avcodec avutil swscale)
+        find_library(TAW_FFMPEG_${lib} ${lib} HINTS /opt/homebrew/opt/ffmpeg/lib /usr/local/opt/ffmpeg/lib)
+        if (NOT TAW_FFMPEG_${lib})
+            set(TAW_FFMPEG_FOUND "")
+        endif()
+    endforeach()
+
+    if (TAW_FFMPEG_FOUND)
+        target_include_directories(taw PRIVATE ${TAW_FFMPEG_INCLUDE})
+        foreach(lib avformat avcodec avutil swscale)
+            target_link_options(taw PRIVATE "LINKER:-weak_library,${TAW_FFMPEG_${lib}}")
+        endforeach()
+        target_compile_definitions(taw PRIVATE TAW_VIDEO=1)
+    else()
+        message(STATUS "FFmpeg not found (brew install ffmpeg): building without video")
+    endif()
 endif()
 
 target_link_libraries(taw PRIVATE

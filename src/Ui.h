@@ -125,6 +125,8 @@ private:
     void drawTrackMenu (App&);
     void drawAutoPanel (App&);
     void drawMidiPanel (App&);
+    void drawHubPage (App&);
+    void drawHubInterfacePicker (App&);
     void drawBrowser (App&);
     int dockCols = 0; // columns the docked browser takes on the right
     void drawDevicePicker (App&);

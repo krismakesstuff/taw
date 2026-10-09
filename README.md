@@ -22,9 +22,9 @@ The binary is `build\taw_artefacts\Release\taw.exe`.
 
 ## Build (macOS)
 
-Needs the Xcode command line tools and CMake 3.24+ (`brew install cmake`). For MP3 bounces
-(and importing formats macOS can't read, like wma) install ffmpeg: `brew install ffmpeg`;
-taw tells you if it's missing.
+Needs the Xcode command line tools and CMake 3.24+ (`brew install cmake`). For MP3 bounces,
+video, and importing formats macOS can't read (like wma), install ffmpeg: `brew install ffmpeg`;
+taw tells you if it's missing. Video is built in only if ffmpeg is there when taw is built.
 
 ```
 ./taw build
@@ -62,6 +62,7 @@ Or run the binary directly:
 taw                   open the session in this folder, or start a new one
 taw my-song           open my-song, or create it
 taw my-song -t 3mic   create my-song from the 3mic template
+taw hub               the audio hub's routing page, no session (macOS)
 taw --devices         list audio devices
 ```
 
@@ -128,7 +129,8 @@ audio device and plugin delay compensation add, so it matches what you hear. `bv
 selection (or, with nothing selected, the whole video) as an MP4: the picture, frame for frame,
 with the mix. The video gets a row under the ruler showing its length and its own timecode: up
 from the first track gets you there, where the arrows step a frame (ctrl a second; hold one to
-scrub) and clicking or dragging along it scrubs the picture. Windows only for now.
+scrub) and clicking or dragging along it scrubs the picture. On macOS video needs Homebrew's
+ffmpeg (`brew install ffmpeg`) when taw is built.
 
 ## Roadmap
 

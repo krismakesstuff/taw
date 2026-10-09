@@ -59,6 +59,7 @@ struct LiveTake
 struct DeviceChoice
 {
     juce::String type, output, input;
+    juce::StringArray inputs; // the type's inputs, for ←→ ("" none); empty when it pairs them (ASIO)
 };
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
@@ -103,7 +104,8 @@ enum class Mode
 {
     Main,
     DevicePicker,
-    TemplatePicker
+    TemplatePicker,
+    Hub // the audio hub's page, with or without a session (HubPanel.cpp)
 };
 
 class App final : private juce::ValueTree::Listener
@@ -319,6 +321,80 @@ public:
     bool midiPanelVisible = false;
     int midiPanelIndex = 0;
     bool handleMidiPanelKey (const Key&);
+
+    // The audio hub (docs/plan-audio-hub.md; HubPanel.cpp): its page shows the interface, the
+    // sessions and the routes between them, from a session ("hub"), the start screen (tab) or
+    // the shell ("taw hub"). "hub route in 1-2 > Song" and "hub unroute" change them, "hub
+    // start" / "hub stop" run it; on the page the same without "hub". macOS only so far.
+    Result hubCommand (const juce::String& rest);
+    Result hubRoute (const juce::String& spec, bool add);
+    void openHubPage();
+    void closeHubPage();
+    void handleHubPageKey (const Key&);
+    bool openHubFirst = false;   // taw hub: the page once the device is open, not the start screen
+    Mode hubReturn = Mode::Main; // where esc goes back to
+    juce::String hubLine;        // the page's command line
+    juce::var hubStatus;         // what the hub last said (void: nothing)
+    juce::String hubError;       // why not
+    double hubAskedAt = 0.0;     // when, to ask again now and then while the page is up
+    void refreshHub (bool now);
+    juce::String hubEndName (const juce::String& key, int channel, bool source) const;
+    // An app device as the hub sees it: as a source "taw1in" (what apps play to taw 1 comes in),
+    // as a destination "taw1out" (what goes out to apps hearing it); "Zoom" if it's named so.
+    juce::String hubAppName (const juce::String& key, bool source) const;
+    bool hubAppNamed (const juce::String& key) const;
+    juce::String hubHardware (bool output) const; // the hub's interface that way: "MacBook Pro Speakers"
+
+    // The hub's interface, picked over its page (i): outputs on the left, inputs on the right
+    // (CoreAudio's, not the driver's own: a loop). ←→ goes between them, ↑↓ picks, enter uses both.
+    struct HubInterfacePicker
+    {
+        bool open = false;
+        juce::StringArray outputs, inputs;
+        int output = 0, input = 0;
+        bool onInputs = false;
+    };
+    HubInterfacePicker hubPicker;
+    void openHubInterfacePicker();
+    void handleHubInterfaceKey (const Key&);
+
+    // Who uses each app device now ("taw 1"): the apps playing into it, and those hearing it as
+    // their mic (macOS only lists an app while its audio runs). Asked with the status.
+    struct HubUsers
+    {
+        juce::StringArray playing, listening;
+    };
+    std::map<juce::String, HubUsers> hubUsers;
+    bool sessionOnHub() const; // the open session is one of the hub's (its device is taw hub)
+
+    // The page's matrix: rows are where sound comes from (the interface's inputs, the app
+    // devices, sessions' outputs), columns where it goes (the interface's outputs in pairs, the
+    // app devices' mics, sessions' inputs). A cell stands for the routes between the two.
+    struct HubEnd
+    {
+        juce::String key;          // "interface", "taw 1", or a session's folder
+        int first = 1, width = 1;  // its channels (a session column: where it lands is per cell)
+        juce::String name, sub;    // "in 1" / "Zoom" / "Song"; a column's second line: "1-2", "mic", "in"
+        bool session = false, live = true;
+    };
+
+    struct HubCell
+    {
+        bool on = false, odd = false, self = false; // odd: routes that aren't the usual shape (typed ones)
+        int land = 0, landLast = 0;                 // a session column: the inputs it lands on
+        double db = 0.0;
+        juce::Array<juce::var> routes;             // the routes it stands for
+    };
+
+    std::vector<HubEnd> hubRows() const;
+    std::vector<HubEnd> hubCols() const;
+    HubCell hubCell (const HubEnd& row, const HubEnd& col) const;
+    int hubRow = 0, hubCol = 0;
+    Result hubToggle();
+    Result hubMoveLanding (int delta);
+    Result hubLevel (double delta);
+    Result hubReplace (const juce::Array<juce::var>& remove, const std::vector<std::array<int, 2>>& add,
+                       const juce::String& from, const juce::String& to, double db);
 
     // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen
     // kind where samples that sound alike sit together, and a list; typing filters by name, and
@@ -599,6 +675,7 @@ public:
     juce::StringArray midiOff;   // MIDI inputs switched off, by name
     void loadSettings();
     void saveSettings() const;
+    mutable juce::var settingsSeen; // settings.json as this taw last read or wrote it
 
     juce::String commandLine, message;
 
@@ -634,6 +711,10 @@ private:
     Result createSession (const Template&);
     void attachSession (std::unique_ptr<Session>);
     void matchDeviceSampleRate();
+
+    // A device that's both the input and the output and runs below 44.1 kHz: a Bluetooth
+    // headset with its mic open. Instruments can go silent at that rate. Empty when it isn't.
+    juce::String headsetWarning();
 
     Result startRecorders (const std::vector<int>& tracks);
     juce::int64 heardPosition (juce::int64 playhead); // minus output latency, when compensating

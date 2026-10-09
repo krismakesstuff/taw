@@ -259,6 +259,8 @@ void Ui::render (App& app)
         canvas.text (1, 0, L"taw needs at least 70x16 \x2014 make the window bigger", colour::error);
     else if (app.mode == Mode::DevicePicker)
         drawDevicePicker (app);
+    else if (app.mode == Mode::Hub)
+        drawHubPage (app);
     else if (app.mode == Mode::TemplatePicker)
     {
         drawTemplatePicker (app);
@@ -2182,9 +2184,16 @@ void Ui::drawHelp (App& app)
             { Pair, L"count 4", L"count-in clicks (off)", L"bounces off", L"...don't open after" },
             { Pair, L"count always", L"...on play too", L"bv", L"bounce with video (mp4)" },
             { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"bv cue 3", L"named (no sel: all)" },
+#if TAW_HUB
+            { Pair, L"dev  panel", L"audio device / driver", L"hub", L"the hub: routes, sessions" },
+            { Pair, L"dark  light", L"themes (also: grey)", L"hub route", L"in 1 > Song  Song > out" },
+            { Pair, L"project", L"the session's settings", L"hub stop", L"(start) run the hub" },
+            { Pair, L"stats", L"load: dsp, cpu, tracks", L"", L"" },
+#else
             { Pair, L"dev  panel", L"audio device / driver", L"stats", L"load: dsp, cpu, tracks" },
             { Pair, L"dark  light", L"themes (also: grey)", L"", L"" },
             { Pair, L"project", L"the session's settings", L"", L"" },
+#endif
 #if JUCE_WINDOWS
             { Note, L"b wav D:\\x bounces to a folder (remembered)." },
 #else
@@ -2919,6 +2928,250 @@ void Ui::drawMidiPanel (App& app)
                  colour::dim, bg, false, boxW - 4);
 }
 
+// The hub's page, a screen of its own (with a session open or not): its interface, then the
+// matrix of where sound goes. Rows are where it comes from (the interface's inputs, the app
+// devices, sessions' outputs); columns where it goes (the interface's outputs, the app devices'
+// mics, sessions' inputs). A cell is ● on, · off, the inputs it lands on in a session's column,
+// ~ when typed routes don't fit the usual shape. It scrolls both ways, so it fits 80x24.
+void Ui::drawHubPage (App& app)
+{
+    if (app.hubPicker.open)
+    {
+        drawHubInterfacePicker (app);
+        return;
+    }
+
+    const auto& s = app.hubStatus;
+    const int w = canvas.width(), h = canvas.height();
+
+    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
+    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
+    int x = canvas.text (5, 0, L"\x25b8 hub", colour::text, colour::headerBg);
+
+    if (app.session != nullptr && ! s.isVoid() && ! app.sessionOnHub())
+        canvas.text (x + 2, 0, L"(" + app.session->name() + L" isn't on the hub \x00b7 its dev \x2192 taw hub puts it here)", colour::error, colour::headerBg);
+    else if (app.session != nullptr)
+        canvas.text (x + 2, 0, L"(" + app.session->name() + L" plays on \x00b7 esc goes back to it)", colour::dim, colour::headerBg);
+
+    int y = 2;
+
+    if (s.isVoid())
+    {
+        canvas.text (1, y++, app.hubError, colour::error, -1, false, w - 2);
+        canvas.text (1, ++y, L"start runs the hub (it then starts at login) \x00b7 it owns the interface and routes between it, sessions and apps",
+                     colour::dim, -1, false, w - 2);
+    }
+    else
+    {
+        canvas.text (1, y, "interface", colour::dim);
+        // The rate and block first: the device's name can be long (two devices).
+        x = canvas.text (12, y, juce::String ((double) s["sampleRate"] / 1000.0, 1) + "k/" + juce::String ((int) s["blockSize"]), colour::dim);
+        canvas.text (x + 2, y++, s["device"].toString() + L" \x00b7 i changes it", colour::text, -1, false, w - x - 3);
+
+        if ((int) s["apps"] == 0)
+            canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
+        else
+            canvas.text (1, y + 1, L"rows come in, columns go out \x00b7 an app on taw 1 plays to taw1in, hears taw1out",
+                         colour::dim, -1, false, w - 2);
+
+        y += 3;
+
+        const auto rows = app.hubRows();
+        const auto cols = app.hubCols();
+        constexpr int colW = 8;
+        // The names take what the columns leave, so who plays into an app device shows.
+        const int labelW = juce::jlimit (20, 34, w - 2 - (int) cols.size() * colW);
+        const int top = y, firstRowY = top + 2;
+        const int visibleCols = std::max (1, (w - 2 - labelW) / colW);
+        const int visibleRows = std::max (1, h - 5 - firstRowY);
+        const int firstCol = juce::jlimit (0, std::max (0, (int) cols.size() - visibleCols), app.hubCol - visibleCols / 2);
+        const int firstRow = juce::jlimit (0, std::max (0, (int) rows.size() - visibleRows), app.hubRow - visibleRows / 2);
+
+        // "to →" beside the columns' names, "from ↓" over the rows'.
+        canvas.text (labelW - 5, top, L"to \x2192", colour::faint);
+        canvas.text (1, top + 1, L"from \x2193", colour::faint);
+
+        // The columns' heads: a name, and under it what part of it ("out 1-2", "as mic", "inputs").
+        for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
+        {
+            const auto& c = cols[(size_t) (firstCol + i)];
+            const bool chosen = firstCol + i == app.hubCol;
+            const int cx = 1 + labelW + i * colW;
+            canvas.text (cx, top, c.name, chosen ? colour::accent : (c.live ? colour::text : colour::faint), -1, chosen, colW - 1);
+            canvas.text (cx, top + 1, c.sub, chosen ? colour::accent : colour::faint, -1, false, colW - 1);
+        }
+
+        if (firstCol > 0)
+            canvas.put (labelW, top, L'\x25c2', colour::dim);
+
+        if (firstCol + visibleCols < (int) cols.size())
+            canvas.put (w - 2, top, L'\x25b8', colour::dim);
+
+        for (int r = 0; r < visibleRows && firstRow + r < (int) rows.size(); ++r)
+        {
+            const auto& row = rows[(size_t) (firstRow + r)];
+            const int ry = firstRowY + r;
+            const bool rowChosen = firstRow + r == app.hubRow;
+
+            if (rowChosen)
+                canvas.put (1, ry, L'\x25b8', colour::accent);
+
+            x = canvas.text (3, ry, row.name, rowChosen ? colour::accent : (row.live ? colour::text : colour::faint), -1, rowChosen, labelW - 3);
+
+            if (row.sub.isNotEmpty() && x + 1 < labelW)
+                canvas.text (x + 1, ry, row.sub, colour::faint, -1, false, labelW - x - 1);
+            else if (! row.live && x + 1 < labelW)
+                canvas.text (x + 1, ry, "(closed)", colour::faint, -1, false, labelW - x - 1);
+
+            for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
+            {
+                const auto& col = cols[(size_t) (firstCol + i)];
+                const auto cell = app.hubCell (row, col);
+                const bool chosen = rowChosen && firstCol + i == app.hubCol;
+                const int bg = chosen ? colour::focusBg : -1;
+                const bool live = row.live && col.live;
+                const int cx = 1 + labelW + i * colW;
+
+                juce::String mark;
+                int fg = colour::faint;
+
+                if (cell.self)
+                    mark = L"\x2500";
+                else if (! cell.on)
+                    mark = L"\x00b7";
+                else
+                {
+                    mark = cell.odd ? juce::String ("~")
+                           : col.session ? juce::String (cell.land) + (cell.landLast > cell.land ? "-" + juce::String (cell.landLast) : juce::String())
+                                         : juce::String (L"\x25cf");
+                    fg = live ? colour::accent : colour::dim;
+                }
+
+                if (chosen && fg == colour::faint)
+                    fg = colour::dim; // faint doesn't read on the highlight
+
+                canvas.fill (cx, ry, colW - 1, L' ', -1, bg);
+                canvas.text (cx + std::max (0, (colW - 1 - (int) mark.length()) / 2), ry, mark, fg, bg, cell.on);
+            }
+        }
+
+        // The chosen cell, in words.
+        if (! rows.empty() && ! cols.empty())
+        {
+            const auto& row = rows[(size_t) juce::jlimit (0, (int) rows.size() - 1, app.hubRow)];
+            const auto& col = cols[(size_t) juce::jlimit (0, (int) cols.size() - 1, app.hubCol)];
+            const auto cell = app.hubCell (row, col);
+            juce::String words;
+
+            if (cell.self)
+            {
+                words = row.name + L" can't feed itself";
+            }
+            else if (! cell.on)
+            {
+                // An app device in full: who plays into it, who hears it.
+                auto users = [&app] (const App::HubEnd& e, bool source) -> juce::String
+                {
+                    const auto it = app.hubUsers.find (e.key);
+                    const auto list = it == app.hubUsers.end() ? juce::String()
+                                      : (source ? it->second.playing : it->second.listening).joinIntoString (", ");
+
+                    if (source)
+                        return L" (" + (list.isEmpty() ? juce::String ("no app plays into it yet") : list + " into it") + ")";
+
+                    return L"'s mic (" + (list.isEmpty() ? juce::String ("no app hears it yet") : list + " hear it") + ")";
+                };
+
+                const bool appRow = ! row.session && row.key != "interface";
+                const bool appCol = ! col.session && col.key != "interface";
+                words = row.name + (appRow ? users (row, true) : juce::String()) + L" \x2192 "
+                        + col.name + (appCol ? users (col, false) : col.sub.isNotEmpty() ? " " + col.sub : juce::String()) + L": off \x00b7 space routes it";
+            }
+            else
+            {
+                juce::StringArray parts;
+
+                for (const auto& r : cell.routes)
+                    parts.add (app.hubEndName (r["from"].toString(), r["fromChannel"], true) + L" \x2192 "
+                               + app.hubEndName (r["to"].toString(), r["toChannel"], false));
+
+                words = parts.joinIntoString (", ") + L" \x00b7 " + formatDb (cell.db) + " dB"
+                        + (col.session ? juce::String (L" \x00b7 shift+\x2190\x2192 other inputs") : juce::String());
+            }
+
+            canvas.text (1, h - 4, words, colour::dim, -1, false, w - 2);
+        }
+    }
+
+    // The message, the command line, the keys.
+    if (app.message.isNotEmpty())
+        canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
+
+    x = canvas.text (1, h - 2, L"hub \x25b8 ", colour::accent);
+    x = canvas.text (x, h - 2, app.hubLine, colour::text, -1, true);
+    canvas.put (x, h - 2, L' ', -1, colour::text);
+
+    if (app.hubLine.isEmpty())
+        canvas.text (x + 2, h - 2, L"or type: route in 1 > Song 3 \x00b7 name taw 1 Zoom \x00b7 forget Song \x00b7 start \x00b7 stop",
+                     colour::faint, -1, false, w - x - 3);
+
+    canvas.text (1, h - 1, L"\x2190\x2191\x2193\x2192 move \x00b7 space on/off \x00b7 [ ] dB \x00b7 shift+\x2190\x2192 inputs \x00b7 i interface \x00b7 n name \x00b7 esc back",
+                 colour::dim, -1, false, w - 2);
+}
+
+// The hub's interface: what it plays through on the left, what it hears on the right; the
+// chosen side's heading and pick in the accent. "current" marks what the hub has.
+void Ui::drawHubInterfacePicker (App& app)
+{
+    const auto& p = app.hubPicker;
+    const int w = canvas.width(), h = canvas.height();
+
+    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
+    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
+    canvas.text (5, 0, L"\x25b8 hub \x25b8 interface", colour::text, colour::headerBg);
+    canvas.text (1, 2, L"The hardware the hub plays through and hears. Enter restarts the hub on it.", colour::dim, -1, false, w - 2);
+
+    const int colW = (w - 4) / 2, top = 4, visible = h - top - 4;
+
+    auto list = [&] (int x, const juce::String& heading, const juce::StringArray& names, int chosen, bool active, const juce::String& now)
+    {
+        canvas.text (x, top, heading, active ? colour::accent : colour::dim, -1, active);
+
+        const int first = juce::jlimit (0, juce::jmax (0, names.size() - visible), chosen - visible / 2);
+
+        if (names.isEmpty())
+            canvas.text (x + 2, top + 2, "none found", colour::faint);
+
+        for (int r = 0; r < visible && first + r < names.size(); ++r)
+        {
+            const int i = first + r;
+            const bool sel = i == chosen;
+            const int y = top + 2 + r;
+            const int bg = sel && active ? colour::focusBg : -1;
+
+            canvas.fill (x, y, colW - 1, L' ', -1, bg);
+
+            if (sel)
+                canvas.put (x, y, L'\x25b8', active ? colour::accent : colour::dim, bg);
+
+            const int nx = canvas.text (x + 2, y, names[i], sel ? (active ? colour::accent : colour::text) : colour::text, bg, sel, colW - 10);
+
+            if (names[i] == now)
+                canvas.text (nx + 1, y, L"\x25cf current", colour::faint, bg);
+        }
+    };
+
+    list (2, "output", p.outputs, p.output, ! p.onInputs, app.hubHardware (true));
+    list (2 + colW + 1, "input", p.inputs, p.input, p.onInputs, app.hubHardware (false));
+
+    // What enter would do, in words.
+    if (! p.outputs.isEmpty())
+        canvas.text (1, h - 3, L"enter: " + p.outputs[p.output] + (p.inputs.isEmpty() ? juce::String() : L" + " + p.inputs[p.input]),
+                     colour::text, -1, false, w - 2);
+
+    canvas.text (1, h - 1, L"\x2190\x2192 output / input \x00b7 \x2191\x2193 choose \x00b7 enter use both \x00b7 r rescan \x00b7 esc back", colour::dim, -1, false, w - 2);
+}
+
 //==============================================================================
 void Ui::drawDevicePicker (App& app)
 {
@@ -2951,16 +3204,21 @@ void Ui::drawDevicePicker (App& app)
 
         canvas.text (3, top + row, juce::String (i + 1).paddedLeft (' ', 2), colour::dim, bg);
         canvas.text (7, top + row, padRight (c.type, 18), c.type == "ASIO" ? colour::accent : colour::dim, bg);
-        canvas.text (26, top + row, c.output, colour::text, bg, sel);
+        int x = canvas.text (26, top + row, c.output, colour::text, bg, sel);
 
-        if (c.input != c.output && c.input.isNotEmpty())
-            canvas.text (27 + c.output.length(), top + row, "(in: " + c.input + ")", colour::faint, bg);
+        // Its input: the same device unless it says otherwise; ←→ on the chosen row change it.
+        const auto input = c.input.isEmpty() ? juce::String ("no input") : c.input == c.output ? juce::String ("its own input") : "in: " + c.input;
+
+        if (sel && ! c.inputs.isEmpty())
+            canvas.text (x + 2, top + row, L"\x2190 " + input + L" \x2192", colour::dim, bg);
+        else if (c.input != c.output)
+            canvas.text (x + 1, top + row, "(" + input + ")", colour::faint, bg);
     }
 
     drawBottom (app);
     canvas.fill (0, h - 2, w, L' ');
     canvas.fill (0, h - 1, w, L' ');
-    canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
+    canvas.text (1, h - 1, L"\x2191\x2193 select \x00b7 \x2190\x2192 input \x00b7 enter choose \x00b7 r rescan \x00b7 esc back", colour::dim);
 }
 
 // Opening or closing a session: what it's doing, and how far along.
@@ -3300,7 +3558,11 @@ void Ui::drawTemplatePicker (App& app)
         canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
     }
 
+#if TAW_HUB
+    const juce::String areas (L"\x2190\x2192 area \x00b7 tab hub");
+#else
     const juce::String areas (L"\x2190\x2192 area");
+#endif
     const auto hint = app.pickArea == Area::bounces
                           ? L"enter play/stop \x00b7 shift \x2190\x2192 seek \x00b7 o session \x00b7 r reveal \x00b7 " + areas
                       : app.pickArea == Area::sessions

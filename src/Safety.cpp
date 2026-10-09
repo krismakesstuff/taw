@@ -344,6 +344,9 @@ juce::File runningFolder() { return configFolder().getChildFile ("running"); }
 juce::File markerFile (juce::uint32 pid) { return runningFolder().getChildFile (juce::String (pid) + ".json"); }
 } // namespace
 
+juce::uint32 thisProcess() { return currentPid(); }
+bool tawRunning (juce::uint32 pid) { return isTawRunning (pid); }
+
 juce::File crashFolder() { return configFolder().getChildFile ("crashes"); }
 
 #if JUCE_WINDOWS

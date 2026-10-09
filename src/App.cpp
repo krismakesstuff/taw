@@ -3,6 +3,10 @@
 #include "Safety.h"
 #include "Timing.h"
 
+#if TAW_HUB
+ #include "HubDevice.h"
+#endif
+
 namespace taw
 {
 static juce::File deviceStateFile() { return configFolder().getChildFile ("audio-device.xml"); }
@@ -495,6 +499,9 @@ Result App::finishClosing (std::optional<bool> saved)
     newSessionName.clear();
     pendingTemplate.clear();
     safety::markRunning ({});
+#if TAW_HUB
+    hub::setClientName ("taw"); // no session: the hub gives it no routes
+#endif
 
     // Closed to open another (an imported Live set).
     if (const auto next = std::exchange (openAfterClose, juce::File{}); next != juce::File())
@@ -627,6 +634,9 @@ int App::run()
 
         syncVideo();
 
+        if (mode == Mode::Hub)
+            refreshHub (false); // the sessions coming and going, their late blocks
+
         if (engine.isRolling())
         {
             if (juce::Time::getMillisecondCounterHiRes() - cursorMovedAt > 3000.0)
@@ -675,6 +685,12 @@ void App::startupDevice()
     auto& dm = engine.devices();
     std::unique_ptr<juce::XmlElement> saved;
 
+#if TAW_HUB
+    // The hub, next to the system's own types (made first: JUCE only makes them if there are none).
+    dm.getAvailableDeviceTypes();
+    dm.addAudioDeviceType (hub::makeDeviceType());
+#endif
+
     if (deviceStateFile().existsAsFile())
         saved = juce::parseXML (deviceStateFile());
 
@@ -697,6 +713,9 @@ void App::startupDevice()
         openDevicePicker();
         return;
     }
+
+    if (const auto headset = headsetWarning(); headset.isNotEmpty())
+        say (Result::fail (headset));
 
     proceedToSession();
 }
@@ -752,6 +771,9 @@ void App::proceedToSession()
     pickArea = recent.empty() ? PickArea::templates : PickArea::sessions; // enter reopens the newest
     mode = Mode::TemplatePicker;
     loadRecentBounces();
+
+    if (std::exchange (openHubFirst, false)) // taw hub
+        openHubPage();
 }
 
 int App::defaultTemplateRow() const
@@ -815,6 +837,9 @@ void App::attachSession (std::unique_ptr<Session> s)
     session->tree().addListener (this);
     rememberSession (session->folder());
     safety::markRunning (session->folder());
+#if TAW_HUB
+    hub::setClientName (session->name(), session->folder().getFullPathName()); // who this taw is to the hub
+#endif
     focused = 0;
     topLane = TopLane::none;
     selectedMarker = {};
@@ -853,9 +878,23 @@ void App::matchDeviceSampleRate()
     if (auto xml = engine.devices().createStateXml())
         xml->writeTo (deviceStateFile());
 
-    if (device = engine.devices().getCurrentAudioDevice(); device != nullptr && device->getCurrentSampleRate() != session->sampleRate())
+    if (const auto headset = headsetWarning(); headset.isNotEmpty())
+        say (Result::fail (headset));
+    else if (device = engine.devices().getCurrentAudioDevice(); device != nullptr && device->getCurrentSampleRate() != session->sampleRate())
         say (Result::fail ("device runs at " + juce::String (device->getCurrentSampleRate()) + " Hz but the session is "
                            + juce::String (session->sampleRate()) + L" Hz \x2014 playback will be off-speed"));
+}
+
+juce::String App::headsetWarning()
+{
+    auto* device = engine.devices().getCurrentAudioDevice();
+    const auto setup = engine.devices().getAudioDeviceSetup();
+
+    if (device == nullptr || device->getCurrentSampleRate() >= 44100.0 || setup.inputDeviceName != setup.outputDeviceName)
+        return {};
+
+    return setup.outputDeviceName + " is at " + kHz (device->getCurrentSampleRate())
+           + L" with its own mic open (a Bluetooth headset does that) \x00b7 instruments may be silent \x00b7 dev, \x2190\x2192 another input";
 }
 
 //==============================================================================
@@ -868,6 +907,7 @@ void App::openDevicePicker()
     pickIndex = 0;
 
     const auto* current = dm.getCurrentAudioDevice();
+    const auto currentInput = dm.getAudioDeviceSetup().inputDeviceName;
 
     for (auto* type : dm.getAvailableDeviceTypes())
     {
@@ -876,14 +916,29 @@ void App::openDevicePicker()
         const auto inputs = type->getDeviceNames (true);
         const auto defaultInput = inputs[juce::jmax (0, type->getDefaultDeviceIndex (true))];
 
+        // Where outputs and inputs are separate devices (CoreAudio), ←→ picks the input: a
+        // Bluetooth headset's own mic drops it to 16 kHz, so it's worth another one.
+        juce::StringArray choosable;
+
+        if (type->hasSeparateInputsAndOutputs())
+        {
+            choosable = inputs;
+            choosable.add ({}); // none
+        }
+
         for (const auto& o : outputs)
         {
-            const auto in = inputs.contains (o) ? o : defaultInput;
+            auto in = inputs.contains (o) ? o : defaultInput;
 
             if (current != nullptr && current->getTypeName() == type->getTypeName() && current->getName() == o)
+            {
                 pickIndex = (int) deviceChoices.size();
 
-            deviceChoices.push_back ({ type->getTypeName(), o, in });
+                if (choosable.contains (currentInput))
+                    in = currentInput; // as it is now
+            }
+
+            deviceChoices.push_back ({ type->getTypeName(), o, in, choosable });
         }
     }
 
@@ -943,6 +998,11 @@ Result App::chooseDevice (const DeviceChoice& c)
         xml->writeTo (deviceStateFile());
 
     device = dm.getCurrentAudioDevice();
+
+    // Opened, but say so and stay in the picker: ←→ there gives it another input.
+    if (const auto headset = headsetWarning(); headset.isNotEmpty())
+        return Result::fail (headset);
+
     return Result::good (c.output + L" \x00b7 " + juce::String (device->getActiveInputChannels().countNumberOfSetBits()) + " in / "
                          + juce::String (device->getActiveOutputChannels().countNumberOfSetBits()) + L" out \x00b7 "
                          + juce::String (device->getCurrentSampleRate() / 1000.0, 1) + L" kHz \x00b7 "
@@ -1983,7 +2043,7 @@ Result App::importAbletonSet (const juce::File& als)
 
     if (auto r = closeSession(); ! r.ok)
     {
-        openAfterClose = {};
+        openAfterClose = juce::File();
         openAfterCloseNote.clear();
         return Result::fail (summary + L" \x00b7 couldn't close this session to open it: " + r.message);
     }
@@ -3073,6 +3133,8 @@ void App::zoom (int delta)
 void App::loadSettings()
 {
     const auto json = juce::JSON::parse (settingsFile());
+    settingsSeen = json;
+
     if (const auto t = json["theme"].toString(); t == "light" || t == "grey")
         theme = t;
 
@@ -3107,9 +3169,7 @@ void App::saveSettings() const
     o->setProperty ("io", ioVisible);
     o->setProperty ("auditionDb", auditionDb);
     o->setProperty ("dateNames", dateSessionNames);
-
-    if (sessionsFolder != juce::File())
-        o->setProperty ("sessionsFolder", sessionsFolder.getFullPathName());
+    o->setProperty ("sessionsFolder", sessionsFolder != juce::File() ? sessionsFolder.getFullPathName() : juce::String()); // empty: where taw starts
     o->setProperty ("newRate", newRate);
     o->setProperty ("browser", browserVisible);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
@@ -3121,7 +3181,21 @@ void App::saveSettings() const
         off.add (name);
 
     o->setProperty ("midiOff", off);
-    settingsFile().replaceWithText (juce::JSON::toString (juce::var (o)));
+    const juce::var mine (o);
+
+    // Other taws share the file: write only what this one changed since it last read or wrote
+    // it, over the file as it is now, so a setting changed in another taw meanwhile stays.
+    auto merged = juce::JSON::parse (settingsFile());
+
+    if (merged.getDynamicObject() == nullptr)
+        merged = new juce::DynamicObject();
+
+    for (const auto& p : o->getProperties())
+        if (! settingsSeen.hasProperty (p.name) || juce::JSON::toString (p.value) != juce::JSON::toString (settingsSeen[p.name]))
+            merged.getDynamicObject()->setProperty (p.name, p.value);
+
+    settingsFile().replaceWithText (juce::JSON::toString (merged));
+    settingsSeen = mine; // what wasn't written is what this taw saw anyway
 }
 
 // The markers row: the arrows (and tab) go marker to marker, selecting the one they land on and
@@ -3296,6 +3370,7 @@ void App::handleKey (const Key& k)
         case Mode::Main:           handleMainKey (k); break;
         case Mode::DevicePicker:   handleDevicePickerKey (k); break;
         case Mode::TemplatePicker: handleTemplatePickerKey (k); break;
+        case Mode::Hub:            handleHubPageKey (k); break;
     }
 }
 
@@ -3986,6 +4061,18 @@ void App::handleDevicePickerKey (const Key& k)
     {
         case Key::Up:   pickIndex = juce::jmax (0, pickIndex - 1); return;
         case Key::Down: pickIndex = juce::jmin (n - 1, pickIndex + 1); return;
+        case Key::Left:
+        case Key::Right:
+            // The row's input, through the type's inputs and none.
+            if (n > 0)
+                if (auto& c = deviceChoices[(size_t) pickIndex]; ! c.inputs.isEmpty())
+                {
+                    const int count = c.inputs.size();
+                    const int at = juce::jmax (0, c.inputs.indexOf (c.input));
+                    c.input = c.inputs[(at + (k.code == Key::Right ? 1 : count - 1)) % count];
+                }
+
+            return;
         case Key::Escape:
             if (engine.devices().getCurrentAudioDevice() != nullptr)
                 proceedToSession();
@@ -4125,9 +4212,14 @@ void App::handleTemplatePickerKey (const Key& k)
         return;
     }
 
+    // Tab: the hub, where there is one (the arrows move between areas); otherwise round the areas.
     if (k.code == Key::Tab)
     {
+#if TAW_HUB
+        openHubPage(); // the hub, with no session
+#else
         movePickArea (pickArea == PickArea::templates ? PickArea::sessions : pickArea == PickArea::sessions ? PickArea::bounces : PickArea::templates);
+#endif
         return;
     }
 

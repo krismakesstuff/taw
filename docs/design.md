@@ -104,6 +104,13 @@ One mode, stopped or rolling: keystrokes build a command line and `Enter` runs i
 Space and Ctrl keys act immediately and never touch the command line. While rolling, a
 PLAYING / RECORDING label sits in front of the prompt. Changing the audio device needs a stop.
 
+**Device rates.** The engine and its plugins run at the device's rate. A Bluetooth headset
+whose own mic is open drops to 16 kHz mono, and some instruments are silent there (Roland's
+EARTH is; `taw --plugintest <file> 16000` shows it). In `dev`, ←→ gives an output another
+input (the Mac's mic, or none), which keeps the headset in stereo at 44.1/48 kHz. A device
+that's its own input and runs below 44.1 kHz gets a warning saying so. Planned: running the
+engine at the session's rate and converting to the device's, so any device works.
+
 ### Navigation keys (idle and rolling)
 
 | Key | Grid on | Grid off |
@@ -255,7 +262,7 @@ records the selected tracks, else whatever is armed.
 | `count always` / `count rec` | count in on plain playback too / only when recording starts (default) |
 | `height 3` | rows per track, 1-4 (default 2); saved with the session |
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
-| `dev` | choose audio device |
+| `dev` | choose audio device; ←→ on a row picks its input (CoreAudio: another device, or none) |
 | `panel` | open the ASIO driver control panel |
 | `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; go back to the sessions; quit (`q` alone is a view key). With unsaved changes, closing and quitting ask: `s` save (and bounce last-saved), `o` save only, `d` don't save, `esc` stay |
 
@@ -856,7 +863,10 @@ own, it shows the frame for where the playhead is, so it can't drift.
 - **Decoding:** FFmpeg's libraries (libavformat, libavcodec, libswscale), linked from Gyan's
   pinned 9.0.2 shared build, which CMake downloads. The DLLs are delay-loaded, so taw starts
   without loading them, and still runs without video if they're missing. FFmpeg rather than
-  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode.
+  Media Foundation because editors deliver ProRes and DNx, which Windows can't decode. On
+  macOS, Homebrew's FFmpeg (`brew install ffmpeg`, 8.x works) is found at build time and
+  weak-linked: without it taw still starts, and `videoAvailable` asks the loader whether the
+  libraries are there. Homebrew's next major version renames them, which needs a rebuild.
 - **Exact frames:** the frame for a time is the last one whose timestamp is at or before it.
   Moving forward decodes on from the current frame (it's always one frame ahead, so playback
   only has to scale); a jump past a keyframe seeks to the keyframe before the target and decodes
@@ -865,8 +875,9 @@ own, it shows the frame for where the playhead is, so it can't drift.
   latency (what you hear); stopped, the cursor. Less the video's start (`videoStart`, samples,
   negative to skip a slate), less `videoOffset` frames (for a screen that lags).
 - **Window:** a normal JUCE window with the native title bar, a view only: it ignores keys,
-  never activates (`WS_EX_NOACTIVATE`; set up before it goes on the desktop, because JUCE
-  activates a window when it remakes it), and the decoder thread scales frames to its size in
+  never activates (`WS_EX_NOACTIVATE` on Windows, set up before it goes on the desktop, because
+  JUCE activates a window when it remakes it; on macOS it can't become the key window, and if
+  it's activated anyway `syncVideo` hands the keyboard back to the terminal), and the decoder thread scales frames to its size in
   physical pixels so painting is a copy. Its close button hides it until `video` or the next
   open (not saved: Windows sends every window the same close on shutdown). Its place is saved
   in the session (`videoWindow`).
@@ -876,8 +887,9 @@ own, it shows the frame for where the playhead is, so it can't drift.
   before the video) in the header. Up from the first track reaches it. Arrows step frames
   (ctrl: seconds; alt keeps the beat), landing on each frame's first sample (`frameStart`:
   the first sample the decoder shows that frame at); tab hops to its start and end; a click
-  puts the cursor on a frame and a drag scrubs (the Windows console reports moves with the
-  left button held as `Key::drag`, once per cell). Selections made there cover every track,
+  puts the cursor on a frame and a drag scrubs (moves with the left button held come in as
+  `Key::drag`, once per cell: from the Windows console, and on macOS from the terminal's
+  button-event mouse mode, 1002). Selections made there cover every track,
   like the other top lanes.
 - **Bounce with picture (`bv`):** `Bounce` with `Format::video` feeds the mix to `VideoMuxer`,
   which re-encodes the picture (x264, CRF 18, the source's size and frame rate) rather than
@@ -890,6 +902,94 @@ own, it shows the frame for where the playhead is, so it can't drift.
 - **Session:** `videoFile` (relative to the session if inside it), `videoStart`,
   `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
   undo and opening sessions need nothing else.
+
+## Hub
+
+The audio hub (`docs/plan-audio-hub.md`; macOS so far): one background taw that owns the
+interface and routes between it and taw sessions, Voicemeeter-style. Apps (Zoom, a browser)
+join it later through virtual devices.
+
+- **Process:** `taw --hub`, headless, run by a launchd agent (`com.taw.hub`, RunAtLoad,
+  KeepAlive after a failure) from "taw hub.app", a bundle the build makes beside taw (the same
+  binary, ad-hoc signed). The bundle is what gets the microphone permission, since launchd
+  starts it, not a terminal. `taw --install-hub` / `--uninstall-hub`, or `hub start` /
+  `hub stop` inside taw. One per user (an `InterProcessLock`). Its log is `hub.log` in the
+  config folder; `hub-info.json` there says where it listens (a local TCP port), its pid, rate,
+  block size, and how many inputs a session gets.
+- **Its interface:** `hub-device.xml` once it has one (written the first time it starts),
+  else the device taw sessions saved (unless that's the hub itself), else the default; never
+  one of the driver's own devices (that would be a loop). `i` on the hub page (or `interface`)
+  opens a picker, outputs and inputs side by side (←→ between them, ↑↓ choose, "● current"
+  marks what the hub has, enter uses both); `interface MacBook Pro Speakers + MacBook Pro
+  Microphone` sets it typed (the start of a name will do). Either restarts the hub on it.
+- **Apps: taw.driver** (`driver/TawDriver.c`), a CoreAudio AudioServerPlugIn built beside
+  taw. Any app can pick "taw 1" to "taw 4" (stereo both ways) as its speaker or mic. The hub
+  reaches them through a hidden 8-channel device, "taw hub": its inputs 2N-1, 2N are what apps
+  play into taw N, its outputs go to taw N's mic. Inside it's loopback through ring buffers
+  indexed by sample time; every device runs on one clock (one anchor and period, one clock
+  domain), so sample time means the same instant on each, and reading clears what was read so
+  an app that stops leaves silence. coreaudiod runs it sandboxed: it talks to nothing.
+  `taw --install-driver` (or `driver install` on the hub page) copies it to
+  `/Library/Audio/Plug-Ins/HAL` with an admin password, restarts coreaudiod (every app's sound
+  stops for a moment) and then the hub; `--uninstall-driver` takes it out. Rates 8 to 96 kHz
+  (the low ones for Bluetooth headsets with their mic open). A Bluetooth headset is two
+  CoreAudio devices with one name, one each way: devices are found by name and direction.
+- **The hub's device with apps:** a private aggregate (`HubMac.mm`, only the hub sees it) of
+  the interface's output device, its input device when that's another one, and the hidden
+  device, clocked by the interface with drift correction on the others. Its last 8 channels
+  each way are the apps'. Apps may set the driver to another rate than the hub's; the drift
+  correction carries it (seen working at 44.1 kHz against a 16 kHz headset).
+- **Sessions join it as a device:** "taw hub" in `dev`, a `juce::AudioIODeviceType`
+  (`HubDevice.cpp`), so `AudioEngine` doesn't change. Opening it starts the hub if it's
+  installed, says hello over the socket (JSON messages), and maps the shared memory the hub
+  made for it (`HubShared.h`). A session gets the interface's inputs, at least 8 (room for apps
+  and other sessions on a MacBook's one mic), and 2 outputs.
+- **Real time:** each block the hub writes every session's inputs for cycle n into slot n % 2,
+  publishes n and wakes it (`os_sync_wake_by_address_any`); the session's device thread
+  (real-time priority) renders and marks n done. At n + 1 the hub plays what was done, or
+  silence and a late block. The hub never waits on a session, so one that stalls doesn't touch
+  the others. A session's outputs are a block later than straight from the interface, which
+  its device reports as output latency, so recording, the picture and delay compensation are
+  right as they are.
+- **Routes:** source channel to destination channel with a level, kept in `hub.json`. Ends are
+  `interface`, an app device (`taw 1`: from it, what apps play into it; to it, its mic), or a
+  session by its folder, so routes outlive restarts and wait for a session that's closed. A session the hub sees for the first time gets the defaults (every interface
+  input to its inputs in order, its outputs 1-2 to the interface's 1-2); after that its routes
+  are whatever they've been made. Session to session adds a block. The plan the audio thread
+  runs is rebuilt on any change and handed over through a queue like the engine's graphs.
+- **In taw:** the hub has a page of its own (`Mode::Hub`), with or without a session: `taw hub`
+  from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), tab on
+  the start screen, `hub` in a session (which plays on meanwhile; one that isn't on the hub is
+  told to pick taw hub in `dev`). It shows the interface and a matrix named from the hub's
+  side: rows come in, columns go out. Rows are the interface's inputs one by one ("MacBook in
+  1": the hardware by its first word, so it isn't taken for the Mac's own output), the app
+  devices as `taw1in` (what apps play to taw 1) and sessions' outputs as stereo; columns are
+  the interface's outputs in pairs ("MacBook / out 1-2"), the app devices as `taw1out` (what
+  apps hear with taw 1 as their mic) and sessions' inputs. Beside an app device: who uses it
+  now (macOS's process list, a helper as its app, "system output" when the Mac's sound is set
+  to it; an app shows only while its audio runs). The chosen row and column are in the accent.
+  Arrows move, space turns a cell on or off (stereo to stereo side by side, mono to both sides;
+  into a session on the input of the same number for an interface input, else the first free
+  pair after the interface's), `[ ]` its level, shift+←→ which of a session's inputs it lands
+  on (a track there takes them with `i`), del takes it out, `n` names the app device (`name
+  taw 1 Zoom`: a label in taw, kept in hub.json; route commands take it too), `i` the
+  interface. A cell is ● on, · off, the inputs it lands on in a session column, ~ when typed
+  routes don't fit the shape, ─ an app device or session into itself. The line under it says
+  what the cell does. It scrolls both ways. Esc goes back. Its command line takes `route in
+  1-2 > Song`, `route taw1in > Song`, `route Song > out 1-2 -6`, `unroute Song > out`, `forget
+  Song`, `start`, `stop` (`hub` in front is fine, and in a session it's needed). `this` is the
+  session here. Channels pair up (one to many spreads, many to one sums, none given: 1-2). A
+  taw with no session open joins with no name and gets no routes until one opens.
+- **Without the hub** (Windows so far, or `-DTAW_WITH_HUB=OFF`): the hub command and page say
+  it's macOS only, `taw hub` too (rather than making a session called hub).
+- **The hub going away:** sessions hear it, wait for it, and carry on when it's back (same rate
+  and block), without choosing the device again.
+- **Tests:** `taw --hubtest` (an engine and server in process, a thread for the interface, two
+  sessions through real "taw hub" devices: sample-exact a block late, the reported latency, a
+  stalling session not touching the other, routes, the hub restarting). `taw --hubping` joins
+  the real hub as a session for a few seconds and says what it heard. `taw --apptest` plays
+  beeps into taw 1 and records taw 2's mic through a route between them (beeps, not clicks:
+  drift correction resamples, which smears a one-sample click).
 
 ## Startup
 
@@ -989,6 +1089,13 @@ threads at low priority so it doesn't crowd the audio.
 - **Edits are kept as you go.** `unsaved\session.json` is rewritten after every change (until you
   save, which writes `session.json`), so a crash loses at most the last few milliseconds of
   edits; the next open picks them up.
+- **One taw per session.** Opening a session writes `.taw-lock` in it (pid, computer, when);
+  another taw (or `--exec`) opening it is refused while that taw runs. A lock left by a taw
+  that's gone is taken over. One from another computer (a synced folder) can't be checked, so
+  it stands until deleted; the message says where it is. Computers are told apart by their
+  hardware id, since a Mac's hostname changes with the network.
+- **Shared settings.** `settings.json` is shared by every taw running: each writes only the
+  settings it changed since it last read or wrote the file, over the file as it is then.
 - **Backups.** Each open copies `session.json` to `backups\session-<time>.json` (newest 10
   kept). If `session.json` won't load, taw opens the newest backup that does and keeps the
   damaged file as `session.json.damaged-<time>`.

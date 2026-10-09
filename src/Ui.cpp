@@ -3149,7 +3149,7 @@ void Ui::drawTemplatePicker (App& app)
                 if (c.hasType (ids::TRACK))
                     tracks.add (c[ids::name].toString() + ((int) c[ids::input] > 0 ? L" \x2190 in" + c[ids::input].toString() : juce::String()));
 
-            canvas.text (20, y, tracks.isEmpty() ? juce::String ("empty") : tracks.joinIntoString ("  "), colour::faint, bg, false, w - 22);
+            canvas.text (20, y, tracks.isEmpty() ? juce::String ("empty") : tracks.joinIntoString ("  "), sel && focused ? colour::dim : colour::faint, bg, false, w - 22);
         }
     }
 
@@ -3213,7 +3213,7 @@ void Ui::drawTemplatePicker (App& app)
                     meta = next;
                 }
 
-                canvas.text (leftX + 3 + nameW, row, meta, colour::faint, bg, false, metaW);
+                canvas.text (leftX + 3 + nameW, row, meta, sel && focused ? colour::dim : colour::faint, bg, false, metaW);
             }
 
             canvas.text (leftX + 3 + nameW + metaW, row, agoText (dir.getChildFile ("session.json").getLastModificationTime()), colour::dim, bg, false,
@@ -3247,7 +3247,7 @@ void Ui::drawTemplatePicker (App& app)
             canvas.text (rightX + 2, row, padRight (b.file.getFileNameWithoutExtension(), nameW), playing ? colour::accent : colour::text, bg,
                          sel && focused, nameW);
             canvas.text (rightX + 3 + nameW, row, padRight (b.session, sessionW), colour::dim, bg, false, sessionW);
-            canvas.text (rightX + 4 + nameW + sessionW, row, agoText (b.time), colour::faint, bg, false, ageW);
+            canvas.text (rightX + 4 + nameW + sessionW, row, agoText (b.time), sel && focused ? colour::dim : colour::faint, bg, false, ageW);
         }
     }
 

@@ -327,7 +327,7 @@ bool App::handleClosePromptKey (const Key& k)
     else if (k.code == Key::Escape || c == 'c')
     {
         closePrompt.reset();
-        openAfterClose = {}; // an imported set waiting to open: not now
+        openAfterClose = juce::File(); // an imported set waiting to open: not now
         openAfterCloseNote.clear();
         say (Result::good ("still open"));
     }

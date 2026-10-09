@@ -444,7 +444,7 @@ Result App::hubCommand (const juce::String& rest)
             if (mode != Mode::Hub)
                 openHubPage();
 
-            openDevicePicker (true);
+            openHubInterfacePicker();
             return Result::good();
         }
 
@@ -846,8 +846,69 @@ Result App::hubLevel (double delta)
 // a cell on or off, [ ] its level, shift+←→ where it lands in a session, del takes it out, n
 // names an app device. Anything else typed goes to the command line ("route in 1 > Song",
 // "hub" in front is fine), enter runs it.
+void App::openHubInterfacePicker()
+{
+    auto& p = hubPicker;
+    p = {};
+
+    for (auto* type : engine.devices().getAvailableDeviceTypes())
+        if (type->getTypeName() == "CoreAudio")
+        {
+            type->scanForDevices();
+            p.outputs = type->getDeviceNames (false);
+            p.inputs = type->getDeviceNames (true);
+        }
+
+    for (auto* list : { &p.outputs, &p.inputs })
+        for (int i = list->size(); --i >= 0;)
+            if (list->getReference (i).startsWith ("taw ")) // the driver's own: a loop
+                list->remove (i);
+
+    // On what the hub has now.
+    p.output = juce::jmax (0, p.outputs.indexOf (hubHardware (true)));
+    p.input = juce::jmax (0, p.inputs.indexOf (hubHardware (false)));
+    p.open = true;
+}
+
+void App::handleHubInterfaceKey (const Key& k)
+{
+    auto& p = hubPicker;
+    auto& at = p.onInputs ? p.input : p.output;
+    const int n = (p.onInputs ? p.inputs : p.outputs).size();
+
+    switch (k.code)
+    {
+        case Key::Up:    at = juce::jmax (0, at - 1); return;
+        case Key::Down:  at = juce::jmax (0, juce::jmin (n - 1, at + 1)); return;
+        case Key::Left:  p.onInputs = false; return;
+        case Key::Right: p.onInputs = true; return;
+        case Key::Tab:   p.onInputs = ! p.onInputs; return;
+        case Key::Escape: p.open = false; return;
+        case Key::Enter:
+            if (p.outputs.isEmpty())
+                return;
+
+            p.open = false;
+            say (hubCommand ("interface " + p.outputs[p.output] + (p.inputs.isEmpty() ? juce::String() : " + " + p.inputs[p.input])));
+            return;
+        case Key::Char:
+            if (k.ch == 'r' || k.ch == 'R')
+                openHubInterfacePicker(); // rescan, e.g. after plugging headphones in
+
+            return;
+        default:
+            return;
+    }
+}
+
 void App::handleHubPageKey (const Key& k)
 {
+    if (hubPicker.open)
+    {
+        handleHubInterfaceKey (k);
+        return;
+    }
+
     const auto numRows = (int) hubRows().size(), numCols = (int) hubCols().size();
     hubRow = juce::jlimit (0, juce::jmax (0, numRows - 1), hubRow);
     hubCol = juce::jlimit (0, juce::jmax (0, numCols - 1), hubCol);
@@ -928,7 +989,7 @@ void App::handleHubPageKey (const Key& k)
             // i: the hub's interface, in a picker.
             if (! typing && (k.ch == 'i' || k.ch == 'I'))
             {
-                openDevicePicker (true);
+                openHubInterfacePicker();
                 return;
             }
 
@@ -962,6 +1023,8 @@ Result App::hubRoute (const juce::String&, bool) { return Result::fail ("the hub
 void App::openHubPage() { say (Result::fail ("the hub runs on macOS only so far")); }
 void App::closeHubPage() {}
 void App::handleHubPageKey (const Key&) {}
+void App::openHubInterfacePicker() {}
+void App::handleHubInterfaceKey (const Key&) {}
 std::vector<App::HubEnd> App::hubRows() const { return {}; }
 std::vector<App::HubEnd> App::hubCols() const { return {}; }
 App::HubCell App::hubCell (const HubEnd&, const HubEnd&) const { return {}; }

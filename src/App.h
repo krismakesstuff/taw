@@ -262,6 +262,19 @@ public:
     bool hubAppNamed (const juce::String& key) const;
     juce::String hubHardware (bool output) const; // the hub's interface that way: "MacBook Pro Speakers"
 
+    // The hub's interface, picked over its page (i): outputs on the left, inputs on the right
+    // (CoreAudio's, not the driver's own: a loop). ←→ goes between them, ↑↓ picks, enter uses both.
+    struct HubInterfacePicker
+    {
+        bool open = false;
+        juce::StringArray outputs, inputs;
+        int output = 0, input = 0;
+        bool onInputs = false;
+    };
+    HubInterfacePicker hubPicker;
+    void openHubInterfacePicker();
+    void handleHubInterfaceKey (const Key&);
+
     // Who uses each app device now ("taw 1"): the apps playing into it, and those hearing it as
     // their mic (macOS only lists an app while its audio runs). Asked with the status.
     struct HubUsers
@@ -460,10 +473,7 @@ public:
     juce::File lastBounce;                          // this session's latest finished bounce
     bool interactive = false;                       // run() is driving (not taw --exec): may open other windows
     const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
-    // forHub: the hub's interface instead (CoreAudio only, not the driver's devices); enter
-    // gives it to the hub, esc goes back to the hub's page.
-    void openDevicePicker (bool forHub = false);
-    bool pickingHubInterface = false;
+    void openDevicePicker();
     Result showControlPanel();
     // Quitting saves and closes the session first: on screen, in steps under the closing box.
     void quit()

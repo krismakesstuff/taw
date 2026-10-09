@@ -2787,6 +2787,12 @@ void Ui::drawMidiPanel (App& app)
 // ~ when typed routes don't fit the usual shape. It scrolls both ways, so it fits 80x24.
 void Ui::drawHubPage (App& app)
 {
+    if (app.hubPicker.open)
+    {
+        drawHubInterfacePicker (app);
+        return;
+    }
+
     const auto& s = app.hubStatus;
     const int w = canvas.width(), h = canvas.height();
 
@@ -2965,17 +2971,66 @@ void Ui::drawHubPage (App& app)
                  colour::dim, -1, false, w - 2);
 }
 
+// The hub's interface: what it plays through on the left, what it hears on the right; the
+// chosen side's heading and pick in the accent. "now" marks what the hub has.
+void Ui::drawHubInterfacePicker (App& app)
+{
+    const auto& p = app.hubPicker;
+    const int w = canvas.width(), h = canvas.height();
+
+    canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
+    canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
+    canvas.text (5, 0, L"\x25b8 hub \x25b8 interface", colour::text, colour::headerBg);
+    canvas.text (1, 2, L"The hardware the hub plays through and hears. Enter restarts the hub on it.", colour::dim, -1, false, w - 2);
+
+    const int colW = (w - 4) / 2, top = 4, visible = h - top - 4;
+
+    auto list = [&] (int x, const juce::String& heading, const juce::StringArray& names, int chosen, bool active, const juce::String& now)
+    {
+        canvas.text (x, top, heading, active ? colour::accent : colour::dim, -1, active);
+
+        const int first = juce::jlimit (0, juce::jmax (0, names.size() - visible), chosen - visible / 2);
+
+        if (names.isEmpty())
+            canvas.text (x + 2, top + 2, "none found", colour::faint);
+
+        for (int r = 0; r < visible && first + r < names.size(); ++r)
+        {
+            const int i = first + r;
+            const bool sel = i == chosen;
+            const int y = top + 2 + r;
+            const int bg = sel && active ? colour::focusBg : -1;
+
+            canvas.fill (x, y, colW - 1, L' ', -1, bg);
+
+            if (sel)
+                canvas.put (x, y, L'\x25b8', active ? colour::accent : colour::dim, bg);
+
+            const int nx = canvas.text (x + 2, y, names[i], sel ? (active ? colour::accent : colour::text) : colour::text, bg, sel, colW - 10);
+
+            if (names[i] == now)
+                canvas.text (nx + 1, y, L"\x25cf now", colour::faint, bg);
+        }
+    };
+
+    list (2, L"output \x2014 plays through", p.outputs, p.output, ! p.onInputs, app.hubHardware (true));
+    list (2 + colW + 1, L"input \x2014 hears", p.inputs, p.input, p.onInputs, app.hubHardware (false));
+
+    // What enter would do, in words.
+    if (! p.outputs.isEmpty())
+        canvas.text (1, h - 3, L"enter: " + p.outputs[p.output] + (p.inputs.isEmpty() ? juce::String() : L" + " + p.inputs[p.input]),
+                     colour::text, -1, false, w - 2);
+
+    canvas.text (1, h - 1, L"\x2190\x2192 output / input \x00b7 \x2191\x2193 choose \x00b7 enter use both \x00b7 r rescan \x00b7 esc back", colour::dim, -1, false, w - 2);
+}
+
 //==============================================================================
 void Ui::drawDevicePicker (App& app)
 {
     const int w = canvas.width(), h = canvas.height();
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
-    canvas.text (5, 0, app.pickingHubInterface ? L"\x25b8 hub \x25b8 interface" : L"\x25b8 audio device", colour::text, colour::headerBg);
-
-    if (app.pickingHubInterface)
-        canvas.text (1, 2, L"Choose the hardware the hub plays through and hears (it restarts on it; sessions on the hub follow).", colour::dim, -1, false, w - 2);
-    else
+    canvas.text (5, 0, L"\x25b8 audio device", colour::text, colour::headerBg);
 #if JUCE_WINDOWS
     canvas.text (1, 2, "Choose the interface taw records and plays through. ASIO gives the lowest latency.", colour::dim);
 #else

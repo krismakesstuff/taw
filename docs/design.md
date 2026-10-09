@@ -257,8 +257,7 @@ records the selected tracks, else whatever is armed.
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device |
 | `panel` | open the ASIO driver control panel |
-| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; save and go back to the sessions; save and quit (`q` alone is a view key) |
-| `close` | save and close the session, back to the recent sessions / new session screen |
+| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; go back to the sessions; quit (`q` alone is a view key). With unsaved changes, closing and quitting ask: `s` save (and bounce last-saved), `d` don't save, `esc` stay |
 
 ### Rolling keys
 
@@ -904,8 +903,35 @@ wanted first: an armed instrument, other instruments, then inserts that are on. 
 insert isn't loaded until it's switched on or its window is opened. Until its plugin is in, a
 track is silent and shows dim (`loading…` under an instrument's name); the transport bar
 counts what's left. Opening a plugin's window, or bounce, loads what it needs at once. Closing
-(`close`, or quitting with a session open) does the same in reverse: each plugin's state is
-saved and the plugin unloaded under a closing box.
+(`close`, or quitting with a session open) does the same in reverse: each plugin unloaded (its
+state saved, if you chose to save) under a closing box.
+
+### Saving, last-saved, and the bounces tab
+Saving is something you do (`ctrl+s`), not something taw does behind you. Edits go to the
+session's `unsaved\` folder as you make them (the session as it is now, and plugin states
+written when a window closes or a plugin is removed); `session.json` and `plugins\` change only
+when you save. So the sessions list, sorted by when `session.json` last changed, says what you
+last worked on, not what you last opened. The title bar says `unsaved` while there are edits.
+
+Closing or quitting with changes (edits, or a plugin window opened and its settings changed
+since the save) asks: `s` saves and bounces, `d` drops the changes (`unsaved\` is deleted),
+`esc` stays. Saving as you close bounces `bounces\last-saved.mp3` (WAV at rates MP3 can't do),
+bar 1 to the end of the last clip plus two seconds, over the last one. It bounces in the
+background with the session's own plugins (they were about to be unloaded anyway, so nothing
+reloads), and the session screen comes up at once; its bottom line shows the progress. A close
+without changes bounces too if you saved during the visit. Quitting waits for the bounce on the
+session screen (any key stays, esc quits now and drops it).
+
+If taw crashes or the window is closed on unsaved changes, they stay in `unsaved\`; the next
+open picks them up, says so, and they're still unsaved until you save. Headless runs (`--exec`)
+save to `session.json` as they go, as before.
+
+The session screen has two tabs (`tab` switches): sessions, and bounces. The bounces tab lists
+what taw bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json`
+in the config folder), plus whatever is in the recent sessions' `bounces\` folders. `enter` (or
+`space`) plays one through the output, decoded on a thread, without opening anything; `←→` seek
+5 s (shift: 30), `home` goes back to the start, `esc` stops, `o` opens the session it came
+from, `r` shows the file in Explorer.
 
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
 (opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long
@@ -922,8 +948,9 @@ took (and anything later that held a frame for over 150 ms), to find what made o
 
 ## When things go wrong
 
-- **Saves are atomic and constant.** `session.json` is rewritten (temp file + rename) after
-  every change, so a crash loses at most the last few milliseconds of edits.
+- **Edits are kept as you go.** `unsaved\session.json` is rewritten after every change (until you
+  save, which writes `session.json`), so a crash loses at most the last few milliseconds of
+  edits; the next open picks them up.
 - **Backups.** Each open copies `session.json` to `backups\session-<time>.json` (newest 10
   kept). If `session.json` won't load, taw opens the newest backup that does and keeps the
   damaged file as `session.json.damaged-<time>`.

@@ -211,7 +211,16 @@ juce::String Ui::snapshot (App& app, int w, int h)
                             xtermColour (colour::wave), xtermColour (colour::clipBg), xtermColour (colour::selBg) });
     }
     canvas.resize (w, h);
-    drawMain (app);
+
+    if (app.mode == Mode::TemplatePicker)
+        drawTemplatePicker (app);
+    else
+    {
+        drawMain (app);
+
+        if (app.closePrompt.has_value())
+            drawClosePrompt (app);
+    }
 
     juce::String out;
 
@@ -263,6 +272,8 @@ void Ui::render (App& app)
 
         if (app.closing != nullptr)
             drawClosing (app);
+        else if (app.closePrompt.has_value())
+            drawClosePrompt (app);
     }
 
     if (app.loadingPlugin.isNotEmpty() && w >= 70 && h >= 16)
@@ -338,7 +349,12 @@ void Ui::drawTitle (App& app)
     int x = canvas.text (1, 0, "taw", colour::accent, -1, true);
 
     if (auto* s = app.session.get())
-        canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);
+    {
+        x = canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);
+
+        if (app.unsaved)
+            canvas.text (x + 1, 0, "unsaved", colour::dim); // ctrl+s saves
+    }
 
     // MIDI inputs on the right, with a light that blinks as messages come in.
     if (app.midiInputs != nullptr)
@@ -1979,7 +1995,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"@17  @1:30", L"bar 17 / 1 min 30 s", L"commands", L"work while playing too" },
             { Pair, L"r t   enter", L"zoom out, in / return", L"l", L"loop selection / toggle" },
             { Pair, L"q w", L"go to sel. start / end", L"tab", L"next clip edge / hit" },
-            { Pair, L"ctrl+s / w", L"save / close session", L"ctrl+q  exit", L"save and quit" },
+            { Pair, L"ctrl+s / w", L"save / close session", L"ctrl+q  exit", L"quit (asks to save)" },
             { Note, L"esc clears the line, then the selection \x00b7 alt+C clears clip lights" },
         } },
         { L"TRACKS", {
@@ -2869,8 +2885,112 @@ void Ui::drawOpening (App& app)
 void Ui::drawClosing (App& app)
 {
     const auto& job = *app.closing;
-    drawProgress (app, job.thenQuit ? "SAVING AND QUITTING" : "CLOSING",
-                  job.current.isNotEmpty() ? "saving " + job.current : juce::String ("saving the session"), job.done, job.total);
+    const auto title = juce::String (job.save ? "SAVING AND " : "") + (job.thenQuit ? "QUITTING" : "CLOSING");
+    const auto doing = job.current.isNotEmpty() ? (job.save ? "saving " : "closing ") + job.current
+                                                : juce::String (job.save ? "saving the session" : "closing the session");
+    drawProgress (app, title, doing, job.done, job.total);
+}
+
+// Closing with unsaved changes: save them (and bounce last-saved), or drop them.
+void Ui::drawClosePrompt (App& app)
+{
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 64), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
+
+    for (int y = 0; y < 7; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const juce::String title (app.closePrompt->thenQuit ? "QUIT" : "CLOSE");
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1, app.session->name(), colour::accent, bg, true, boxW - title.length() - 5);
+    canvas.text (x0 + 2, y0 + 2, "has changes you haven't saved", colour::dim, bg, false, boxW - 4);
+
+    int x = canvas.text (x0 + 2, y0 + 4, "s", colour::accent, bg, true);
+    x = canvas.text (x + 1, y0 + 4, "save, and bounce last-saved", colour::text, bg, false, boxW - 4);
+    x = canvas.text (x0 + 2, y0 + 5, "d", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 5, "don't save", colour::text, bg);
+    x = canvas.text (x0 + 20, y0 + 5, "esc", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 5, "stay", colour::text, bg);
+}
+
+// The session screen's bounces tab: what taw bounced, newest first; enter plays one.
+void Ui::drawBouncesTab (App& app, int y)
+{
+    const int w = canvas.width(), h = canvas.height();
+    const int n = (int) app.recentBounces.size();
+    const auto now = juce::Time::getCurrentTime();
+    const auto* player = app.bouncePlayer.get();
+    const auto at = app.bouncePlaySeconds();
+
+    auto ago = [&] (juce::Time t)
+    {
+        const auto age = now - t;
+        return age.inMinutes() < 60 ? juce::String ((int) age.inMinutes()) + " min ago"
+             : age.inHours() < 48   ? juce::String ((int) age.inHours()) + " h ago"
+                                    : juce::String ((int) age.inDays()) + " days ago";
+    };
+
+    auto clock = [] (double s)
+    {
+        const auto t = juce::jmax (0, (int) s);
+        return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
+    };
+
+    if (n == 0)
+    {
+        canvas.text (1, y, "no bounces yet", colour::dim);
+        canvas.text (1, y + 2, L"in a session, select a range and b bounces it \x00b7 saving as you close bounces last-saved", colour::faint, -1, false, w - 2);
+    }
+    else
+    {
+        canvas.text (1, y++, "recent bounces", colour::dim);
+        const int rows = juce::jmax (1, h - 6 - y);
+        const int first = juce::jlimit (0, juce::jmax (0, n - rows), app.bounceIndex - rows / 2);
+
+        for (int i = first; i < juce::jmin (n, first + rows); ++i, ++y)
+        {
+            const auto& b = app.recentBounces[(size_t) i];
+            const bool sel = i == app.bounceIndex;
+            const bool playing = player != nullptr && player->file == b.file && at >= 0.0;
+            const int bg = sel ? colour::focusBg : -1;
+
+            canvas.fill (1, y, w - 2, L' ', -1, bg);
+
+            if (sel)
+                canvas.put (1, y, L'\x25b8', colour::accent, bg);
+
+            if (playing)
+                canvas.put (2, y, L'\x266a', colour::accent, bg);
+
+            const auto name = b.file.getFileNameWithoutExtension();
+            canvas.text (4, y, padRight (name, 30), playing ? colour::accent : colour::text, bg, sel, 30);
+            canvas.text (35, y, padRight (b.session, 22), colour::dim, bg, false, 22);
+            canvas.text (58, y, padRight (ago (b.time), 12), colour::faint, bg, false, w - 59);
+        }
+    }
+
+    // What's playing: where, and how far through.
+    if (player != nullptr)
+    {
+        const auto len = app.bounceLengthSeconds();
+        int x = canvas.text (1, h - 4, at >= 0.0 ? L"\x25b6 " : L"\x25a0 ", colour::accent);
+        x = canvas.text (x, h - 4, player->file.getFileNameWithoutExtension(), colour::text, -1, true, 30);
+
+        if (! player->started)
+            canvas.text (x + 2, h - 4, L"loading\x2026", colour::dim);
+        else
+        {
+            x = canvas.text (x + 2, h - 4, clock (juce::jmax (0.0, at)) + " / " + clock (len), colour::dim);
+            const int barW = juce::jmax (0, w - 2 - (x + 2));
+            const int filled = len > 0.0 && at >= 0.0 ? (int) (barW * at / len) : 0;
+
+            for (int i = 0; i < barW; ++i)
+                canvas.put (x + 2 + i, h - 4, i < filled ? L'\x2501' : L'\x2500', i < filled ? colour::accent : colour::faint);
+        }
+    }
+
+    canvas.text (1, h - 1, L"\x2191\x2193 choose \x00b7 enter play/stop \x00b7 \x2190\x2192 seek \x00b7 o open its session \x00b7 r reveal \x00b7 tab sessions",
+                 colour::dim, -1, false, w - 2);
 }
 
 void Ui::drawTemplatePicker (App& app)
@@ -2879,12 +2999,54 @@ void Ui::drawTemplatePicker (App& app)
     const int numRecent = (int) app.recent.size();
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
-    canvas.text (5, 0, L"\x25b8 sessions", colour::text, colour::headerBg);
+
+    // Two tabs: the sessions, and the bounces taw made (tab switches).
+    {
+        int x = 5;
+
+        for (const bool bounces : { false, true })
+        {
+            const bool on = app.bouncesTab == bounces;
+
+            if (on)
+                canvas.put (x, 0, L'\x25b8', colour::accent, colour::headerBg);
+
+            x = canvas.text (x + 2, 0, bounces ? "bounces" : "sessions", on ? colour::text : colour::dim, colour::headerBg, on) + 1;
+        }
+
+        canvas.text (x + 1, 0, "(tab)", colour::faint, colour::headerBg);
+    }
 
     // Which build, out of the way on the right: the version, the commit (+: changes on top of
     // it) and when it was built.
     const auto build = juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime();
-    canvas.text (std::max (16, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
+    canvas.text (std::max (32, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
+
+    // Bounces still going in the background (a session saved and closed), else the last word.
+    if (! app.backgroundBounces.empty())
+    {
+        const auto& b = *app.backgroundBounces.front();
+        auto text = "bouncing " + app.backgroundBounceNames.front() + L" \x00b7 " + b.file().getFileName() + " "
+                    + juce::String (juce::roundToInt (b.progress() * 100.0f)) + "%";
+
+        if (app.backgroundBounces.size() > 1)
+            text << " (+" << (int) app.backgroundBounces.size() - 1 << " more)";
+
+        if (app.quitAfterBounces)
+            text << L" \x00b7 taw quits when it's done \x00b7 esc quits now \x00b7 any key stays";
+
+        canvas.text (1, h - 3, text, app.quitAfterBounces ? colour::text : colour::dim, -1, false, w - 2);
+    }
+    else if (app.message.isNotEmpty())
+    {
+        canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::dim, -1, false, w - 2);
+    }
+
+    if (app.bouncesTab)
+    {
+        drawBouncesTab (app, 2);
+        return;
+    }
 
     int y = 2;
 
@@ -2955,7 +3117,7 @@ void Ui::drawTemplatePicker (App& app)
     }
 
     canvas.text (1, h - 2, "templates live in " + configFolder().getChildFile ("templates").getFullPathName() + L" \x00b7 add your own", colour::faint, -1, false, w - 2);
-    canvas.text (1, h - 1, numRecent > 0 ? L"\x2191\x2193 choose \x00b7 enter open / create \x00b7 type a name for a new session \x00b7 esc quit"
+    canvas.text (1, h - 1, numRecent > 0 ? L"\x2191\x2193 choose \x00b7 enter open / create \x00b7 type a name for a new session \x00b7 tab bounces \x00b7 esc quit"
                                          : L"type name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 esc quit",
                  colour::dim);
 

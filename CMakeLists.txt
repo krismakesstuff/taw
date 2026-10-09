@@ -48,6 +48,7 @@ target_sources(taw PRIVATE
     src/Routing.cpp
     src/Inserts.cpp
     src/AlsImport.cpp
+    src/SessionScreen.cpp
     src/AutomationEdit.cpp
     src/TrackMenu.cpp
     src/Midi.cpp

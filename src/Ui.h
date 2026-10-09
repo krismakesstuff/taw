@@ -132,6 +132,8 @@ private:
     void drawOpening (App&);
     void drawPluginLoading (App&);
     void drawClosing (App&);
+    void drawClosePrompt (App&);
+    void drawBouncesTab (App&, int y);
     void drawProgress (App&, const juce::String& title, const juce::String& doing, size_t done, size_t total);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
     void drawDb (int x, int y, float hold, bool clipped, int bg = -1);

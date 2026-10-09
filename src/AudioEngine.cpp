@@ -100,12 +100,12 @@ void AudioEngine::triggerPad (int trackIndex, float velocity)
     padPresses.push ({ trackIndex, velocity }); // a full queue drops the press
 }
 
-void AudioEngine::preview (std::shared_ptr<const juce::AudioBuffer<float>> audio, float gain)
+void AudioEngine::preview (std::shared_ptr<const juce::AudioBuffer<float>> audio, float gain, int startSample)
 {
     for (PreviewSound* p = nullptr; previewRetired.pop (p);)
         delete p;
 
-    auto* p = new PreviewSound { std::move (audio), gain };
+    auto* p = new PreviewSound { std::move (audio), gain, juce::jmax (0, startSample) };
 
     if (! previewPending.push (p))
         delete p; // the audio thread is behind; this one's skipped
@@ -120,11 +120,14 @@ void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
             jassertfalse; // leaked rather than freed here
 
         previewNow = p;
-        previewPos = 0;
+        previewPos = p->start;
     }
 
-    if (previewNow == nullptr || previewNow->audio == nullptr)
+    if (previewNow == nullptr || previewNow->audio == nullptr || previewPos >= previewNow->audio->getNumSamples())
+    {
+        previewAt.store (-1);
         return;
+    }
 
     const auto& a = *previewNow->audio;
     const int count = juce::jmin (n, a.getNumSamples() - previewPos);
@@ -134,6 +137,7 @@ void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
             juce::FloatVectorOperations::addWithMultiply (out[ch], a.getReadPointer (juce::jmin (ch, a.getNumChannels() - 1), previewPos), previewNow->gain, count);
 
     previewPos += juce::jmax (0, count);
+    previewAt.store (previewPos);
 }
 
 // Live pad voices for one track, added into its bus. Like hits, they ring out over each other.

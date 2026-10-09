@@ -19,8 +19,16 @@ public:
 
     bool save() const;
 
+    // Edits wait in unsaved\ (the session as it is, and plugin states) until a save, so
+    // session.json and its date only change when you save. Left there by a crash (or the window
+    // closed with changes), the next open picks them up.
+    juce::File workFolder() const { return dir.getChildFile ("unsaved"); }
+    bool saveWork() const;
+    void discardWork() const { workFolder().deleteRecursively(); }
+
     // Set by load when session.json was unreadable and a backup was opened instead.
     juce::String loadNote;
+    bool recovered = false; // load found unsaved changes left in workFolder() and opened them
 
     // Pass undo() to tree changes made by editing; pass nullptr for bookkeeping that shouldn't be
     // undone (the automatic arm/restore around a record pass, bounce settings).
@@ -147,4 +155,14 @@ std::vector<Template> loadTemplates();
 std::vector<juce::File> loadRecentSessions();
 void rememberSession (const juce::File& folder);
 void enableRecentSessions(); // interactive runs only; until called, rememberSession does nothing
+
+// Bounces taw made, newest first, only those still there (for the session screen).
+struct BounceRecord
+{
+    juce::File file;
+    juce::String session;
+    juce::File folder; // the session's
+};
+std::vector<BounceRecord> loadRecentBounceRecords();
+void rememberBounce (const juce::File& file, const juce::String& session, const juce::File& folder); // likewise only once enabled
 } // namespace taw

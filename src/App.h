@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "AudioEngine.h"
 #include "Bounce.h"
@@ -15,6 +15,7 @@
 #include "Video.h"
 
 #include <functional>
+#include <optional>
 #include <map>
 #include <thread>
 
@@ -222,13 +223,68 @@ public:
     struct Closing
     {
         bool thenQuit = false;
+        bool save = false; // the session and plugin states to disk; otherwise the changes are dropped
         size_t done = 0, total = 0;
         juce::String current; // the plugin being saved
+        std::unique_ptr<Graph> bounceGraph; // last-saved.mp3: the closed session's own plugins play it
+        juce::int64 bounceEnd = 0;
+        juce::File bounceFile;
     };
     std::unique_ptr<Closing> closing;
-    void startClosing (bool thenQuit);
+    void startClosing (bool thenQuit, bool save);
     void stepClosing();
-    Result finishClosing();
+    Result finishClosing (std::optional<bool> saved = {}); // saved: a close that asked (true: it saved)
+
+    // Saving is something you do: edits wait in the session's unsaved\ folder (Session::workFolder)
+    // until save, so session.json's date says when you last worked on it, not when you opened it.
+    // Closing with changes asks: save (and bounce last-saved.mp3) or drop them.
+    bool unsaved = false;        // edits since the last save
+    bool savedThisVisit = false; // saved since it was opened: closing bounces last-saved.mp3
+    bool hasUnsavedChanges();    // edits, or a plugin tweaked in its window since the save
+    Result saveSession();        // "save", ctrl+s
+    struct ClosePrompt { bool thenQuit = false; };
+    std::optional<ClosePrompt> closePrompt; // "save changes?" up
+    void requestClose (bool thenQuit);
+    bool handleClosePromptKey (const Key&);
+    // Writes go to unsaved\ while a person is driving (headless runs save as they go, as before).
+    juce::File pluginStateFile (const juce::String& path, bool forWriting) const;
+    juce::File newPluginStateFile (const juce::String& base) const;
+
+    // Bounces that carry on after their session closed (last-saved.mp3), so you're back at the
+    // session screen at once. Quitting waits for them.
+    std::vector<std::unique_ptr<Bounce>> backgroundBounces;
+    std::vector<juce::String> backgroundBounceNames; // whose, for the screen
+    bool quitAfterBounces = false;
+    void pollBackgroundBounces();
+
+    // The session screen's second tab: bounces taw made, newest first, to audition without
+    // opening anything.
+    struct RecentBounce { juce::File file; juce::String session; juce::File folder; juce::Time time; };
+    std::vector<RecentBounce> recentBounces;
+    bool bouncesTab = false;
+    int bounceIndex = 0;
+    void loadRecentBounces();
+    void handleBouncesTabKey (const Key&);
+    // The bounce playing on the session screen: decoded on a thread, then played by the
+    // engine's preview voice from any point.
+    struct BouncePlayer
+    {
+        juce::File file;
+        std::shared_ptr<juce::AudioBuffer<float>> audio; // at the device's rate, once loaded
+        std::thread loader;
+        std::atomic<bool> loaded { false };
+        juce::String error;    // set before loaded
+        double rate = 44100.0; // the device's, what audio is at
+        double startAt = 0.0;  // seconds, once it's loaded
+        bool started = false;
+        ~BouncePlayer() { if (loader.joinable()) loader.join(); }
+    };
+    std::unique_ptr<BouncePlayer> bouncePlayer;
+    void playBounce (const juce::File&);
+    void stopBounce();
+    void seekBounce (double seconds);
+    double bouncePlaySeconds() const; // where it's playing; < 0 when it isn't
+    double bounceLengthSeconds() const;
     Result scanPlugins (bool retryFailed); // "scan", "scan retry"
     // "midi": the MIDI inputs panel. Each input on or off (kept in settings.json), whether it
     // opened, and the last message it sent, to see a controller is getting through.
@@ -399,16 +455,21 @@ public:
     const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
     void openDevicePicker();
     Result showControlPanel();
-    // Quitting saves and closes the session first: on screen, in steps under the closing box.
+    // Quitting closes the session first (asking about unsaved changes): on screen, in steps
+    // under the closing box.
     void quit()
     {
         if (session != nullptr && console.isOpen() && closing == nullptr)
-            startClosing (true);
+            requestClose (true);
+        else if (closing == nullptr && ! backgroundBounces.empty() && console.isOpen())
+            quitAfterBounces = true;
         else if (closing == nullptr)
             quitRequested = true;
     }
-    Result closeSession(); // save, close, back to the recent sessions / new session screen
-    void releaseSession();
+    Result closeSession(); // close (asking about unsaved changes), back to the session screen
+    // decided: the close already saved or dropped the changes. Otherwise (headless, or the
+    // window closed on taw) it saves: to session.json headless, to unsaved\ with a person.
+    void releaseSession (bool decided = false);
     // Tells you the last run didn't end cleanly, ahead of anything opening the session said.
     void reportUncleanExit (const juce::File& crashLog, bool reopened);
 
@@ -590,6 +651,7 @@ private:
         std::shared_ptr<PluginSlot> slot;
         juce::String problem; // why it didn't load
         juce::MemoryBlock savedState; // what's in its state file, to skip rewriting it
+        bool touched = false;         // its window opened (or a controller set it): it may differ from the save
     };
     std::vector<Hosted> hosted;
     Hosted* hostedEntry (const juce::ValueTree& node); // loads it the first time
@@ -694,6 +756,7 @@ private:
 
     void rebuildGraph();
     std::unique_ptr<Graph> buildGraph (bool offline = false); // offline: its own plugin instances, for a bounce
+    bool handOffPlugins = false; // an offline graph takes the live plugins themselves (closing: they're going anyway)
     void writeLane (const juce::ValueTree& owner, const juce::String& param, std::vector<std::pair<double, double>> points);
     Result automationTrack (int& track, juce::String& param); // the focused track and the lane you're on
 
@@ -802,10 +865,11 @@ private:
     void updateMeters (double dt);
     void keepInView (juce::int64 pos);
 
-    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { treeDirty = true; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { treeDirty = true; }
-    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { treeDirty = true; }
-    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { treeDirty = true; }
+    void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { treeDirty = unsaved = true; }
+    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { treeDirty = unsaved = true; }
+    void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { treeDirty = unsaved = true; }
+    void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { treeDirty = unsaved = true; }
+    void persist(); // after an edit: into unsaved\ (or session.json, headless)
 
     Ui ui;
     juce::String lastEditKey;

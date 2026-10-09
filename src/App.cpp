@@ -56,11 +56,14 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
     loadSettings();
     timing::mark ("settings read");
 
-    // If taw crashes, save what's open on the way down.
+    // If taw crashes, keep what's open on the way down (as unsaved changes, with a person
+    // driving: the next open offers them).
     safety::setEmergencySave ([] (void* app)
                               {
-                                  if (auto& s = static_cast<App*> (app)->session; s != nullptr)
-                                      s->save();
+                                  auto* a = static_cast<App*> (app);
+
+                                  if (auto& s = a->session; s != nullptr)
+                                      a->interactive ? s->saveWork() : s->save();
                               },
                               this);
 
@@ -83,12 +86,15 @@ App::~App()
         indexThread.join(); // an index half written would be measured again anyway
 
     midiInputs.reset(); // its callbacks feed the engine's queues
+    stopBounce();
+    backgroundBounces.clear(); // quitting anyway: an unfinished last-saved is dropped (the old one stays)
     releaseSession();
     safety::setEmergencySave (nullptr, nullptr);
 }
 
-// Stops the transport (keeping any take), saves, and lets go of the session.
-void App::releaseSession()
+// Stops the transport (keeping any take), saves (unless the close decided already), and lets
+// go of the session.
+void App::releaseSession (bool decided)
 {
     if (session != nullptr)
     {
@@ -107,7 +113,14 @@ void App::releaseSession()
         // Plugins: their state to disk, their windows closed. The instances themselves go with
         // the last graph that plays them.
         pluginQueue.clear();
-        savePluginStates();
+
+        // Headless: saved, as it always was. Window closed on unsaved changes: kept in
+        // unsaved\, offered on the next open.
+        const bool keep = ! decided && (! interactive || hasUnsavedChanges());
+
+        if (keep)
+            savePluginStates();
+
         midiEditor.reset();
         audioEditor.reset();
 
@@ -131,9 +144,114 @@ void App::releaseSession()
         videoFailed.clear();
         videoClosed = false;
         session->tree().removeListener (this);
-        session->save();
+
+        if (keep)
+            persist();
+
         session.reset();
+        unsaved = savedThisVisit = false;
     }
+}
+
+void App::persist()
+{
+    if (session != nullptr)
+        interactive ? session->saveWork() : session->save();
+}
+
+juce::File App::pluginStateFile (const juce::String& path, bool forWriting) const
+{
+    const auto work = session->workFolder().getChildFile (path);
+
+    if (! interactive)
+        return session->folder().getChildFile (path);
+
+    return forWriting || work.existsAsFile() ? work : session->folder().getChildFile (path);
+}
+
+// A name for a new plugin's state, free in the session and in its unsaved changes.
+juce::File App::newPluginStateFile (const juce::String& base) const
+{
+    const auto folder = session->folder().getChildFile ("plugins");
+
+    for (int i = 1;; ++i)
+    {
+        const auto name = base + (i > 1 ? "_" + juce::String (i) : juce::String()) + ".state";
+        const auto rel = "plugins/" + name;
+
+        if (! folder.getChildFile (name).exists() && ! session->workFolder().getChildFile (rel).exists())
+            return folder.getChildFile (name);
+    }
+}
+
+bool App::hasUnsavedChanges()
+{
+    if (session == nullptr)
+        return false;
+
+    if (unsaved)
+        return true;
+
+    // A tweak in a plugin's window doesn't touch the session: compare with what's saved.
+    for (auto& in : hosted)
+        if (in.touched && in.slot != nullptr)
+        {
+            const auto path = in.node[ids::pluginState].toString();
+            juce::MemoryBlock saved;
+
+            if (path.isNotEmpty())
+                session->folder().getChildFile (path).loadFileAsData (saved);
+
+            if (in.slot->getState() != saved)
+                return true;
+        }
+
+    return false;
+}
+
+// Everything to session.json and the plugins\ folder; the unsaved changes folder goes.
+Result App::saveSession()
+{
+    if (session == nullptr)
+        return Result::fail ("no session open");
+
+    const auto work = session->workFolder();
+
+    // Plugin states written while editing (a plugin removed, its window closed): theirs to keep,
+    // undo can bring the plugin back from them.
+    for (const auto& f : work.findChildFiles (juce::File::findFiles, true))
+        if (f.getParentDirectory() != work)
+        {
+            const auto target = session->folder().getChildFile (f.getRelativePathFrom (work));
+            target.getParentDirectory().createDirectory();
+            f.copyFileTo (target);
+        }
+
+    for (auto& in : hosted)
+    {
+        const auto path = in.node[ids::pluginState].toString();
+
+        if (in.slot == nullptr || path.isEmpty())
+            continue;
+
+        auto state = in.slot->getState();
+        const auto file = session->folder().getChildFile (path);
+        file.getParentDirectory().createDirectory();
+
+        if (! file.replaceWithData (state.getData(), state.getSize()))
+            return Result::fail ("couldn't write " + file.getFullPathName());
+
+        in.savedState = std::move (state);
+        in.touched = false;
+    }
+
+    if (! session->save())
+        return Result::fail ("couldn't write session.json");
+
+    session->discardWork();
+    unsaved = false;
+    savedThisVisit = true;
+    return Result::good ("saved " + session->folder().getFullPathName());
 }
 
 Result App::closeSession()
@@ -147,16 +265,63 @@ Result App::closeSession()
     // On screen: in steps, with the closing box (plugins can take a while to save and unload).
     if (console.isOpen())
     {
-        startClosing (false);
+        requestClose (false);
         return Result::good();
     }
 
     return finishClosing();
 }
 
+// Unsaved changes: ask first. Otherwise straight to closing.
+void App::requestClose (bool thenQuit)
+{
+    if (bounce != nullptr || import != nullptr)
+    {
+        say (Result::fail (L"wait for the bounce or import to finish (esc cancels it)"));
+        return;
+    }
+
+    if (hasUnsavedChanges())
+        closePrompt = ClosePrompt { thenQuit };
+    else
+        startClosing (thenQuit, false);
+}
+
+bool App::handleClosePromptKey (const Key& k)
+{
+    if (! closePrompt.has_value())
+        return false;
+
+    const auto thenQuit = closePrompt->thenQuit;
+    const auto c = k.code == Key::Char ? juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch) : 0;
+
+    if (k.code == Key::Enter || c == 's' || c == 'y')
+    {
+        closePrompt.reset();
+        startClosing (thenQuit, true);
+    }
+    else if (c == 'd' || c == 'n')
+    {
+        closePrompt.reset();
+        startClosing (thenQuit, false);
+    }
+    else if (k.code == Key::Escape || c == 'c')
+    {
+        closePrompt.reset();
+        openAfterClose = {}; // an imported set waiting to open: not now
+        openAfterCloseNote.clear();
+        say (Result::good ("still open"));
+    }
+
+    return true;
+}
+
 // Closing (close, or quitting): recording stopped and the engine silent at once, then each
 // plugin's state saved and the plugin let go of, a few per frame, under the closing box.
-void App::startClosing (bool thenQuit)
+// save: the changes kept, and last-saved.mp3 bounced from the session's own plugins once
+// it's closed. Otherwise they're dropped (and it bounces only if it was saved this visit with
+// nothing changed since, so the file is always what's saved).
+void App::startClosing (bool thenQuit, bool save)
 {
     if (recording || engine.isRolling())
     {
@@ -170,12 +335,56 @@ void App::startClosing (bool thenQuit)
         }
     }
 
+    const bool bounceIt = save || (savedThisVisit && ! hasUnsavedChanges());
+
+    // The video window's place, for next time (not an edit worth asking about).
+    if (save && video != nullptr)
+        session->tree().setProperty (ids::videoWindow, video->windowState(), nullptr);
+
     engine.setGraph (std::make_unique<Graph>()); // silence: nothing of the session plays on
     closing = std::make_unique<Closing>();
     closing->thenQuit = thenQuit;
+    closing->save = save;
     closing->total = hosted.size() + 1; // and the session file
     helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = trackMenuVisible = false;
     ioCell = -1;
+
+    if (save)
+    {
+        // States written while editing first; the plugins' current ones go over them below.
+        const auto work = session->workFolder();
+
+        for (const auto& f : work.findChildFiles (juce::File::findFiles, true))
+            if (f.getParentDirectory() != work)
+            {
+                const auto target = session->folder().getChildFile (f.getRelativePathFrom (work));
+                target.getParentDirectory().createDirectory();
+                f.copyFileTo (target);
+            }
+    }
+
+    // last-saved.mp3, from bar 1 to the end plus a couple of seconds to ring out. The graph
+    // takes the session's own plugins (they'd be unloaded now anyway), so nothing reloads.
+    if (const auto end = session->contentEnd(); bounceIt && end > 0)
+    {
+        for (auto& in : hosted)
+            if (in.slot != nullptr)
+            {
+                in.slot->closeEditor();
+                in.slot->prepare (sampleRate(), 8192);
+                in.slot->setNonRealtime (true);
+            }
+
+        handOffPlugins = true;
+        closing->bounceGraph = buildGraph (true);
+        handOffPlugins = false;
+        closing->bounceEnd = end + (juce::int64) (2.0 * sampleRate());
+
+        const auto rate = juce::roundToInt (sampleRate());
+        const bool mp3 = rate == 32000 || rate == 44100 || rate == 48000;
+        closing->bounceFile = session->folder().getChildFile (session->tree()[ids::bounceFolder].toString())
+                                  .getChildFile (juce::String ("last-saved") + (mp3 ? ".mp3" : ".wav"));
+    }
 }
 
 void App::stepClosing()
@@ -186,7 +395,14 @@ void App::stepClosing()
     {
         auto& in = hosted.back();
         closing->current = in.node[ids::pluginName].toString();
-        writePluginState (in);
+
+        if (const auto path = in.node[ids::pluginState].toString(); closing->save && in.slot != nullptr && path.isNotEmpty())
+        {
+            const auto state = in.slot->getState();
+            const auto file = session->folder().getChildFile (path);
+            file.getParentDirectory().createDirectory();
+            file.replaceWithData (state.getData(), state.getSize());
+        }
 
         if (in.slot != nullptr)
             in.slot->closeEditor();
@@ -199,27 +415,61 @@ void App::stepClosing()
         return;
 
     const bool thenQuit = closing->thenQuit;
+
+    if (closing->save && ! session->save())
+    {
+        say (Result::fail (L"couldn't write session.json \x00b7 your changes are kept in " + session->workFolder().getFullPathName()));
+        closing->save = false;
+        session->saveWork();
+    }
+    else
+    {
+        session->discardWork(); // saved, or the changes dropped
+    }
+
+    const auto saved = closing->save;
+
+    // Off it goes in the background; the session screen comes up meanwhile.
+    if (closing->bounceGraph != nullptr)
+    {
+        // A save-and-close of this session still bouncing: the newer one wins.
+        for (auto& b : backgroundBounces)
+            if (b->file() == closing->bounceFile)
+                b->cancel();
+
+        auto b = std::make_unique<Bounce> (std::move (closing->bounceGraph), juce::Range<juce::int64> (0, closing->bounceEnd), sampleRate(),
+                                           closing->bounceFile.hasFileExtension ("mp3") ? Bounce::Format::mp3 : Bounce::Format::wav,
+                                           closing->bounceFile);
+        b->start();
+        backgroundBounces.push_back (std::move (b));
+        backgroundBounceNames.push_back (session->name());
+    }
+
     closing.reset();
 
-    if (thenQuit)
+    // Quitting waits for the bounce, on the session screen (any key stays in taw).
+    if (thenQuit && ! backgroundBounces.empty())
+        quitAfterBounces = true;
+    else if (thenQuit)
     {
-        releaseSession();
+        releaseSession (true);
         quitRequested = true;
         return;
     }
 
-    say (finishClosing());
+    say (finishClosing (saved));
 }
 
-Result App::finishClosing()
+Result App::finishClosing (std::optional<bool> saved)
 {
     const auto name = session->name();
+    const bool bouncing = saved.has_value() && ! backgroundBounces.empty() && backgroundBounceNames.back() == name;
 
     // Opened by folder, the start screen still lists the sessions next to this one.
     if (newSessionParent == juce::File())
         newSessionParent = session->folder().getParentDirectory();
 
-    releaseSession();
+    releaseSession (saved.has_value());
     engine.setGraph (std::make_unique<Graph>()); // silence: nothing of the old session plays on
 
     clips.clear();
@@ -239,7 +489,12 @@ Result App::finishClosing()
     }
 
     proceedToSession(); // no session, so: the recent sessions and templates
-    return Result::good ("closed " + name + " (saved)");
+
+    if (! saved.has_value())
+        return Result::good ("closed " + name + " (saved)");
+
+    return Result::good ("closed " + name + (*saved ? juce::String (" (saved)") : juce::String (L" \x00b7 changes not saved"))
+                         + (bouncing ? juce::String (L" \x00b7 bouncing last-saved in the background") : juce::String()));
 }
 
 int App::run()
@@ -313,6 +568,7 @@ int App::run()
         pollControls(); // controllers mapped to automation
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
+        pollBackgroundBounces();
         pollImport();
         { timing::Scope t ("slow: library", 150.0); pollIndexing(); }
 
@@ -344,7 +600,7 @@ int App::run()
 
             timing::Scope t ("slow: rebuild and save", 150.0);
             rebuildGraph();
-            session->save();
+            persist();
         }
 
         syncVideo();
@@ -466,6 +722,7 @@ void App::proceedToSession()
 
     pickIndex = recent.empty() ? defaultTemplateRow() : 0;
     mode = Mode::TemplatePicker;
+    loadRecentBounces();
 }
 
 int App::defaultTemplateRow() const
@@ -533,6 +790,10 @@ void App::attachSession (std::unique_ptr<Session> s)
     topLane = TopLane::none;
     selectedMarker = {};
     cursor = playStart = viewStart = 0;
+    stopBounce(); // the session screen's player
+    unsaved = session->recovered; // changes left from last time, not saved yet
+    savedThisVisit = false;
+    closePrompt.reset();
 
     if (session->loadNote.isNotEmpty())
         say (Result::fail (session->loadNote));
@@ -1055,7 +1316,7 @@ void App::recoverTakes()
     }
 
     journal.deleteFile();
-    session->save();
+    persist();
 
     if (! recovered.isEmpty())
         say (Result::good (L"recovered the take that was recording: " + recovered.joinIntoString (", ")));
@@ -1089,7 +1350,7 @@ void App::collectFinishedTakes()
         placeTake (f.trackIndex, f.file, f.start, f.length, latencyCompensation());
 
         // Saved before the journal forgets the take, so a crash between the two can't lose it.
-        session->save();
+        persist();
         writeTakeJournal();
 
         auto msg = L"take saved \x00b7 track " + juce::String (f.trackIndex + 1) + L" \x00b7 " + juce::String ((double) f.length / sampleRate(), 1) + " s";
@@ -1177,7 +1438,7 @@ void App::pumpBackgroundWork()
     {
         treeDirty = false;
         rebuildGraph();
-        session->save();
+        persist();
     }
 }
 
@@ -1389,7 +1650,11 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             // Live: a plugin not loaded yet is queued and the track is silent until it is.
             if (auto* in = offline ? hostedEntry (t) : liveEntry (t); in != nullptr && in->slot != nullptr)
             {
-                if (offline)
+                if (offline && handOffPlugins)
+                {
+                    tp.plugin = in->slot; // closing: the session's own instance plays the bounce
+                }
+                else if (offline)
                 {
                     // A bounce plays its own copy, so the live one keeps playing meanwhile.
                     juce::String problem;
@@ -2002,6 +2267,9 @@ void App::pollBounce()
             say (Result::good ("bounced " + summary));
 
         lastBounce = bounce->file();
+
+        if (session != nullptr)
+            rememberBounce (lastBounce, session->name(), session->folder());
 
         if (interactive && session != nullptr && (bool) session->tree()[ids::bounceReveal])
             lastBounce.revealToUser();
@@ -2963,6 +3231,15 @@ void App::handleKey (const Key& k)
     if (opening != nullptr || closing != nullptr)
         return; // keys wait until the session is open (or closed)
 
+    // "Save changes?" takes every key until it's answered.
+    if (closePrompt.has_value())
+    {
+        if (k.code != Key::Mouse)
+            handleClosePromptKey (k);
+
+        return;
+    }
+
     if (k.code == Key::Mouse)
     {
         if (k.drag) // only scrubbing uses drags so far
@@ -3706,6 +3983,7 @@ void App::handleDevicePickerKey (const Key& k)
 void App::startOpening (const juce::File& dir)
 {
     juce::String error;
+    stopBounce(); // the session screen's player
     timing::mark ("opening " + dir.getFullPathName());
     auto s = Session::load (dir, error);
     timing::mark ("session.json read");
@@ -3762,8 +4040,28 @@ void App::handleTemplatePickerKey (const Key& k)
     const auto numRecent = (int) recent.size();
     const auto n = numRecent + (int) templates.size();
 
+    // Quitting was waiting on a bounce: esc again quits now (the bounce is dropped), any
+    // other key means stay.
+    if (std::exchange (quitAfterBounces, false))
+    {
+        if (k.code == Key::Escape)
+        {
+            quitRequested = true;
+            return;
+        }
+
+        say (Result::good (L"staying \x00b7 the bounce carries on"));
+    }
+
+    if (bouncesTab)
+    {
+        handleBouncesTabKey (k);
+        return;
+    }
+
     switch (k.code)
     {
+        case Key::Tab:       bouncesTab = true; loadRecentBounces(); return;
         case Key::Up:        pickIndex = juce::jmax (0, pickIndex - 1); return;
         case Key::Down:      pickIndex = juce::jmin (n - 1, pickIndex + 1); return;
         case Key::Backspace: newSessionName = newSessionName.dropLastCharacters (1); return;

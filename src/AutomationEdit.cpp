@@ -1,4 +1,4 @@
-// Automation on the message thread: which parameter a track's lane shows (its view), reading
+﻿// Automation on the message thread: which parameter a track's lane shows (its view), reading
 // and naming values, and editing points. AUTO lanes hold POINTs (beat, val); the graph turns
 // them into Curves (App::automationCurve) for the audio thread.
 
@@ -1301,7 +1301,10 @@ void App::keepAsSetting (const Touch& t)
         case Kind::effect:
             if (auto* plugin = automationPlugin (owner, target, false))
                 if (const auto index = plugin->findParameter (target.paramId); index >= 0)
+                {
                     plugin->setParameter (index, (float) value);
+                    unsaved = true; // a plugin setting: not in the session tree
+                }
             break;
         case Kind::none:
         default:

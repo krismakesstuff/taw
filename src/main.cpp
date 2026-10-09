@@ -529,6 +529,147 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --savetest <session-dir> <scratch-dir>: saving is something you do. On a copy: an edit
+    // goes to unsaved\ (session.json untouched), closing asks, "don't save" drops it, "save"
+    // keeps it and bounces last-saved in the background with the session's own plugins, a
+    // crash's changes come back, and the session screen lists and plays the bounce.
+    if (args[0] == "--savetest" && args.size() >= 3)
+    {
+        const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        const auto scratch = juce::File::getCurrentWorkingDirectory().getChildFile (args[2]);
+        const auto dir = scratch.getChildFile (source.getFileName());
+        scratch.deleteRecursively();
+        scratch.createDirectory();
+        source.copyDirectoryTo (dir);
+        dir.getChildFile ("unsaved").deleteRecursively();
+        dir.getChildFile ("bounces").deleteRecursively();
+
+        int failures = 0;
+        auto check = [&] (bool ok, const char* what)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        const auto sessionFile = dir.getChildFile ("session.json");
+        const auto work = dir.getChildFile ("unsaved");
+        auto bpmOnDisk = [&] { return (double) taw::varToTree (juce::JSON::parse (sessionFile))[taw::ids::bpm]; };
+        const auto bpm0 = bpmOnDisk();
+
+        auto open = [&]
+        {
+            auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+            app->interactive = true;
+
+            while (app->hasBackgroundWork())
+                app->pumpBackgroundWork();
+
+            return app;
+        };
+
+        auto close = [&] (taw::App& app, const char* answer)
+        {
+            app.requestClose (false);
+
+            if (answer != nullptr)
+            {
+                check (app.closePrompt.has_value(), "closing with changes asks");
+
+                if (*answer == 'd')
+                    std::printf ("%s", app.screenText (100, 14).toRawUTF8());
+
+                taw::Key k;
+                k.code = taw::Key::Char;
+                k.ch = (juce::juce_wchar) answer[0];
+                app.pressKey (k);
+            }
+
+            while (app.closing != nullptr)
+                app.stepClosing();
+
+            check (app.session == nullptr, "closed");
+        };
+
+        // An edit, then "don't save".
+        {
+            auto app = open();
+            check (! app->unsaved, "freshly opened: nothing unsaved");
+            const auto before = sessionFile.getLastModificationTime();
+            std::printf ("       %s\n", app->execute ("bpm " + juce::String (bpm0 + 7)).message.toRawUTF8());
+            app->pumpBackgroundWork();
+            check (app->unsaved, "an edit is unsaved");
+            check (work.getChildFile ("session.json").existsAsFile(), "the edit went to unsaved\\session.json");
+            check (sessionFile.getLastModificationTime() == before, "session.json untouched");
+            close (*app, "d");
+            check (! work.exists(), "don't save: unsaved\\ is gone");
+            check (bpmOnDisk() == bpm0, "don't save: session.json as it was");
+            check (app->backgroundBounces.empty(), "don't save: no bounce");
+        }
+
+        // An edit, then "save": session.json, and last-saved bounced in the background.
+        {
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 9));
+            app->pumpBackgroundWork();
+            close (*app, "s");
+            check (! work.exists(), "save: unsaved\\ is gone");
+            check (bpmOnDisk() == bpm0 + 9, "save: session.json has the edit");
+            check (app->backgroundBounces.size() == 1, "save: last-saved is bouncing");
+
+            while (! app->backgroundBounces.empty())
+            {
+                app->pollBackgroundBounces();
+                juce::Thread::sleep (20);
+            }
+
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile ("last-saved.mp3");
+            check (mp3.getSize() > 10000, "save: bounces\\last-saved.mp3 written");
+            std::printf ("       %s  %lld bytes  %s\n", mp3.getFullPathName().toRawUTF8(), (long long) mp3.getSize(), app->message.toRawUTF8());
+
+            // The session screen: its bounces tab lists it, and it plays.
+            app->bouncesTab = true;
+            app->loadRecentBounces();
+            check (! app->recentBounces.empty() && app->recentBounces.front().file == mp3, "the bounces tab lists it");
+            std::printf ("%s", app->screenText (100, 24).toRawUTF8());
+            app->playBounce (mp3);
+
+            while (! app->bouncePlayer->loaded.load())
+                juce::Thread::sleep (10);
+
+            app->pollBackgroundBounces();
+            check (app->bouncePlayer != nullptr && app->bounceLengthSeconds() > 1.0, "it plays");
+            std::printf ("       %.1f s long\n", app->bounceLengthSeconds());
+            app->stopBounce();
+        }
+
+        // Nothing changed: closing doesn't ask.
+        {
+            auto app = open();
+            close (*app, nullptr);
+            check (app->backgroundBounces.empty(), "opened and closed: no bounce");
+        }
+
+        // A crash (or the window closed) with changes: they're kept, and offered next time.
+        {
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 11));
+            app->pumpBackgroundWork();
+        }
+
+        check (work.getChildFile ("session.json").existsAsFile(), "window closed on changes: kept in unsaved\\");
+        check (bpmOnDisk() == bpm0 + 9, "...and session.json not changed");
+
+        {
+            auto app = open();
+            check (app->unsaved && app->session->recovered, "reopened: the changes are back, unsaved");
+            check ((double) app->session->tree()[taw::ids::bpm] == bpm0 + 11, "...with the edit");
+            close (*app, "d");
+        }
+
+        std::printf ("%s\n", failures == 0 ? "all ok" : "FAILURES");
+        return failures;
+    }
+
     // taw --exec <session-dir> "<command>" ...   run command lines against a session without the
     // screen, print each result, save. The first headless way in for scripts and agents.
     if (args[0] == "--exec")

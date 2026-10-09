@@ -921,8 +921,7 @@ Result App::execute (const juce::String& line)
     }
 
     if (v == "save")
-        return session->save() ? Result::good ("saved " + session->folder().getFullPathName())
-                               : Result::fail ("couldn't write session.json");
+        return saveSession();
 
     if (v == "bpm")
     {

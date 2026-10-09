@@ -98,9 +98,9 @@ juce::String App::hubEndName (const juce::String& key, int channel, bool source)
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
             if (s["key"].toString() == key)
-                return s["name"].toString() + " " + juce::String (channel);
+                return s["name"].toString() + (source ? " out " : " in ") + juce::String (channel);
 
-    return juce::File (key).getFileName() + " " + juce::String (channel);
+    return juce::File (key).getFileName() + (source ? " out " : " in ") + juce::String (channel);
 }
 
 juce::String App::hubAppName (const juce::String& key, bool source) const
@@ -591,7 +591,7 @@ std::vector<App::HubEnd> App::hubCols() const
 
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
-            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), L"\x2192 track", true, (bool) s["connected"] });
+            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), "inputs", true, (bool) s["connected"] });
 
     return cols;
 }
@@ -780,9 +780,9 @@ Result App::hubToggle()
         return r;
 
     return Result::good (row.name + L" \x2192 " + col.name
-                         + (col.session ? " " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()) : juce::String())
+                         + (col.session ? (row.width > 1 ? " inputs " : " input ") + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()) : juce::String())
                          + (! col.live ? juce::String (L" \x00b7 waits for it to open")
-                            : col.session ? L" \x00b7 there, a track takes them: i " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String())
+                            : col.session ? L" \x00b7 in the session a track takes them: i " + juce::String (land) + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String())
                                                 + ", then mon to hear it or a to arm it"
                                           : juce::String()));
 }
@@ -809,7 +809,7 @@ Result App::hubMoveLanding (int delta)
         return Result::good();
 
     const auto r = hubReplace (cell.routes, cellPairs (row, col, land), row.key, col.key, cell.db);
-    return r.ok ? Result::good (row.name + L" \x2192 " + col.name + " " + juce::String (land)
+    return r.ok ? Result::good (row.name + L" \x2192 " + col.name + (row.width > 1 ? " inputs " : " input ") + juce::String (land)
                                 + (row.width > 1 ? "-" + juce::String (land + row.width - 1) : juce::String()))
                 : r;
 }

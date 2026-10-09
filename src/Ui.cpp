@@ -2837,7 +2837,7 @@ void Ui::drawHubPage (App& app)
         canvas.text (labelW - 5, top, L"to \x2192", colour::faint);
         canvas.text (1, top + 1, L"from \x2193", colour::faint);
 
-        // The columns' heads: a name, and under it what part of it ("out 1-2", "as mic", "→ track").
+        // The columns' heads: a name, and under it what part of it ("out 1-2", "as mic", "inputs").
         for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)
         {
             const auto& c = cols[(size_t) (firstCol + i)];
@@ -2942,7 +2942,7 @@ void Ui::drawHubPage (App& app)
                                + app.hubEndName (r["to"].toString(), r["toChannel"], false));
 
                 words = parts.joinIntoString (", ") + L" \x00b7 " + formatDb (cell.db) + " dB"
-                        + (col.session ? juce::String (L" \x00b7 shift+\x2190\x2192 moves it") : juce::String());
+                        + (col.session ? juce::String (L" \x00b7 shift+\x2190\x2192 other inputs") : juce::String());
             }
 
             canvas.text (1, h - 4, words, colour::dim, -1, false, w - 2);

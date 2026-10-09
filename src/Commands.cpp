@@ -1,4 +1,4 @@
-// The command language: [selector] verb [args]
+﻿// The command language: [selector] verb [args]
 //
 //   selector   1 | 1-3 | 1,4 | * (tracks are 1-based on the surface, 0-based inside)
 //   @pos       @17  @17.3  @1:30  @0
@@ -58,7 +58,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "help", "q", "quit", "exit", "save", "cons", "consolidate", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
-                              "inst", "ed", "edit", "scan", "midi", "fill",
+                              "inst", "ed", "edit", "scan", "midi", "stats", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
                               "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub" };
 
@@ -831,6 +831,7 @@ Result App::execute (const juce::String& line)
     if (v == "inst")                return loadInstrument (p.hasSelector ? p.tracks : std::vector<int> {}, p.rest);
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
+    if (v == "stats")              return toggleStats();
     if (v == "hub")                return hubCommand (p.rest.trim());
 
     // browse: show or hide the sample browser (ctrl+B goes into it); index <folder> adds a folder of samples to it.
@@ -922,8 +923,7 @@ Result App::execute (const juce::String& line)
     }
 
     if (v == "save")
-        return session->save() ? Result::good ("saved " + session->folder().getFullPathName())
-                               : Result::fail ("couldn't write session.json");
+        return saveSession();
 
     if (v == "bpm")
     {

@@ -17,10 +17,27 @@ public:
 
     static bool existsIn (const juce::File& dir) { return dir.getChildFile ("session.json").existsAsFile(); }
 
+    // A saved session at a glance, without opening it (the session screen): how big it is.
+    struct Summary
+    {
+        bool ok = false;
+        int tracks = 0, plugins = 0; // plugins: instruments and inserts, the mix's too
+        double bpm = 0.0, seconds = 0.0; // seconds: to the end of the last clip
+    };
+    static Summary summarise (const juce::File& dir);
+
     bool save() const;
+
+    // Edits wait in unsaved\ (the session as it is, and plugin states) until a save, so
+    // session.json and its date only change when you save. Left there by a crash (or the window
+    // closed with changes), the next open picks them up.
+    juce::File workFolder() const { return dir.getChildFile ("unsaved"); }
+    bool saveWork() const;
+    void discardWork() const { workFolder().deleteRecursively(); }
 
     // Set by load when session.json was unreadable and a backup was opened instead.
     juce::String loadNote;
+    bool recovered = false; // load found unsaved changes left in workFolder() and opened them
 
     // Pass undo() to tree changes made by editing; pass nullptr for bookkeeping that shouldn't be
     // undone (the automatic arm/restore around a record pass, bounce settings).
@@ -149,4 +166,14 @@ std::vector<Template> loadTemplates();
 std::vector<juce::File> loadRecentSessions();
 void rememberSession (const juce::File& folder);
 void enableRecentSessions(); // interactive runs only; until called, rememberSession does nothing
+
+// Bounces taw made, newest first, only those still there (for the session screen).
+struct BounceRecord
+{
+    juce::File file;
+    juce::String session;
+    juce::File folder; // the session's
+};
+std::vector<BounceRecord> loadRecentBounceRecords();
+void rememberBounce (const juce::File& file, const juce::String& session, const juce::File& folder); // likewise only once enabled
 } // namespace taw

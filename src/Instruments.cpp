@@ -92,7 +92,7 @@ std::shared_ptr<PluginSlot> App::createPlugin (const juce::ValueTree& node, doub
         {
             juce::MemoryBlock state;
 
-            if (session->folder().getChildFile (stateFile).loadFileAsData (state))
+            if (pluginStateFile (stateFile, false).loadFileAsData (state))
                 slot->setState (state);
         }
     }
@@ -208,7 +208,6 @@ juce::String App::instrumentProblem (int track) const
 // megabytes. Written only when it changed.
 void App::writePluginState (Hosted& in)
 {
-    const auto sessionFolder = session->folder();
     const auto path = in.node[ids::pluginState].toString();
 
     if (in.slot == nullptr || path.isEmpty())
@@ -219,7 +218,7 @@ void App::writePluginState (Hosted& in)
     if (state == in.savedState)
         return;
 
-    const auto file = sessionFolder.getChildFile (path);
+    const auto file = pluginStateFile (path, true);
     file.getParentDirectory().createDirectory();
 
     if (file.replaceWithData (state.getData(), state.getSize()))
@@ -365,6 +364,29 @@ Result App::toggleMidiPanel()
     return Result::good (midiInputs->opening()           ? juce::String (L"opening the MIDI inputs\x2026 rows show open as they come in")
                          : midiInputs->devices().empty() ? juce::String (L"no MIDI inputs \x2014 plug a controller in (taw picks it up)")
                                                          : juce::String (L"play your controller: its row lights up"));
+}
+
+Result App::toggleStats()
+{
+    statsVisible = ! statsVisible;
+
+    if (statsVisible)
+    {
+        midiPanelVisible = helpVisible = settingsVisible = pluginPickerVisible = false;
+        system.sample();
+        systemSampledAt = juce::Time::getMillisecondCounterHiRes();
+    }
+
+    return Result::good (statsVisible ? juce::String (L"stats \x00b7 keys still work (space plays) \x00b7 esc or stats closes") : juce::String());
+}
+
+bool App::handleStatsKey (const Key& k)
+{
+    if (! statsVisible || ! commandLine.isEmpty() || k.code != Key::Escape)
+        return false;
+
+    statsVisible = false;
+    return true;
 }
 
 bool App::handleMidiPanelKey (const Key& k)
@@ -553,7 +575,7 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     }
 
     const auto base = juce::String (index + 1).paddedLeft ('0', 2) + "-" + juce::File::createLegalFileName (desc.name).replaceCharacter (' ', '_');
-    const auto stateFile = session->folder().getChildFile ("plugins").getNonexistentChildFile (base, ".state", false);
+    const auto stateFile = newPluginStateFile (base);
 
     track.setProperty (ids::kind, "instrument", um())
         .setProperty (ids::input, 0, um())
@@ -727,6 +749,10 @@ Result App::toggleEditor (int index)
 
     const auto t = session->track (index);
     closePluginWindows(); // one at a time
+
+    if (auto* in = hostedEntry (t))
+        in->touched = true; // whatever happens in there may differ from the save
+
     slot->showEditor (juce::String (index + 1) + " " + t[ids::name].toString() + L" \x00b7 " + slot->name() + L" \x00b7 taw");
     return Result::good (slot->name() + L" window open \x00b7 | again (or its close button) closes it");
 }

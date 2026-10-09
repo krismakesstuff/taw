@@ -269,6 +269,24 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
     const auto file = dir.getChildFile ("session.json");
     auto tree = readSessionFile (file, error);
     juce::String note;
+    bool recovered = false;
+
+    // Unsaved changes left behind (a crash, or the window closed on them): open those.
+    if (const auto work = dir.getChildFile ("unsaved"); work.isDirectory())
+    {
+        const auto workFile = work.getChildFile ("session.json");
+        juce::String ignored;
+        recovered = true;
+
+        if (auto t = workFile.existsAsFile() ? readSessionFile (workFile, ignored) : juce::ValueTree(); t.isValid())
+        {
+            tree = t;
+            error.clear();
+        }
+
+        note = L"opened the changes you hadn't saved (from " + (workFile.existsAsFile() ? workFile : work).getLastModificationTime().formatted ("%d %b %H:%M")
+               + L") \x00b7 save keeps them, closing without saving drops them";
+    }
 
     if (! tree.isValid())
     {
@@ -309,11 +327,54 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
     applyDefaults (tree);
     dir.getChildFile ("audio").createDirectory();
 
-    if (note.isEmpty())
+    if (note.isEmpty() || recovered)
         backUp (dir);
 
     std::unique_ptr<Session> s (new Session (dir, tree));
     s->loadNote = note;
+    s->recovered = recovered;
+    return s;
+}
+
+Session::Summary Session::summarise (const juce::File& dir)
+{
+    Summary s;
+    juce::String error;
+    const auto tree = readSessionFile (dir.getChildFile ("session.json"), error);
+
+    if (! tree.isValid())
+        return s;
+
+    s.ok = true;
+    s.bpm = tree.getProperty (ids::bpm, 120.0);
+    const double rate = tree.getProperty (ids::sampleRate, 44100.0);
+    const double samplesPerBeat = rate * 60.0 / juce::jmax (1.0, s.bpm);
+    juce::int64 end = 0;
+
+    for (const auto& c : tree)
+        s.plugins += c.hasType (ids::INSERT) ? 1 : 0; // the mix's
+
+    for (const auto& t : tree)
+    {
+        if (! t.hasType (ids::TRACK))
+            continue;
+
+        ++s.tracks;
+        s.plugins += t[ids::pluginName].toString().isNotEmpty() ? 1 : 0;
+        const bool sampleTrack = isSampleTrack (t);
+
+        for (const auto& c : t)
+        {
+            s.plugins += c.hasType (ids::INSERT) ? 1 : 0;
+
+            if (! sampleTrack && c.hasType (ids::CLIP))
+                end = juce::jmax (end, (juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
+            else if (isBeatClip (c))
+                end = juce::jmax (end, (juce::int64) std::llround (clipEnd (c) * samplesPerBeat));
+        }
+    }
+
+    s.seconds = rate > 0.0 ? (double) end / rate : 0.0;
     return s;
 }
 
@@ -321,6 +382,12 @@ bool Session::save() const
 {
     const auto json = juce::JSON::toString (treeToVar (state), juce::JSON::FormatOptions{}.withSpacing (juce::JSON::Spacing::multiLine));
     return dir.getChildFile ("session.json").replaceWithText (json + "\n");
+}
+
+bool Session::saveWork() const
+{
+    const auto json = juce::JSON::toString (treeToVar (state), juce::JSON::FormatOptions{}.withSpacing (juce::JSON::Spacing::multiLine));
+    return workFolder().createDirectory() && workFolder().getChildFile ("session.json").replaceWithText (json + "\n");
 }
 
 int Session::numTracks() const
@@ -860,6 +927,50 @@ void rememberSession (const juce::File& folder)
 
     configFolder().createDirectory();
     recentFile().replaceWithText (juce::JSON::toString (list));
+}
+
+static juce::File bouncesFile() { return configFolder().getChildFile ("bounces.json"); }
+
+std::vector<BounceRecord> loadRecentBounceRecords()
+{
+    std::vector<BounceRecord> out;
+    juce::var parsed;
+
+    if (juce::JSON::parse (bouncesFile().loadFileAsString(), parsed).wasOk())
+        if (auto* list = parsed.getArray())
+            for (const auto& v : *list)
+                if (const juce::File f (v["file"].toString()); f.existsAsFile())
+                    out.push_back ({ f, v["session"].toString(), juce::File (v["folder"].toString()) });
+
+    return out;
+}
+
+void rememberBounce (const juce::File& file, const juce::String& session, const juce::File& folder)
+{
+    if (! recentEnabled)
+        return;
+
+    constexpr size_t maxBounces = 60;
+    auto list = loadRecentBounceRecords();
+    list.erase (std::remove_if (list.begin(), list.end(), [&] (const auto& b) { return b.file == file; }), list.end());
+    list.insert (list.begin(), { file, session, folder });
+
+    if (list.size() > maxBounces)
+        list.resize (maxBounces);
+
+    juce::Array<juce::var> out;
+
+    for (const auto& b : list)
+    {
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("file", b.file.getFullPathName());
+        o->setProperty ("session", b.session);
+        o->setProperty ("folder", b.folder.getFullPathName());
+        out.add (juce::var (o));
+    }
+
+    configFolder().createDirectory();
+    bouncesFile().replaceWithText (juce::JSON::toString (out));
 }
 
 std::vector<Template> loadTemplates()

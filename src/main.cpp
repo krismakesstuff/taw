@@ -9,6 +9,7 @@
 #include "Video.h"
 
 #include <juce_events/juce_events.h>
+#include <numeric>
 
 #if TAW_HUB
  #include "Hub.h"
@@ -716,6 +717,444 @@ int main (int argc, char** argv)
             failures += b.succeeded() ? 0 : 1;
         }
 
+        return failures;
+    }
+
+    // taw --paralleltest: tracks rendering on several cores sound exactly as on one. Eight
+    // tones, some sent pre and post fader to a bus that's sent to a second bus, one going only
+    // to a bus: rendered both ways, compared sample for sample.
+    if (args[0] == "--paralleltest")
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 256, length = 48000;
+
+        auto render = [&] (bool parallel)
+        {
+            auto engineOwned = std::make_unique<taw::AudioEngine>();
+            auto& engine = *engineOwned;
+            engine.runWithoutDevice (rate, block, 0);
+            engine.parallel = parallel;
+
+            auto g = std::make_unique<taw::Graph>();
+            g->numBuses = 2;
+
+            for (int t = 0; t < 8; ++t)
+            {
+                auto tone = std::make_shared<juce::AudioBuffer<float>> (2, length);
+
+                for (int i = 0; i < length; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        tone->setSample (ch, i, 0.1f * (float) std::sin (juce::MathConstants<double>::twoPi * (110.0 * (t + 1) + ch * 3.0) * i / rate));
+
+                taw::TrackPlay tp;
+                tp.stereo = true;
+                tp.gain = 0.5f + 0.05f * (float) t;
+                tp.clips.push_back ({ tone, 0, 0, length });
+
+                if (t % 3 == 0)
+                    tp.sends.push_back ({ 0, 0.7f, t % 2 == 0 });
+
+                if (t == 5)
+                    tp.out = 1; // only to the second bus
+
+                g->tracks.push_back (std::move (tp));
+            }
+
+            for (int bus = 0; bus < 2; ++bus)
+            {
+                taw::TrackPlay tp;
+                tp.stereo = true;
+                tp.busIndex = bus;
+                tp.out = bus == 0 ? 1 : -1; // bus 1 feeds bus 2, which goes to the mix
+                g->tracks.push_back (std::move (tp));
+            }
+
+            g->order = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 };
+            engine.setGraph (std::move (g));
+            engine.play (0);
+
+            std::vector<float> out;
+            std::vector<float> l (block), r (block);
+            float* outs[] = { l.data(), r.data() };
+
+            for (int pos = 0; pos < length; pos += block)
+            {
+                engine.renderWithoutDevice (outs, 2, block, nullptr, 0);
+                out.insert (out.end(), l.begin(), l.end());
+                out.insert (out.end(), r.begin(), r.end());
+            }
+
+            return out;
+        };
+
+        const auto one = render (false), many = render (true);
+        float level = 0.0f, diff = 0.0f;
+
+        for (size_t i = 0; i < one.size(); ++i)
+        {
+            level = std::max (level, std::abs (one[i]));
+            diff = std::max (diff, std::abs (one[i] - many[i]));
+        }
+
+        const bool ok = one.size() == many.size() && level > 0.1f && diff == 0.0f;
+        std::printf ("%s  %d helper threads: peak %.3f, largest difference %g\n", ok ? "ok  " : "FAIL",
+                     juce::jlimit (0, 7, juce::SystemStats::getNumPhysicalCpus() - 1), level, diff);
+        return ok ? 0 : 1;
+    }
+
+    // taw --loadtest <session-dir> [buffer] [from-seconds] [seconds]: plays the session through
+    // the engine as fast as it renders, without a device, timing every block against how long
+    // it lasts at that buffer size (default 512), and where the time goes, track by track.
+    // Then the loop wrap and a start mid-song (notes chased). Read-only: nothing is saved.
+    if (args[0] == "--loadtest" && args.size() >= 2)
+    {
+        // On a copy, so loading can't touch the session.
+        const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-loadtest").getChildFile (source.getFileName());
+        dir.getParentDirectory().deleteRecursively();
+        source.copyDirectoryTo (dir);
+        dir.getChildFile (".taw-lock").deleteFile(); // the copy isn't open anywhere
+        const int buffer = args.size() > 2 ? args[2].getIntValue() : 512;
+        const double from = args.size() > 3 ? args[3].getDoubleValue() : 0.0;
+        const double seconds = args.size() > 4 ? args[4].getDoubleValue() : 30.0;
+
+        auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+
+        if (app->session == nullptr)
+        {
+            std::printf ("couldn't open: %s\n", app->message.toRawUTF8());
+            return 1;
+        }
+
+        auto& s = *app->session;
+        const double rate = s.sampleRate();
+        auto& engine = app->engine;
+        engine.runWithoutDevice (rate, buffer, 2);
+
+        const auto loadStart = juce::Time::getMillisecondCounterHiRes();
+        app->buildPlayback();
+
+        while (app->hasBackgroundWork())
+            app->pumpBackgroundWork();
+
+        app->buildPlayback(); // with every plugin in
+        std::printf ("%s: %d tracks, plugins loaded in %.1f s, %g Hz, buffer %d (%.1f ms)\n", s.name().toRawUTF8(), s.numTracks(),
+                     (juce::Time::getMillisecondCounterHiRes() - loadStart) / 1000.0, rate, buffer, buffer * 1000.0 / rate);
+
+        auto trackName = [&] (int t)
+        {
+            const auto tr = s.track (t);
+            const auto plugin = tr[taw::ids::pluginName].toString();
+            juce::StringArray fx;
+
+            for (int slot = 0; slot < taw::Session::numSends; ++slot)
+                if (const auto in = taw::Session::insert (tr, slot); in.isValid() && ! (bool) in[taw::ids::bypass])
+                    fx.add (in[taw::ids::pluginName].toString());
+
+            return juce::String (t + 1) + " " + tr[taw::ids::name].toString() + (plugin.isNotEmpty() ? " [" + plugin + "]" : juce::String())
+                   + (fx.isEmpty() ? juce::String() : " + " + fx.joinIntoString (", "));
+        };
+
+        engine.profiling = true;
+        const int numTracks = s.numTracks();
+        std::vector<float> l ((size_t) buffer), r ((size_t) buffer), inL ((size_t) buffer), inR ((size_t) buffer);
+        float* outs[] = { l.data(), r.data() };
+        const float* ins[] = { inL.data(), inR.data() };
+        const double budgetMs = buffer * 1000.0 / rate;
+
+        auto run = [&] (const char* what, juce::int64 start, double secs)
+        {
+            struct Block { juce::int64 pos; double ms; std::vector<double> tracks; double mix; };
+            std::vector<Block> blocks;
+            std::vector<double> sum ((size_t) numTracks), most ((size_t) numTracks);
+            double mixSum = 0.0, mixMost = 0.0;
+
+            engine.resetBlockLoad();
+            engine.play (start);
+            const auto count = (int) (secs * rate / buffer);
+
+            for (int b = 0; b < count; ++b)
+            {
+                const auto pos = engine.playhead();
+                const auto t0 = juce::Time::getHighResolutionTicks();
+                engine.renderWithoutDevice (outs, 2, buffer, ins, 2);
+                const auto ms = juce::Time::highResolutionTicksToSeconds (juce::Time::getHighResolutionTicks() - t0) * 1000.0;
+                std::vector<double> tracks ((size_t) numTracks);
+
+                for (int t = 0; t < numTracks; ++t)
+                {
+                    tracks[(size_t) t] = engine.profileTrackMs[(size_t) t];
+                    sum[(size_t) t] += tracks[(size_t) t];
+                    most[(size_t) t] = std::max (most[(size_t) t], tracks[(size_t) t]);
+                }
+
+                mixSum += engine.profileMixMs;
+                mixMost = std::max (mixMost, engine.profileMixMs);
+                blocks.push_back ({ pos, ms, std::move (tracks), engine.profileMixMs });
+            }
+
+            engine.stop();
+
+            std::vector<double> sorted;
+            for (const auto& b : blocks)
+                sorted.push_back (b.ms);
+            std::sort (sorted.begin(), sorted.end());
+            const auto pct = [&] (double p) { return sorted[(size_t) std::min ((double) sorted.size() - 1, p * sorted.size())] / budgetMs * 100.0; };
+            const auto over = std::count_if (sorted.begin(), sorted.end(), [&] (double ms) { return ms > budgetMs; });
+            const auto close80 = std::count_if (sorted.begin(), sorted.end(), [&] (double ms) { return ms > budgetMs * 0.8; });
+
+            std::printf ("\n== %s: %d blocks from %s\n", what, (int) blocks.size(), app->formatBars (start).toRawUTF8());
+            std::printf ("   load  median %.0f%%  p99 %.0f%%  worst %.0f%%  |  over 100%%: %d  over 80%%: %d\n", pct (0.5), pct (0.99),
+                         sorted.back() / budgetMs * 100.0, (int) over, (int) close80);
+            std::printf ("   per track, ms per block (budget %.2f):  mean   worst\n", budgetMs);
+
+            for (int t = 0; t < numTracks; ++t)
+                if (most[(size_t) t] > 0.05)
+                    std::printf ("     %-60s %5.2f  %6.2f\n", trackName (t).substring (0, 60).toRawUTF8(), sum[(size_t) t] / blocks.size(), most[(size_t) t]);
+
+            std::printf ("     %-60s %5.2f  %6.2f\n", "mix inserts", mixSum / blocks.size(), mixMost);
+
+            // The worst blocks: when, and who took the time.
+            std::vector<size_t> order (blocks.size());
+            std::iota (order.begin(), order.end(), (size_t) 0);
+            std::sort (order.begin(), order.end(), [&] (size_t a, size_t b) { return blocks[a].ms > blocks[b].ms; });
+
+            for (size_t i = 0; i < std::min<size_t> (6, order.size()); ++i)
+            {
+                const auto& b = blocks[order[i]];
+                std::vector<int> who ((size_t) numTracks);
+                std::iota (who.begin(), who.end(), 0);
+                std::sort (who.begin(), who.end(), [&] (int x, int y) { return b.tracks[(size_t) x] > b.tracks[(size_t) y]; });
+                juce::String top;
+
+                for (int j = 0; j < std::min (3, numTracks); ++j)
+                    top << "  " << (who[(size_t) j] + 1) << ":" << juce::String (b.tracks[(size_t) who[(size_t) j]], 2);
+
+                std::printf ("   worst #%d  block %d  at %s  %.0f%%  (%.2f ms)  tracks%s  mix:%.2f\n", (int) i + 1, (int) order[i],
+                             app->formatBars (b.pos).toRawUTF8(), b.ms / budgetMs * 100.0, b.ms, top.toRawUTF8(), b.mix);
+            }
+        };
+
+        run ("from the start", (juce::int64) (from * rate), seconds);
+
+        // The stats panel as it stood at the end of that.
+        app->toggleStats();
+        juce::Thread::sleep (300);
+        app->system.sample();
+        std::printf ("\n%s", app->screenText (100, 32).toRawUTF8());
+        app->toggleStats();
+
+        if ((bool) s.tree()[taw::ids::loop])
+        {
+            const auto loopEnd = (juce::int64) s.tree()[taw::ids::loopEnd];
+            run ("across the loop wrap", std::max<juce::int64> (0, loopEnd - (juce::int64) (4.0 * rate)), 8.0);
+        }
+
+        run ("starting mid-song (chase)", (juce::int64) (s.contentEnd() / 2), 4.0);
+
+        engine.profiling = false;
+        app->session.reset(); // read-only: nothing saved
+        return 0;
+    }
+
+    // taw --savetest <session-dir> <scratch-dir>: saving is something you do. On a copy: an edit
+    // goes to unsaved\ (session.json untouched), closing asks, "don't save" drops it, "save"
+    // keeps it and bounces last-saved in the background with the session's own plugins, a
+    // crash's changes come back, and the session screen lists and plays the bounce.
+    if (args[0] == "--savetest" && args.size() >= 3)
+    {
+        const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        const auto scratch = juce::File::getCurrentWorkingDirectory().getChildFile (args[2]);
+        const auto dir = scratch.getChildFile (source.getFileName());
+        scratch.deleteRecursively();
+        scratch.createDirectory();
+        source.copyDirectoryTo (dir);
+        dir.getChildFile (".taw-lock").deleteFile(); // the copy isn't open anywhere
+        dir.getChildFile ("unsaved").deleteRecursively();
+        dir.getChildFile ("bounces").deleteRecursively();
+
+        int failures = 0;
+        auto check = [&] (bool ok, const char* what)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        const auto sessionFile = dir.getChildFile ("session.json");
+        const auto work = dir.getChildFile ("unsaved");
+        auto bpmOnDisk = [&] { return (double) taw::varToTree (juce::JSON::parse (sessionFile))[taw::ids::bpm]; };
+        const auto bpm0 = bpmOnDisk();
+
+        auto open = [&]
+        {
+            auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+            app->interactive = true;
+
+            while (app->hasBackgroundWork())
+                app->pumpBackgroundWork();
+
+            return app;
+        };
+
+        auto close = [&] (taw::App& app, const char* answer)
+        {
+            app.requestClose (false);
+
+            if (answer != nullptr)
+            {
+                check (app.closePrompt.has_value(), "closing with changes asks");
+
+                if (*answer == 'd')
+                    std::printf ("%s", app.screenText (100, 14).toRawUTF8());
+
+                taw::Key k;
+                k.code = taw::Key::Char;
+                k.ch = (juce::juce_wchar) answer[0];
+                app.pressKey (k);
+            }
+
+            while (app.closing != nullptr)
+                app.stepClosing();
+
+            check (app.session == nullptr, "closed");
+        };
+
+        // An edit, then "don't save".
+        {
+            auto app = open();
+            check (! app->unsaved, "freshly opened: nothing unsaved");
+            const auto before = sessionFile.getLastModificationTime();
+            std::printf ("       %s\n", app->execute ("bpm " + juce::String (bpm0 + 7)).message.toRawUTF8());
+            app->pumpBackgroundWork();
+            check (app->unsaved, "an edit is unsaved");
+            check (work.getChildFile ("session.json").existsAsFile(), "the edit went to unsaved\\session.json");
+            check (sessionFile.getLastModificationTime() == before, "session.json untouched");
+            close (*app, "d");
+            check (! work.exists(), "don't save: unsaved\\ is gone");
+            check (bpmOnDisk() == bpm0, "don't save: session.json as it was");
+            check (app->backgroundBounces.empty(), "don't save: no bounce");
+        }
+
+        // An edit, then "save": session.json, and last-saved bounced in the background.
+        {
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 9));
+            app->pumpBackgroundWork();
+            close (*app, "s");
+            check (! work.exists(), "save: unsaved\\ is gone");
+            check (bpmOnDisk() == bpm0 + 9, "save: session.json has the edit");
+            check (app->backgroundBounces.size() == 1, "save: last-saved is bouncing");
+            std::printf ("%s", app->screenText (100, 12).toRawUTF8());
+
+            while (! app->backgroundBounces.empty())
+            {
+                app->pollBackgroundBounces();
+                juce::Thread::sleep (20);
+            }
+
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile (dir.getFileName() + "-last-saved.mp3");
+            check (mp3.getSize() > 10000, "save: bounces\\<session>-last-saved.mp3 written");
+            std::printf ("       %s  %lld bytes  %s\n", mp3.getFullPathName().toRawUTF8(), (long long) mp3.getSize(), app->message.toRawUTF8());
+
+            // The session screen: the bounces list has it (newest, so first), and it plays.
+            check (! app->recentBounces.empty() && app->recentBounces.front().file == mp3 && app->bounceIndex == 0, "the bounces list has it, selected");
+
+            // Areas: ctrl+arrows move between them, the way they sit on screen.
+            using Area = taw::App::PickArea;
+            auto key = [&] (taw::Key::Code code, bool ctrl)
+            {
+                taw::Key k;
+                k.code = code;
+                k.ctrl = ctrl;
+                app->pressKey (k);
+                return app->pickArea;
+            };
+            check (app->pickArea == Area::sessions, "the session screen starts in the recent sessions");
+            check (key (taw::Key::Right, false) == Area::bounces, "right: bounces");
+            check (key (taw::Key::Left, false) == Area::sessions, "left: sessions");
+            check (key (taw::Key::Right, true) == Area::bounces, "ctrl+right: bounces");
+            check (key (taw::Key::Left, true) == Area::sessions, "ctrl+left: sessions");
+            check (key (taw::Key::Up, true) == Area::templates, "ctrl+up: templates");
+            check (key (taw::Key::Down, true) == Area::sessions, "ctrl+down: sessions");
+            const auto before = app->sessionIndex;
+            key (taw::Key::Down, false);
+            check (app->sessionIndex == juce::jmin (before + 1, (int) app->recent.size() - 1) && app->pickArea == Area::sessions, "down: the next session");
+            // Each recent session's size at a glance.
+            {
+                const auto it = std::find (app->recent.begin(), app->recent.end(), dir);
+                const auto i = (size_t) (it - app->recent.begin());
+                check (it != app->recent.end() && i < app->recentSummaries.size() && app->recentSummaries[i].ok
+                           && app->recentSummaries[i].tracks == app->recentSummaries[i].tracks && app->recentSummaries[i].bpm == bpm0 + 9,
+                       "recent sessions: tracks, bpm, plugins, length");
+                std::printf ("%s", app->screenText (140, 20).toRawUTF8());
+            }
+
+            key (taw::Key::Right, true);
+            std::printf ("%s", app->screenText (100, 24).toRawUTF8());
+            std::printf ("%s", app->screenText (70, 16).toRawUTF8());
+            // The sessions folder: a client's drive. Nowhere to put it fails; a new folder on a
+            // drive that's there is made. (The real setting goes back as it was.)
+            {
+                const auto old = app->sessionsFolder;
+                const auto drive = scratch.getChildFile ("client drive");
+                check (! app->setSessionsFolder (drive.getChildFile ("sessions")).ok, "sessions folder: somewhere that isn't there fails");
+                drive.createDirectory();
+                const auto r = app->setSessionsFolder (drive.getChildFile ("sessions"));
+                check (r.ok && drive.getChildFile ("sessions").isDirectory() && app->newSessionParent == drive.getChildFile ("sessions"),
+                       "sessions folder: made, and new sessions go there");
+                std::printf ("       %s\n", r.message.toRawUTF8());
+                app->sessionsFolder = old;
+                app->saveSettings();
+            }
+
+            app->playBounce (mp3);
+
+            while (! app->bouncePlayer->loaded.load())
+                juce::Thread::sleep (10);
+
+            app->pollBackgroundBounces();
+            check (app->bouncePlayer != nullptr && app->bounceLengthSeconds() > 1.0, "it plays");
+            std::printf ("       %.1f s long\n", app->bounceLengthSeconds());
+            app->stopBounce();
+        }
+
+        // "Save only": session.json, no bounce.
+        {
+            const auto mp3 = dir.getChildFile ("bounces").getChildFile (dir.getFileName() + "-last-saved.mp3");
+            const auto bounced = mp3.getLastModificationTime();
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 10));
+            app->pumpBackgroundWork();
+            close (*app, "o");
+            check (bpmOnDisk() == bpm0 + 10, "save only: session.json has the edit");
+            check (app->backgroundBounces.empty() && mp3.getLastModificationTime() == bounced, "save only: no bounce");
+        }
+
+        // Nothing changed: closing doesn't ask.
+        {
+            auto app = open();
+            close (*app, nullptr);
+            check (app->backgroundBounces.empty(), "opened and closed: no bounce");
+        }
+
+        // A crash (or the window closed) with changes: they're kept, and offered next time.
+        {
+            auto app = open();
+            app->execute ("bpm " + juce::String (bpm0 + 11));
+            app->pumpBackgroundWork();
+        }
+
+        check (work.getChildFile ("session.json").existsAsFile(), "window closed on changes: kept in unsaved\\");
+        check (bpmOnDisk() == bpm0 + 10, "...and session.json not changed");
+
+        {
+            auto app = open();
+            check (app->unsaved && app->session->recovered, "reopened: the changes are back, unsaved");
+            check ((double) app->session->tree()[taw::ids::bpm] == bpm0 + 11, "...with the edit");
+            close (*app, "d");
+        }
+
+        std::printf ("%s\n", failures == 0 ? "all ok" : "FAILURES");
         return failures;
     }
 

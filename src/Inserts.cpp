@@ -35,7 +35,7 @@ void App::addInserts (TrackPlay& tp, const juce::ValueTree& track, bool offline)
 
         const auto prefix = "fx " + Session::slotName (s).toLowerCase() + "/";
 
-        if (! offline)
+        if (! offline || handOffPlugins) // live, or closing (the bounce takes the session's own)
         {
             tp.inserts.push_back (in->slot);
             addParameterCurves (tp, track, in->slot, prefix);
@@ -123,7 +123,7 @@ Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc
     }
 
     const auto base = (index < 0 ? juce::String ("mix") : juce::String (index + 1).paddedLeft ('0', 2)) + "-" + juce::File::createLegalFileName (desc.name).replaceCharacter (' ', '_');
-    const auto stateFile = session->folder().getChildFile ("plugins").getNonexistentChildFile (base, ".state", false);
+    const auto stateFile = newPluginStateFile (base);
 
     juce::ValueTree node (ids::INSERT);
     node.setProperty (ids::slot, Session::slotName (slot).toLowerCase(), nullptr)
@@ -180,6 +180,7 @@ Result App::toggleInsertEditor (int index, int slot)
 
     // One plugin window at a time: it follows you from slot to slot.
     closePluginWindows();
+    in->touched = true; // whatever happens in there may differ from the save
     in->slot->showEditor ((index < 0 ? juce::String ("Mix") : juce::String (index + 1) + " " + track[ids::name].toString()) + L" \x00b7 " + Session::slotName (slot) + L" \x00b7 "
                           + in->slot->name() + L" \x00b7 taw");
     return Result::good (in->slot->name() + L" window open \x00b7 | again (or its close button) closes it");

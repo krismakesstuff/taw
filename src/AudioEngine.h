@@ -3,6 +3,7 @@
 #include "Automation.h"
 #include "Midi.h"
 #include "SpscQueue.h"
+#include "RenderPool.h"
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -480,7 +481,8 @@ public:
 
     // The sample browser's audition: plays this (already at the device's rate) straight to the
     // outputs, stopped or rolling, cutting off whatever it played before; null just stops it.
-    void preview (std::shared_ptr<const juce::AudioBuffer<float>>, float gain = 0.7f);
+    void preview (std::shared_ptr<const juce::AudioBuffer<float>>, float gain = 0.7f, int startSample = 0);
+    int previewPosition() const noexcept { return previewAt.load(); } // where it's playing; -1 when it isn't
 
     // numChannels 2: a stereo track, recording inputChannel and the one after it.
     std::shared_ptr<Recorder> createRecorder (int trackIndex, int inputChannel, int numChannels, const juce::File&,
@@ -510,6 +512,24 @@ public:
     int lateBlockCount() const noexcept { return lateBlocks.load(); }
     float worstBlockLoad() const noexcept { return worstLoad.load(); }
     void resetBlockLoad() noexcept { lateBlocks.store (0); worstLoad.store (0.0f); }
+
+    // Where a block's time goes (taw --loadtest): each track's share of the last block, in ms,
+    // and the mix's inserts. Off unless a test turns it on; read it between blocks.
+    // Load as you work (the stats panel, the transport's dsp): how much of each block's time
+    // the audio takes, smoothed over about half a second, and the highest in the last few
+    // seconds; each track's time (ms per block) likewise. Measured stopped too: plugins run.
+    float dspLoad() const noexcept { return loadAverage.load (std::memory_order_relaxed); }
+    float dspPeak() const noexcept { return loadPeak.load (std::memory_order_relaxed); }
+    float trackMs (int t) const noexcept { return t >= 0 && t < maxTracks ? trackAverage[(size_t) t].load (std::memory_order_relaxed) : 0.0f; }
+    float trackPeakMs (int t) const noexcept { return t >= 0 && t < maxTracks ? trackPeak[(size_t) t].load (std::memory_order_relaxed) : 0.0f; }
+    float mixMs() const noexcept { return mixAverage.load (std::memory_order_relaxed); }
+    double blockMs() const noexcept { return lastBlockMs.load (std::memory_order_relaxed); } // how long a block lasts
+    int helperThreads() const noexcept { return pool != nullptr ? pool->numWorkers() : 0; }
+
+    bool profiling = false;
+    bool parallel = true; // tracks on several cores (taw --paralleltest compares it with one)
+    std::array<double, 256> profileTrackMs {};
+    double profileMixMs = 0.0;
 
     // MIDI: each input port feeds one queue (see MidiInputs). While recording, what the audio
     // thread passed on comes back with the playhead it arrived at.
@@ -567,10 +587,11 @@ private:
 
     SpscQueue<PadPress, 256> padPresses;
 
-    struct PreviewSound { std::shared_ptr<const juce::AudioBuffer<float>> audio; float gain = 0.7f; };
+    struct PreviewSound { std::shared_ptr<const juce::AudioBuffer<float>> audio; float gain = 0.7f; int start = 0; };
     SpscQueue<PreviewSound*, 32> previewPending, previewRetired; // deleted on the message thread
     PreviewSound* previewNow = nullptr; // audio thread only
     int previewPos = 0;
+    std::atomic<int> previewAt { -1 };
     void renderPreview (float* const* out, int numOut, int n) noexcept;
 
     std::array<MidiQueue, MidiInputs::maxPorts> midiIn;
@@ -585,7 +606,8 @@ private:
     };
     SpscQueue<Audition, 256> auditions;
     std::array<Audition, 64> blockAuditions;         // this block's, audio thread only
-    std::array<MidiMsg, 512 + 64> mergedMidi;          // a track's live messages plus its auditions
+    static constexpr int mergedMidiSize = 512 + 64;
+    std::vector<MidiMsg> mergedMidi;                   // per track (they render in parallel): its live messages plus its auditions
     std::array<int, maxTracks> auditionsHeld {};      // notes on without their off yet, per track
     std::atomic<int> generation { 0 }, maxBlock { 8192 };
     std::atomic<double> liveRate { 0.0 };
@@ -607,6 +629,10 @@ private:
 
     std::atomic<bool> rolling { false }, deviceRunning { false };
     std::atomic<int> lateBlocks { 0 };
+    std::atomic<float> loadAverage { 0.0f }, loadPeak { 0.0f }, mixAverage { 0.0f };
+    std::atomic<double> lastBlockMs { 0.0 };
+    std::array<std::atomic<float>, maxTracks> trackAverage {}, trackPeak {};
+    static void smooth (std::atomic<float>& average, std::atomic<float>* peak, float value, double blockSeconds) noexcept;
     std::atomic<float> worstLoad { 0.0f };
     std::atomic<juce::int64> playPos { 0 }, seekTo { -1 }, countInLeft { 0 };
     std::atomic<int> numInputs { 0 };
@@ -616,6 +642,23 @@ private:
     std::array<AtomicPeak, 2> masterPeaks;
 
     juce::AudioBuffer<float> scratch; // see audioDeviceAboutToStart
+    juce::AudioBuffer<float> trackScratch; // left and right for each track: they render in parallel, then mix in order
+
+    // A block's tracks render on several cores (RenderPool): each into its own buffers, then
+    // they're mixed one after another, buses after what feeds them.
+    struct Block
+    {
+        const float* const* in;
+        int numIn, n, numLive, numAuditions, numBuses;
+        juce::int64 pos;
+        bool isRolling;
+        HostTransport transport;
+    };
+    Block block {};
+    std::array<int, maxTracks> parallelTracks {};
+    void renderTrack (int t, const Block&) noexcept; // its clips, plugin and inserts, into its buffers
+    void finishTrack (int t, const Block&, float* mixL, float* mixR, const float* silence) noexcept; // mixed, metered, recorded
+    std::unique_ptr<RenderPool> pool;
     juce::AudioBuffer<float> busScratch; // left and right for each bus
     std::array<float*, Graph::maxBuses * 2> busPtrs {};
 

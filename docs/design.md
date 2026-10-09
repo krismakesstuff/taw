@@ -264,8 +264,7 @@ records the selected tracks, else whatever is armed.
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device; ←→ on a row picks its input (CoreAudio: another device, or none) |
 | `panel` | open the ASIO driver control panel |
-| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; save and go back to the sessions; save and quit (`q` alone is a view key) |
-| `close` | save and close the session, back to the recent sessions / new session screen |
+| `save` (or `Ctrl+S`), `close` (or `Ctrl+W`), `exit` (or `Ctrl+Q`) | save; go back to the sessions; quit (`q` alone is a view key). With unsaved changes, closing and quitting ask: `s` save (and bounce last-saved), `o` save only, `d` don't save, `esc` stay |
 
 ### Rolling keys
 
@@ -1004,8 +1003,51 @@ wanted first: an armed instrument, other instruments, then inserts that are on. 
 insert isn't loaded until it's switched on or its window is opened. Until its plugin is in, a
 track is silent and shows dim (`loading…` under an instrument's name); the transport bar
 counts what's left. Opening a plugin's window, or bounce, loads what it needs at once. Closing
-(`close`, or quitting with a session open) does the same in reverse: each plugin's state is
-saved and the plugin unloaded under a closing box.
+(`close`, or quitting with a session open) does the same in reverse: each plugin unloaded (its
+state saved, if you chose to save) under a closing box.
+
+### Saving, last-saved, and the session screen
+Saving is something you do (`ctrl+s`), not something taw does behind you. Edits go to the
+session's `unsaved\` folder as you make them (the session as it is now, and plugin states
+written when a window closes or a plugin is removed); `session.json` and `plugins\` change only
+when you save. So the sessions list, sorted by when `session.json` last changed, says what you
+last worked on, not what you last opened. The title bar says `unsaved` while there are edits.
+
+Closing or quitting with changes (edits, or a plugin window opened and its settings changed
+since the save) asks: `s` saves and bounces, `o` saves without bouncing, `d` drops the changes (`unsaved\` is deleted),
+`esc` stays. Saving as you close bounces `bounces\<session>-last-saved.mp3` (WAV at rates MP3 can't do),
+bar 1 to the end of the last clip plus two seconds, over the last one. It bounces in the
+background with the session's own plugins (they were about to be unloaded anyway, so nothing
+reloads), and the session screen comes up at once, with a lit BOUNCING label and a progress
+bar near the bottom. A close
+without changes bounces too if you saved during the visit. Quitting waits for the bounce on the
+session screen (any key stays, esc quits now and drops it).
+
+If taw crashes or the window is closed on unsaved changes, they stay in `unsaved\`; the next
+open picks them up, says so, and they're still unsaved until you save. Headless runs (`--exec`)
+save to `session.json` as they go, as before.
+
+The session screen: a new session at the top (type its name; the templates under it), then two
+columns, recent sessions on the left and bounces on the right. Arrows move within the area
+that has the keys (off the end of a list, into the area beyond); `left` and `right`, and
+`ctrl+arrows`, move between areas the way they sit on screen (`tab` goes round them), so you never scroll through one list
+to reach another. Typing a name takes you to the templates. The bounces list shows what taw
+bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json` in the
+config folder), plus whatever is in the recent sessions' `bounces` folders. `enter` (or
+`space`) plays one through the output, decoded on a thread, without opening anything; `shift+left`
+and `shift+right` seek 5 s (alt: 30), `home` goes back to the start, `esc` stops it, `o` opens the
+session it came from, `r` shows the file in Explorer.
+
+Each recent session shows its size at a glance, in grey between its name and when it was last
+saved: tracks, tempo, plugins (instruments and inserts, the mix's too) and length (to the end
+of the last clip), as many as the column fits, read from its `session.json` without opening it.
+
+**Where sessions go.** New sessions are made in the folder on the `in` line, and the screen lists
+the sessions in it alongside the recent ones. `ctrl+o` picks another in Windows' folder dialog;
+`ctrl+l` types (or pastes) a path over it, `enter` sets it, `esc` leaves it. A folder that isn't
+there yet is made, if the drive or folder it would go in is. It's kept in `settings.json`
+(`sessionsFolder`), so a client's drive stays the place until you change it; plain `taw` starts
+there, and says so if the drive has been unplugged (then it's wherever taw was started).
 
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
 (opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long
@@ -1020,10 +1062,33 @@ are made at 44.1 kHz, or the rate set in `settings` ("New session rate": 44.1, 4
 `timing.log` in the config folder lists each step of the last start and open with how long it
 took (and anything later that held a frame for over 150 ms), to find what made one slow.
 
+### Many cores, and late blocks
+The audio thread doesn't render the tracks alone: every track that isn't a bus renders on
+whichever core is free (one helper thread per spare physical core, at the audio thread's
+priority, MMCSS "Pro Audio" on Windows), each into its own buffers. Then, on the audio thread,
+in order, each is mixed into its bus or the mix, and the buses render once what feeds them is
+in. So a block takes about as long as its slowest track instead of all of them added up.
+`taw --paralleltest` checks it sounds exactly as on one core. Bounces render on their own
+thread, one track after another, as before.
+
+Right of the transport bar, in grey, `dsp NN%` is always shown: how much of each block's time the audio takes (averaged
+over half a second; plugins run stopped too, so it's live while you build). Playing, `peak NN%`
+joins it: the slowest block this pass. A block over 100% is a dropout (a click), counted in red;
+stopping says how many. `stats` opens a panel with the rest: dsp now, its high point in the last
+3 s and this pass's worst; the block length and how many cores the tracks share; the machine's
+CPU (and taw's share), taw's memory and what's free; and every track's time per block, heaviest
+first, as a bar of one block with its recent peak marked, plus the mix's inserts. Keys still
+reach the session while it's up (space plays); esc or `stats` closes it.
+`taw --loadtest <session> [buffer]` plays a copy of a session without the device, as fast as it
+renders, and prints the load (median, p99, worst), each track's share, and the worst blocks:
+from the start, across the loop wrap, and starting mid-song. The video decoder keeps to two
+threads at low priority so it doesn't crowd the audio.
+
 ## When things go wrong
 
-- **Saves are atomic and constant.** `session.json` is rewritten (temp file + rename) after
-  every change, so a crash loses at most the last few milliseconds of edits.
+- **Edits are kept as you go.** `unsaved\session.json` is rewritten after every change (until you
+  save, which writes `session.json`), so a crash loses at most the last few milliseconds of
+  edits; the next open picks them up.
 - **One taw per session.** Opening a session writes `.taw-lock` in it (pid, computer, when);
   another taw (or `--exec`) opening it is refused while that taw runs. A lock left by a taw
   that's gone is taken over. One from another computer (a synced folder) can't be checked, so

@@ -3258,9 +3258,9 @@ void Ui::drawTemplatePicker (App& app)
         canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
     }
 
-    const juce::String areas (L"ctrl+arrows area");
+    const juce::String areas (L"\x2190\x2192 area");
     const auto hint = app.pickArea == Area::bounces
-                          ? L"enter play/stop \x00b7 \x2190\x2192 seek \x00b7 o session \x00b7 r reveal \x00b7 " + areas
+                          ? L"enter play/stop \x00b7 shift \x2190\x2192 seek \x00b7 o session \x00b7 r reveal \x00b7 " + areas
                       : app.pickArea == Area::sessions
                           ? L"\x2191\x2193 choose \x00b7 enter open \x00b7 type: new session \x00b7 " + areas + L" \x00b7 esc quit"
                           : L"type a name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 " + areas + L" \x00b7 esc quit";

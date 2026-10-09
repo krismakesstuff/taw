@@ -127,8 +127,8 @@ void App::handleBouncesKey (const Key& k)
                 --bounceIndex;
             return;
         case Key::Down:  bounceIndex = juce::jmax (0, juce::jmin (n - 1, bounceIndex + 1)); return;
-        case Key::Left:  seekBounce (bouncePlaySeconds() - (k.shift ? 30.0 : 5.0)); return;
-        case Key::Right: seekBounce (bouncePlaySeconds() + (k.shift ? 30.0 : 5.0)); return;
+        case Key::Left:  seekBounce (bouncePlaySeconds() - (k.alt ? 30.0 : 5.0)); return; // shift: 5 s, alt: 30 s (plain: areas)
+        case Key::Right: seekBounce (bouncePlaySeconds() + (k.alt ? 30.0 : 5.0)); return;
         case Key::Home:  seekBounce (0.0); return;
         case Key::Enter:
             if (sel != nullptr)

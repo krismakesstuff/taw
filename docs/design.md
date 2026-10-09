@@ -929,13 +929,13 @@ save to `session.json` as they go, as before.
 
 The session screen: a new session at the top (type its name; the templates under it), then two
 columns, recent sessions on the left and bounces on the right. Arrows move within the area
-that has the keys (off the end of a list, into the area beyond); `ctrl+arrows` move between
-areas the way they sit on screen (`tab` goes round them), so you never scroll through one list
+that has the keys (off the end of a list, into the area beyond); `left` and `right`, and
+`ctrl+arrows`, move between areas the way they sit on screen (`tab` goes round them), so you never scroll through one list
 to reach another. Typing a name takes you to the templates. The bounces list shows what taw
 bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json` in the
 config folder), plus whatever is in the recent sessions' `bounces` folders. `enter` (or
-`space`) plays one through the output, decoded on a thread, without opening anything; `left`
-and `right` seek 5 s (shift: 30), `home` goes back to the start, `esc` stops it, `o` opens the
+`space`) plays one through the output, decoded on a thread, without opening anything; `shift+left`
+and `shift+right` seek 5 s (alt: 30), `home` goes back to the start, `esc` stops it, `o` opens the
 session it came from, `r` shows the file in Explorer.
 
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate

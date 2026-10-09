@@ -4068,8 +4068,11 @@ void App::handleTemplatePickerKey (const Key& k)
 
     const auto numTemplates = (int) templates.size(), numBounces = (int) recentBounces.size();
 
-    // Between areas: ctrl+arrows, the way they sit on screen (or tab, round them all).
-    if (k.ctrl && (k.code == Key::Up || k.code == Key::Down || k.code == Key::Left || k.code == Key::Right))
+    // Between areas: ctrl+arrows, the way they sit on screen (or tab, round them all); plain
+    // left and right too (shift and alt with them seek the bounce playing).
+    const bool sideways = (k.code == Key::Left || k.code == Key::Right) && ! k.shift && ! k.alt;
+
+    if (sideways || (k.ctrl && (k.code == Key::Up || k.code == Key::Down)))
     {
         if (k.code == Key::Up)
             movePickArea (PickArea::templates);

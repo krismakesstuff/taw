@@ -878,6 +878,8 @@ int main (int argc, char** argv)
                 return app->pickArea;
             };
             check (app->pickArea == Area::sessions, "the session screen starts in the recent sessions");
+            check (key (taw::Key::Right, false) == Area::bounces, "right: bounces");
+            check (key (taw::Key::Left, false) == Area::sessions, "left: sessions");
             check (key (taw::Key::Right, true) == Area::bounces, "ctrl+right: bounces");
             check (key (taw::Key::Left, true) == Area::sessions, "ctrl+left: sessions");
             check (key (taw::Key::Up, true) == Area::templates, "ctrl+up: templates");

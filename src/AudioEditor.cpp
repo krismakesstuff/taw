@@ -676,13 +676,15 @@ private:
         const auto ch = kp.getTextCharacter();
         const auto mods = kp.getModifiers();
 
-        // + and - zoom around taw's cursor when it's in view, else the middle.
+        // + and - (and r t, as on taw's timeline) zoom this window around taw's cursor when it's
+        // in view, else the middle. The session's zoom stays as it is.
         const auto cursorX = xOf ((double) app.cursor);
         const auto around = cursorX >= 0.0f && cursorX <= (float) getWidth() ? cursorX : (float) getWidth() * 0.5f;
+        const bool plain = ! ctrlOrCmd (mods) && ! mods.isAltDown();
 
-        if ((ch == '+' || ch == '=') && ! ctrlOrCmd (mods))
+        if (((ch == '+' || ch == '=') && ! ctrlOrCmd (mods)) || (ch == 't' && plain))
             zoomAround (around, 1.0 / 1.5);
-        else if (ch == '-' && ! ctrlOrCmd (mods))
+        else if ((ch == '-' && ! ctrlOrCmd (mods)) || (ch == 'r' && plain))
             zoomAround (around, 1.5);
         else if (kp.getKeyCode() == juce::KeyPress::escapeKey)
             app.console.focusTerminal(); // the keyboard back to taw

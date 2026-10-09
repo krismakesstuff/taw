@@ -186,7 +186,7 @@ for placing them precisely and taw's keys do the editing.
 - **A clip's edges:** drag to trim (it's a window into its file: never past the file, nothing
   lost). **Its name bar:** drag to move it.
 - **Height:** starts scaled to the track's loudest peak (a quiet take isn't a flat line); alt+wheel
-  changes it. Ctrl+wheel (or `+` `-`, around the cursor) zooms; the wheel scrolls.
+  changes it. Ctrl+wheel (or `r` `t` / `+` `-`, around the cursor) zooms; the wheel scrolls.
 
 ### The MIDI editor
 
@@ -211,8 +211,8 @@ One MIDI clip, for fine work with the mouse.
 - **Toolbar:** the grid (bar to 1/32, triplets, off; it starts at the session's `grid` step) and
   quantize (note starts in the selection, or the whole clip, to the grid; also `q`).
 - **Keys** while it's in front: Delete, ↑↓ transpose (shift: an octave), ←→ move by the grid
-  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `+` `-`
-  zoom, Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
+  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `r` `t`
+  (or `+` `-`) zoom the window around taw's cursor (the session's zoom stays), Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
   space plays, ctrl+z undoes, ctrl+s saves, shift+E closes it.
 - **Mouse wheel:** scrolls pitch; shift: time; ctrl: zoom time around the mouse; alt: row height.
 

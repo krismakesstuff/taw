@@ -652,7 +652,7 @@ private:
         g.setColour (colours.panel);
         g.fillRect (0, 0, getWidth(), toolbarH);
         g.setColour (colours.dim);
-        g.drawText (L"double-click: new note \x00b7 drag: move (alt: off the grid) \x00b7 edge: length \x00b7 right-click: delete \x00b7 ctrl+wheel: zoom",
+        g.drawText (L"double-click: new note \x00b7 drag: move (alt: off the grid) \x00b7 edge: length \x00b7 right-click: delete \x00b7 r t / ctrl+wheel: zoom",
                     laneBox.getRight() + 12, 0, getWidth() - laneBox.getRight() - 18, toolbarH, juce::Justification::centredLeft, true);
 
         const auto roll = rollArea();
@@ -1366,9 +1366,11 @@ private:
             duplicateSelected();
         else if (letterOf (kp) == 'Q' && ! mods.isAnyModifierKeyDown() && ! ctrlHeld (kp))
             quantize();
-        else if ((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! ctrlOrCmd (mods))
+        // + and - (and r t, as on taw's timeline) zoom this window; the session's zoom stays.
+        else if (((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! ctrlOrCmd (mods))
+                 || (kp.getTextCharacter() == 't' && ! ctrlOrCmd (mods) && ! mods.isAltDown()))
             zoomBy (1.5);
-        else if (kp.getTextCharacter() == '-' && ! ctrlOrCmd (mods))
+        else if ((kp.getTextCharacter() == '-' && ! ctrlOrCmd (mods)) || (kp.getTextCharacter() == 'r' && ! ctrlOrCmd (mods) && ! mods.isAltDown()))
             zoomBy (1.0 / 1.5);
         else if (code == juce::KeyPress::escapeKey)
         {
@@ -1392,11 +1394,14 @@ private:
         return true;
     }
 
+    // Around taw's cursor when it's in view, else the middle.
     void zoomBy (double factor)
     {
-        const auto middle = beatAt ((float) (keysW + getWidth()) * 0.5f);
+        const auto cursorX = xOf ((double) app.cursor / spb());
+        const auto x = cursorX >= (float) keysW && cursorX <= (float) getWidth() ? cursorX : (float) (keysW + getWidth()) * 0.5f;
+        const auto at = beatAt (x);
         pxPerBeat = juce::jlimit (2.0, 800.0, pxPerBeat * factor);
-        viewBeat = middle - visibleBeats() * 0.5;
+        viewBeat = at - (x - keysW) / pxPerBeat;
     }
 
     //==============================================================================

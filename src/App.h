@@ -256,7 +256,10 @@ public:
     double hubAskedAt = 0.0;     // when, to ask again now and then while the page is up
     void refreshHub (bool now);
     juce::String hubEndName (const juce::String& key, int channel, bool source) const;
-    juce::String hubAppName (const juce::String& key) const; // "Zoom" for taw 1 if it's named so
+    // An app device as a source, "taw1out" (what apps play out to taw 1), or as a destination,
+    // "taw1in" (what they hear from it); "Zoom" if it's named so.
+    juce::String hubAppName (const juce::String& key, bool source) const;
+    bool hubAppNamed (const juce::String& key) const;
 
     // Who uses each app device now ("taw 1"): the apps playing into it, and those hearing it as
     // their mic (macOS only lists an app while its audio runs). Asked with the status.

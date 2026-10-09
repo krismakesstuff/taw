@@ -2817,7 +2817,7 @@ void Ui::drawHubPage (App& app)
         if ((int) s["apps"] == 0)
             canvas.text (12, y, L"no app devices \x2014 driver install adds taw 1 to taw 4 for Zoom, a browser...", colour::faint, -1, false, w - 13);
         else
-            canvas.text (1, y + 1, L"apps: taw 1-4 as a speaker = a row (\x25c2 who plays) \x00b7 as a mic = a column (\x25b8 who hears)",
+            canvas.text (1, y + 1, L"an app set to taw 1 plays into taw1out (a row) and hears taw1in (a column)",
                          colour::dim, -1, false, w - 2);
 
         y += 3;

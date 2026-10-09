@@ -2833,8 +2833,9 @@ void Ui::drawHubPage (App& app)
         const int firstCol = juce::jlimit (0, std::max (0, (int) cols.size() - visibleCols), app.hubCol - visibleCols / 2);
         const int firstRow = juce::jlimit (0, std::max (0, (int) rows.size() - visibleRows), app.hubRow - visibleRows / 2);
 
-        canvas.text (1, top, "from", colour::faint);
-        canvas.text (1, top + 1, L"   \x2193   to \x2192", colour::faint);
+        // "to →" beside the columns' names, "from ↓" over the rows'.
+        canvas.text (labelW - 5, top, L"to \x2192", colour::faint);
+        canvas.text (1, top + 1, L"from \x2193", colour::faint);
 
         // The columns' heads: a name, and under it what part of it ("1-2", "mic", "in").
         for (int i = 0; i < visibleCols && firstCol + i < (int) cols.size(); ++i)

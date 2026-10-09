@@ -227,7 +227,7 @@ std::map<juce::String, DeviceUsers> appDeviceUsers()
         }
     }
 
-    // The system's own output and input: what anything set to "the Mac's sound" uses.
+    // The system's own output and input: what anything set to the Mac's sound uses.
     for (const bool output : { true, false })
     {
         const auto device = scalarProperty<AudioObjectID> (kAudioObjectSystemObject, output ? kAudioHardwarePropertyDefaultOutputDevice
@@ -235,7 +235,7 @@ std::map<juce::String, DeviceUsers> appDeviceUsers()
         const auto deviceName = stringProperty (device, kAudioObjectPropertyName);
 
         if (deviceName.startsWith ("taw ") && deviceName != "taw hub")
-            (output ? users[deviceName].playing : users[deviceName].listening).add (output ? "the Mac's output" : "the Mac's input");
+            (output ? users[deviceName].playing : users[deviceName].listening).add (output ? "Mac's output" : "Mac's input");
     }
 
     return users;

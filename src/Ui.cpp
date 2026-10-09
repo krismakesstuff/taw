@@ -2972,7 +2972,7 @@ void Ui::drawHubPage (App& app)
 }
 
 // The hub's interface: what it plays through on the left, what it hears on the right; the
-// chosen side's heading and pick in the accent. "now" marks what the hub has.
+// chosen side's heading and pick in the accent. "current" marks what the hub has.
 void Ui::drawHubInterfacePicker (App& app)
 {
     const auto& p = app.hubPicker;
@@ -3009,12 +3009,12 @@ void Ui::drawHubInterfacePicker (App& app)
             const int nx = canvas.text (x + 2, y, names[i], sel ? (active ? colour::accent : colour::text) : colour::text, bg, sel, colW - 10);
 
             if (names[i] == now)
-                canvas.text (nx + 1, y, L"\x25cf now", colour::faint, bg);
+                canvas.text (nx + 1, y, L"\x25cf current", colour::faint, bg);
         }
     };
 
-    list (2, L"output \x2014 plays through", p.outputs, p.output, ! p.onInputs, app.hubHardware (true));
-    list (2 + colW + 1, L"input \x2014 hears", p.inputs, p.input, p.onInputs, app.hubHardware (false));
+    list (2, "output", p.outputs, p.output, ! p.onInputs, app.hubHardware (true));
+    list (2 + colW + 1, "input", p.inputs, p.input, p.onInputs, app.hubHardware (false));
 
     // What enter would do, in words.
     if (! p.outputs.isEmpty())

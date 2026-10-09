@@ -1132,6 +1132,9 @@ private:
         {
             case Drag::move:
             {
+                if (! e.mouseWasDraggedSinceMouseDown()) // a click to select doesn't move anything
+                    break;
+
                 auto start = snap (anchor.start + dx, free);
                 auto delta = start - anchor.start;
                 auto dp = pitchAt (p.y) - downPitch;
@@ -1142,9 +1145,11 @@ private:
                     dp = juce::jlimit (-o.pitch, 127 - o.pitch, dp);
                 }
 
+                // Each moved note lands on the grid, not just the one under the mouse (alt: they
+                // keep their places relative to it).
                 for (auto& o : originals)
                 {
-                    o.node.setProperty (ids::beat, o.start + delta - zero(), um());
+                    o.node.setProperty (ids::beat, std::max (0.0, snap (o.start + delta, free)) - zero(), um());
                     o.node.setProperty (ids::pitch, o.pitch + dp, um());
                 }
 

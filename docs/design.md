@@ -395,8 +395,10 @@ TRACK { kind: "instrument", plugin, pluginName, pluginState, … }
   their notes, out to whole bars.
 
 - `inst` opens the instrument picker (type to filter, enter loads); `inst vital` loads the best
-  name match. Either makes a new instrument track, armed, so the controller plays it at once.
-  `3 inst vital` puts it on track 3 (an empty or instrument track; the notes stay).
+  name match. On an instrument track (or selected ones) either swaps its plugin, keeping its
+  notes, inserts, sends and mixer; anywhere else it makes a new instrument track, armed, so the
+  controller plays it at once. `add inst vital` always makes a new track; `3 inst vital` puts
+  it on track 3 (an empty or instrument track; the notes stay).
 - `scan` looks for new or changed plugins in the VST3 folders, and on macOS among the Audio
   Units (opening the picker the first time starts it). Finding out what a plugin is means loading it, and some crash or hang when
   loaded cold, so each file is looked at in a child process (`taw --scan-plugin`, four at a

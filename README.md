@@ -106,7 +106,8 @@ shift+T       track menu (rename, delete...)
 
 ## Instruments
 
-Plug in a MIDI controller and type `inst` (or `inst vital`). The first time, taw scans your VST3
+Plug in a MIDI controller and type `inst` (or `inst vital`); on an instrument track the same swaps
+its plugin, and `add inst vital` always makes a new track. The first time, taw scans your VST3
 plugins, each in a separate process, so one that crashes or hangs is just skipped. The new instrument track is
 armed, so the controller plays it straight away; `ctrl+space` records what you play as notes,
 `|` (shift+`\`) opens and closes the plugin's window, even while playing, `f` fills the view with the focused track (a piano roll on

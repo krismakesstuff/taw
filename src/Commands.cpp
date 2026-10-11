@@ -839,9 +839,24 @@ Result App::execute (const juce::String& line)
     }
     if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
 
-    // Instruments: inst <name> (a new instrument track; 3 inst <name> puts it on track 3), inst
-    // alone for the picker, ed for the plugin's window, scan to find plugins, midi for inputs.
-    if (v == "inst")                return loadInstrument (p.hasSelector ? p.tracks : std::vector<int> {}, p.rest);
+    // Instruments: inst <name> swaps the plugin on the focused (or selected) instrument tracks,
+    // else makes a new instrument track; 3 inst <name> puts it on track 3, add inst <name> always
+    // makes a new track. inst alone for the picker, ed for the plugin's window, scan to find
+    // plugins, midi for inputs.
+    if (v == "inst")
+    {
+        std::vector<int> onto;
+
+        if (p.hasSelector)
+            onto = p.tracks;
+        else if (const auto here = onTopLane() ? std::vector<int>() : defaultTargets(); ! here.empty() && std::all_of (here.begin(), here.end(), [this] (int t) { return Session::isInstrumentTrack (session->track (t)); }))
+            onto = here;
+
+        return loadInstrument (onto, p.rest);
+    }
+
+    if ((v == "add" || v == "new") && p.args[0].equalsIgnoreCase ("inst"))
+        return loadInstrument ({}, p.rest.fromFirstOccurrenceOf (" ", false, false).trim());
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
     if (v == "stats")              return toggleStats();

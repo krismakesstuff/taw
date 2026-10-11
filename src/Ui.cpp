@@ -2305,7 +2305,7 @@ void Ui::drawHelp (App& app)
         } },
         { L"PLUGINS", {
             { Heading, L"INSTRUMENTS", nullptr, L"EFFECTS & ROUTING", nullptr },
-            { Pair, L"inst juno", L"instrument (alone: list)", L"ins  ins cla", L"effect picker / by name" },
+            { Pair, L"inst juno", L"load/swap (alone: list)", L"ins  ins cla", L"effect picker / by name" },
             { Pair, L"shift+R  |", L"arm MIDI / plugin window", L"2 fx b  b x", L"its window / remove it" },
             { Pair, L"f  shift+E", L"piano roll / editor", L"2 fx b off", L"bypass (on); b>d swaps" },
             { Pair, L"scan  midi", L"find plugins / MIDI ins", L"\\   io", L"routing column / hide" },

@@ -4,47 +4,19 @@ What's left before taw goes public and ships its first downloads. Tick items off
 
 ## Decide
 
-- [ ] **Version number.** A `v0.1.0` tag ("taw 0.1.0: first playable milestone", 30 Sep 2026)
-      already exists, and the release workflow stops on a version that has a tag. Either bump the
-      first public release to 0.2.0 (`CMakeLists.txt` and the `CHANGELOG.md` heading; the
-      milestone tag stays), or delete the old tag: `git push origin :refs/tags/v0.1.0`.
+- [x] **Version number:** the first public release is **0.2.0**. The `v0.1.0` tag ("first
+      playable milestone", 30 Sep 2026) stays as history.
+- [x] **Commit email:** no history rewrite. Older commits keep the work address; from now on this
+      repository commits as `Kris Crawford <11crawfordk@gmail.com>` (set in the repo's own git
+      config, so other repositories keep their address).
 
 ## Before the repository goes public
 
 - [ ] **Have a lawyer read [CLA.md](../CLA.md)** and the revenue wording in
       [CONTRIBUTING.md](../CONTRIBUTING.md), especially the licence to relicense (section 2) and
       the discretionary revenue sharing (section 6). Do this before the first outside pull request.
-- [ ] **Add a contact email** in [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md), in place of
-      `[CONDUCT CONTACT EMAIL]`.
-- [ ] **Rewrite the history's email addresses** (about 80 commits carry the work address):
-
-  ```
-  pip install git-filter-repo
-  git clone --mirror https://github.com/krismakesstuff/taw.git taw-clean
-  cd taw-clean
-  cat > ../mailmap <<'EOF'
-  Kris Crawford <11crawfordk@gmail.com> <kris@placetostandagency.com>
-  Kris Crawford <11crawfordk@gmail.com> Claude <noreply@anthropic.com>
-  EOF
-  git filter-repo --mailmap ../mailmap
-  git log --all --format='%an <%ae> | %cn <%ce>' | sort -u    # check: no work address left
-  ```
-
-  The second mailmap line is optional: it makes the two Claude-authored commits yours (they
-  already credit Claude as co-author), as the AI rule in CONTRIBUTING.md asks.
-
-- [ ] **Push the rewritten history.** Cleanest: a new, empty public repository, since GitHub keeps
-      old pull requests' commits (with the old address) in this one.
-
-  ```
-  git remote add origin https://github.com/krismakesstuff/<new-repo>.git
-  git push origin --all && git push origin --tags
-  ```
-
-  Or force-push into this repository (`git push --force origin --all` and `--tags`), accepting
-  that old pull requests may still show the old address.
-- [ ] **Afterwards:** re-clone local copies, `git config --global user.email 11crawfordk@gmail.com`,
-      and turn on GitHub's "Keep my email addresses private".
+- [x] **Contact email** in [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md): 11crawfordk@gmail.com.
+- [ ] **Make the repository public:** Settings → General → Danger Zone → Change visibility.
 
 ## GitHub settings
 

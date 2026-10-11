@@ -1,7 +1,7 @@
 # A release: merge main into the publish branch and push it. Builds Windows and macOS from
 # publish, packages them, and makes a draft GitHub release for the version in CMakeLists.txt
 # (project(VERSION)), with that version's notes from CHANGELOG.md, to look over and publish by
-# hand. Publishing the draft creates the tag (v0.1.0) on the commit it was built from.
+# hand. Publishing the draft creates the tag (v0.2.0) on the commit it was built from.
 #
 # Nothing else makes a release: not pushes to main, not tags. A version that already has a
 # release (or a tag) stops the run before anything is built: bump the version first.

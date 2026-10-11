@@ -12,4 +12,4 @@ body:
     id: version
     attributes:
       label: taw version and platform
-      placeholder: taw 0.1.0 on Windows 11, Windows Terminal
+      placeholder: taw 0.2.0 on Windows 11, Windows Terminal

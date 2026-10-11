@@ -264,15 +264,18 @@ public:
 
     // The session screen's areas: templates (a new session) on top, then recent sessions and
     // the bounces taw made side by side (newest first, to audition without opening anything).
-    // Arrows move within the focused area; ctrl+arrows (or tab) move between areas.
+    // Arrows move within the focused area; tab and shift+tab move between areas.
     enum class PickArea { templates, sessions, bounces };
     PickArea pickArea = PickArea::sessions;
+    int newSessionCursor = 0; // in newSessionName (clamped to it: other places set the name)
     int templateIndex = 0, sessionIndex = 0;
     struct RecentBounce { juce::File file; juce::String session; juce::File folder; juce::Time time; };
     std::vector<RecentBounce> recentBounces;
     int bounceIndex = 0;
     void loadRecentBounces();
     void movePickArea (PickArea to);
+    void cyclePickArea (int direction); // tab: +1, shift+tab: -1
+    void typeIntoName (const juce::String& text);
     std::vector<Session::Summary> recentSummaries; // beside recent: tracks, bpm, plugins, length
 
     // Where new sessions go (and whose sessions the screen lists alongside the recent ones):

@@ -1013,7 +1013,7 @@ join it later through virtual devices.
   are whatever they've been made. Session to session adds a block. The plan the audio thread
   runs is rebuilt on any change and handed over through a queue like the engine's graphs.
 - **In taw:** the hub has a page of its own (`Mode::Hub`), with or without a session: `taw hub`
-  from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), tab on
+  from the shell opens taw straight on it (a session folder called hub: `taw ./hub`), alt+h on
   the start screen, `hub` in a session (which plays on meanwhile; one that isn't on the hub is
   told to pick taw hub in `dev`). It shows the interface and a matrix named from the hub's
   side: rows come in, columns go out. Rows are the interface's inputs one by one ("MacBook in
@@ -1083,15 +1083,18 @@ open picks them up, says so, and they're still unsaved until you save. Headless 
 save to `session.json` as they go, as before.
 
 The session screen: a new session at the top (type its name; the templates under it), then two
-columns, recent sessions on the left and bounces on the right. Arrows move within the area
-that has the keys (off the end of a list, into the area beyond); `left` and `right`, and
-`ctrl+arrows`, move between areas the way they sit on screen (`tab` goes round them), so you never scroll through one list
-to reach another. Typing a name takes you to the templates. The bounces list shows what taw
-bounced, newest first: every `b` bounce and last-saved (remembered in `bounces.json` in the
-config folder), plus whatever is in the recent sessions' `bounces` folders. `enter` (or
-`space`) plays one through the output, decoded on a thread, without opening anything; `shift+left`
-and `shift+right` seek 5 s (alt: 30), `home` goes back to the start, `esc` stops it, `o` opens the
-session it came from, `r` shows the file in Explorer.
+columns, recent sessions on the left and bounces on the right, each in a frame; the one with
+the keys is drawn heavy and lit. Arrows move within that area (off the end of a list, into the
+area beyond); `tab` and `shift+tab` go round the areas, so you never scroll through one list to
+reach another. The name is a text field: `left` and `right` move its cursor, `ctrl` with them
+(and with `backspace` and `delete`) a word at a time, `home` and `end` to either end. Typing a
+name from a list takes you to the templates. The bounces list shows what taw bounced, newest
+first: every `b` bounce and last-saved (remembered in `bounces.json` in the config folder),
+plus whatever is in the recent sessions' `bounces` folders. With the bounces focused (or one
+playing), a player sits at the foot of their frame: the one playing and how far through, else
+the one picked, ready. `enter` (or `space`) plays it through the output, decoded on a thread,
+without opening anything; `left` and `right` seek 5 s (alt: 30), `home` goes back to the start,
+`esc` stops it, `o` opens the session it came from, `r` shows the file in Explorer.
 
 Each recent session shows its size at a glance, in grey between its name and when it was last
 saved: tracks, tempo, plugins (instruments and inserts, the mix's too) and length (to the end

@@ -127,7 +127,7 @@ void App::handleBouncesKey (const Key& k)
                 --bounceIndex;
             return;
         case Key::Down:  bounceIndex = juce::jmax (0, juce::jmin (n - 1, bounceIndex + 1)); return;
-        case Key::Left:  seekBounce (bouncePlaySeconds() - (k.alt ? 30.0 : 5.0)); return; // shift: 5 s, alt: 30 s (plain: areas)
+        case Key::Left:  seekBounce (bouncePlaySeconds() - (k.alt ? 30.0 : 5.0)); return; // 5 s, alt: 30 s
         case Key::Right: seekBounce (bouncePlaySeconds() + (k.alt ? 30.0 : 5.0)); return;
         case Key::Home:  seekBounce (0.0); return;
         case Key::Enter:
@@ -149,12 +149,8 @@ void App::handleBouncesKey (const Key& k)
     }
     else if (c == 'r' && sel != nullptr)
         sel->file.revealToUser();
-    else if (c >= 32)
-    {
-        // Anything else starts a new session's name, like it does from the sessions.
-        newSessionName += juce::String::charToString ((juce::juce_wchar) k.ch);
-        pickArea = PickArea::templates;
-    }
+    else if (c >= 32 && ! k.ctrl && ! k.alt)
+        typeIntoName (juce::String::charToString ((juce::juce_wchar) k.ch)); // anything else starts a new session's name, as from the sessions
 }
 
 void App::playBounce (const juce::File& file)

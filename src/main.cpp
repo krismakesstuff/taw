@@ -1131,23 +1131,49 @@ int main (int argc, char** argv)
             // The session screen: the bounces list has it (newest, so first), and it plays.
             check (! app->recentBounces.empty() && app->recentBounces.front().file == mp3 && app->bounceIndex == 0, "the bounces list has it, selected");
 
-            // Areas: ctrl+arrows move between them, the way they sit on screen.
+            // Areas: tab and shift+tab go round them.
             using Area = taw::App::PickArea;
-            auto key = [&] (taw::Key::Code code, bool ctrl)
+            auto key = [&] (taw::Key::Code code, bool ctrl, bool shift = false)
             {
                 taw::Key k;
                 k.code = code;
                 k.ctrl = ctrl;
+                k.shift = shift;
                 app->pressKey (k);
                 return app->pickArea;
             };
+            auto type = [&] (const juce::String& s)
+            {
+                for (auto c : s)
+                {
+                    taw::Key k;
+                    k.code = taw::Key::Char;
+                    k.ch = (wchar_t) c;
+                    app->pressKey (k);
+                }
+            };
             check (app->pickArea == Area::sessions, "the session screen starts in the recent sessions");
-            check (key (taw::Key::Right, false) == Area::bounces, "right: bounces");
-            check (key (taw::Key::Left, false) == Area::sessions, "left: sessions");
-            check (key (taw::Key::Right, true) == Area::bounces, "ctrl+right: bounces");
-            check (key (taw::Key::Left, true) == Area::sessions, "ctrl+left: sessions");
-            check (key (taw::Key::Up, true) == Area::templates, "ctrl+up: templates");
-            check (key (taw::Key::Down, true) == Area::sessions, "ctrl+down: sessions");
+            check (key (taw::Key::Tab, false) == Area::bounces, "tab: bounces");
+            check (key (taw::Key::Tab, false) == Area::templates, "tab: round to the new session");
+            check (key (taw::Key::Tab, false, true) == Area::bounces, "shift+tab: back to bounces");
+            check (key (taw::Key::Tab, false, true) == Area::sessions, "shift+tab: sessions");
+            check (key (taw::Key::Right, false) == Area::sessions, "right stays in the area");
+
+            // The name is a text field: typing from a list starts it, the arrows move in it.
+            type ("big song");
+            check (app->pickArea == Area::templates && app->newSessionName == "big song", "typing from the sessions starts a name");
+            key (taw::Key::Left, true);
+            type ("new ");
+            check (app->newSessionName == "big new song", "ctrl+left: back a word, typing goes there");
+            key (taw::Key::Home, false);
+            key (taw::Key::Right, true);
+            key (taw::Key::Backspace, true);
+            check (app->newSessionName == "new song", "ctrl+right, ctrl+backspace: a word off");
+            key (taw::Key::End, false);
+            key (taw::Key::Backspace, false);
+            check (app->newSessionName == "new son" && app->pickArea == Area::templates, "end, backspace");
+            app->newSessionName.clear();
+            key (taw::Key::Tab, false);
             const auto before = app->sessionIndex;
             key (taw::Key::Down, false);
             check (app->sessionIndex == juce::jmin (before + 1, (int) app->recent.size() - 1) && app->pickArea == Area::sessions, "down: the next session");
@@ -1161,7 +1187,8 @@ int main (int argc, char** argv)
                 std::printf ("%s", app->screenText (140, 20).toRawUTF8());
             }
 
-            key (taw::Key::Right, true);
+            key (taw::Key::Tab, false);
+            check (app->pickArea == Area::bounces, "tab: bounces");
             std::printf ("%s", app->screenText (100, 24).toRawUTF8());
             std::printf ("%s", app->screenText (70, 16).toRawUTF8());
             // The sessions folder: a client's drive. Nowhere to put it fails; a new folder on a

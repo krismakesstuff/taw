@@ -4354,7 +4354,7 @@ void App::handleTemplatePickerKey (const Key& k)
         say (Result::good (L"staying \x00b7 the bounce carries on"));
     }
 
-    const auto numTemplates = (int) templates.size(), numBounces = (int) recentBounces.size();
+    const auto numTemplates = (int) templates.size();
 
     // The sessions folder: typed, or picked in Windows' dialog.
     if (handleFolderEditKey (k))
@@ -4374,34 +4374,21 @@ void App::handleTemplatePickerKey (const Key& k)
         return;
     }
 
-    // Between areas: ctrl+arrows, the way they sit on screen (or tab, round them all); plain
-    // left and right too (shift and alt with them seek the bounce playing).
-    const bool sideways = (k.code == Key::Left || k.code == Key::Right) && ! k.shift && ! k.alt;
-
-    if (sideways || (k.ctrl && (k.code == Key::Up || k.code == Key::Down)))
+    // Between areas: tab and shift+tab, round them all. The arrows stay in the area, so the
+    // name can be edited like any text field.
+    if (k.code == Key::Tab && ! k.ctrl && ! k.alt)
     {
-        if (k.code == Key::Up)
-            movePickArea (PickArea::templates);
-        else if (k.code == Key::Left)
-            movePickArea (PickArea::sessions);
-        else if (k.code == Key::Right)
-            movePickArea (PickArea::bounces);
-        else if (pickArea == PickArea::templates)
-            movePickArea (numRecent > 0 || numBounces == 0 ? PickArea::sessions : PickArea::bounces);
-
+        cyclePickArea (k.shift ? -1 : 1);
         return;
     }
 
-    // Tab: the hub, where there is one (the arrows move between areas); otherwise round the areas.
-    if (k.code == Key::Tab)
-    {
 #if TAW_HUB
+    if (k.code == Key::Char && k.alt && ! k.ctrl && (k.ch == 'h' || k.ch == 'H'))
+    {
         openHubPage(); // the hub, with no session
-#else
-        movePickArea (pickArea == PickArea::templates ? PickArea::sessions : pickArea == PickArea::sessions ? PickArea::bounces : PickArea::templates);
-#endif
         return;
     }
+#endif
 
     // The playing bounce stops before esc means quit.
     if (k.code == Key::Escape)
@@ -4414,7 +4401,51 @@ void App::handleTemplatePickerKey (const Key& k)
         return;
     }
 
-    if (k.code == Key::Backspace)
+    newSessionCursor = juce::jlimit (0, newSessionName.length(), newSessionCursor);
+
+    // The name, a text field: the cursor moves (ctrl: a word at a time), and typing goes where
+    // it is. From the lists, backspace still takes the last letter off.
+    if (pickArea == PickArea::templates && ! k.alt)
+    {
+        auto& name = newSessionName;
+        auto& at = newSessionCursor;
+        const auto isSpace = [&name] (int i) { return juce::CharacterFunctions::isWhitespace (name[i]); };
+        const auto wordLeft = [&]
+        {
+            auto i = at;
+            while (i > 0 && isSpace (i - 1)) --i;
+            while (i > 0 && ! isSpace (i - 1)) --i;
+            return i;
+        };
+        const auto wordRight = [&]
+        {
+            auto i = at;
+            while (i < name.length() && ! isSpace (i)) ++i;
+            while (i < name.length() && isSpace (i)) ++i;
+            return i;
+        };
+
+        switch (k.code)
+        {
+            case Key::Left:  at = k.ctrl ? wordLeft() : juce::jmax (0, at - 1); return;
+            case Key::Right: at = k.ctrl ? wordRight() : juce::jmin (name.length(), at + 1); return;
+            case Key::Home:  at = 0; return;
+            case Key::End:   at = name.length(); return;
+            case Key::Backspace:
+            {
+                const auto from = k.ctrl ? wordLeft() : juce::jmax (0, at - 1);
+                name = name.substring (0, from) + name.substring (at);
+                at = from;
+                return;
+            }
+            case Key::Delete:
+                name = name.substring (0, at) + name.substring (k.ctrl ? wordRight() : at + 1);
+                return;
+            default:
+                break;
+        }
+    }
+    else if (k.code == Key::Backspace)
     {
         newSessionName = newSessionName.dropLastCharacters (1);
         return;
@@ -4455,12 +4486,8 @@ void App::handleTemplatePickerKey (const Key& k)
                 say (createSession (templates[(size_t) index]));
             return;
         case Key::Char:
-            if (k.ch >= 32)
-            {
-                // Typing a name means a new session: the templates take the keys.
-                newSessionName += juce::String::charToString ((juce::juce_wchar) k.ch);
-                pickArea = PickArea::templates;
-            }
+            if (k.ch >= 32 && ! k.ctrl && ! k.alt)
+                typeIntoName (juce::String::charToString ((juce::juce_wchar) k.ch));
             return;
         default:
             return;
@@ -4477,6 +4504,34 @@ void App::movePickArea (PickArea to)
         return;
 
     pickArea = to;
+}
+
+void App::cyclePickArea (int direction)
+{
+    // Each step skips an empty list (movePickArea leaves it where it was); templates are always there.
+    auto i = (int) pickArea;
+
+    for (int step = 0; step < 3; ++step)
+    {
+        i = (i + direction + 3) % 3;
+        movePickArea ((PickArea) i);
+
+        if (pickArea == (PickArea) i)
+            return;
+    }
+}
+
+// Typing a name means a new session: the templates take the keys. From a list, the letters
+// go on the end; in the name, where the cursor is.
+void App::typeIntoName (const juce::String& text)
+{
+    if (pickArea != PickArea::templates)
+        newSessionCursor = newSessionName.length();
+
+    newSessionCursor = juce::jlimit (0, newSessionName.length(), newSessionCursor);
+    newSessionName = newSessionName.substring (0, newSessionCursor) + text + newSessionName.substring (newSessionCursor);
+    newSessionCursor += text.length();
+    pickArea = PickArea::templates;
 }
 
 //==============================================================================

@@ -3378,8 +3378,8 @@ void Ui::drawClosePrompt (App& app)
 
 // The session screen, top to bottom: a new session (its name, where it goes, the templates),
 // then two columns: recent sessions on the left, the bounces taw made on the right (enter
-// plays one, without opening anything). Arrows move within the focused area, ctrl+arrows (or
-// tab) move between areas.
+// plays one, without opening anything). Each is framed, the focused one lit. Arrows move
+// within the focused area, tab and shift+tab between areas.
 static juce::String agoText (juce::Time t)
 {
     const auto age = juce::Time::getCurrentTime() - t;
@@ -3394,10 +3394,42 @@ static juce::String clockText (double s)
     return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2);
 }
 
-// An area's heading: bright when it has the keys.
-static void areaHeading (Canvas& canvas, int x, int y, const juce::String& text, bool focused)
+// An area's frame, its name set into the top edge: heavy and lit when it has the keys, light
+// and faint when it doesn't.
+static void areaBox (Canvas& canvas, int x0, int y0, int x1, int y1, const juce::String& title, bool focused)
 {
-    canvas.text (x, y, text, focused ? colour::accent : colour::dim, -1, focused);
+    const int c = focused ? colour::accent : colour::faint;
+    const wchar_t across = focused ? L'\x2501' : L'\x2500', down = focused ? L'\x2503' : L'\x2502';
+
+    for (int x = x0 + 1; x < x1; ++x)
+    {
+        canvas.put (x, y0, across, c);
+        canvas.put (x, y1, across, c);
+    }
+
+    for (int y = y0 + 1; y < y1; ++y)
+    {
+        canvas.put (x0, y, down, c);
+        canvas.put (x1, y, down, c);
+    }
+
+    canvas.put (x0, y0, focused ? L'\x250f' : L'\x250c', c);
+    canvas.put (x1, y0, focused ? L'\x2513' : L'\x2510', c);
+    canvas.put (x0, y1, focused ? L'\x2517' : L'\x2514', c);
+    canvas.put (x1, y1, focused ? L'\x251b' : L'\x2518', c);
+    canvas.text (x0 + 2, y0, " " + title + " ", focused ? colour::accent : colour::dim, -1, focused, x1 - x0 - 3);
+}
+
+// A line across a frame, joined to its sides.
+static void areaRule (Canvas& canvas, int x0, int x1, int y, bool focused)
+{
+    const int c = focused ? colour::accent : colour::faint;
+
+    for (int x = x0 + 1; x < x1; ++x)
+        canvas.put (x, y, focused ? L'\x2501' : L'\x2500', c);
+
+    canvas.put (x0, y, focused ? L'\x2523' : L'\x251c', c);
+    canvas.put (x1, y, focused ? L'\x252b' : L'\x2524', c);
 }
 
 // The first row to show so the selected one stays in view.
@@ -3422,34 +3454,44 @@ void Ui::drawTemplatePicker (App& app)
     const auto build = juce::String (TAW_VERSION) + " " + buildCommit() + " " + buildTime();
     canvas.text (std::max (16, w - 1 - build.length()), 0, build, colour::dim, colour::headerBg);
 
-    // New session: its name, where it goes, then the template to start from.
-    int y = 2;
-    areaHeading (canvas, 1, y, "new session", app.pickArea == Area::templates);
-    canvas.text (14, y, "name", colour::dim);
+    // New session, in its frame: its name, where it goes, then the template to start from.
+    const bool newFocused = app.pickArea == Area::templates;
+    const int newTop = 2;
+    const int templateRows = juce::jlimit (1, juce::jmax (1, numTemplates), (h - 14) / 2);
+    areaBox (canvas, 0, newTop, w - 1, newTop + 3 + templateRows, "new session", newFocused);
+    int y = newTop + 1;
+    canvas.text (2, y, "name", colour::dim);
 
     {
-        const auto x = canvas.text (19, y, app.newSessionName, colour::text, -1, true);
-        canvas.put (x, y, L' ', -1, colour::text);
+        // A text field: the cursor shows where typing goes while the area has the keys.
+        const auto& name = app.newSessionName;
+        const auto x = canvas.text (7, y, name, colour::text, -1, true);
 
-        if (app.newSessionName.isEmpty())
+        if (newFocused)
+        {
+            const auto at = juce::jlimit (0, name.length(), app.newSessionCursor);
+            canvas.put (7 + at, y, at < name.length() ? (wchar_t) name[at] : L' ', colour::headerBg, colour::text, true);
+        }
+
+        if (name.isEmpty())
             canvas.text (x + 2, y, "(type a name, or enter for a dated one)", colour::faint, -1, false, w - x - 3);
-        else if (app.dateSessionNames && App::datedName (app.newSessionName) != app.newSessionName)
-            canvas.text (x + 1, y, App::datedName ("").trim(), colour::faint); // the date it will get
+        else if (app.dateSessionNames && App::datedName (name) != name)
+            canvas.text (x + 2, y, App::datedName ("").trim(), colour::faint, -1, false, w - x - 3); // the date it will get
     }
 
     // Where they go: ctrl+l types a new place over it, ctrl+o picks one.
-    canvas.text (14, ++y, "in", colour::dim);
+    canvas.text (2, ++y, "in", colour::dim);
 
     if (app.editingFolder)
     {
-        const auto x = canvas.text (19, y, app.folderEdit, app.folderEditFresh ? colour::dim : colour::text, app.folderEditFresh ? colour::selBg : -1,
+        const auto x = canvas.text (7, y, app.folderEdit, app.folderEditFresh ? colour::dim : colour::text, app.folderEditFresh ? colour::selBg : -1,
                                     true, w - 40);
         canvas.put (x, y, L' ', -1, colour::text);
         canvas.text (x + 2, y, L"enter sets it \x00b7 esc leaves it", colour::faint, -1, false, w - x - 3);
     }
     else
     {
-        const auto x = canvas.text (19, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 50);
+        const auto x = canvas.text (7, y, app.newSessionParent.getFullPathName(), colour::faint, -1, false, w - 40);
         canvas.text (x + 2, y, L"ctrl+o choose \x00b7 ctrl+l type", colour::faint, -1, false, w - x - 3);
     }
 
@@ -3457,9 +3499,9 @@ void Ui::drawTemplatePicker (App& app)
 
     // Templates: as many rows as fit, keeping room below for the lists.
     {
-        const int rows = juce::jlimit (1, juce::jmax (1, numTemplates), (h - 12) / 2);
+        const int rows = templateRows;
         const int first = firstShown (app.templateIndex, numTemplates, rows);
-        const bool focused = app.pickArea == Area::templates;
+        const bool focused = newFocused;
 
         for (int i = first; i < juce::jmin (numTemplates, first + rows); ++i, ++y)
         {
@@ -3483,18 +3525,23 @@ void Ui::drawTemplatePicker (App& app)
         }
     }
 
-    // Two columns: recent sessions | bounces.
-    ++y;
-    const int colW = (w - 4) / 2, leftX = 1, rightX = leftX + colW + 2; // a divider between, a space each side
-    const int listRows = juce::jmax (1, h - 5 - (y + 1));
+    // Two frames side by side: recent sessions | bounces, down to the message rows.
+    y = newTop + 4 + templateRows;
+    const int mid = w / 2, listTop = y, listBottom = juce::jmax (listTop + 2, h - 4);
+    const int leftX = 1, colW = mid - 2;           // inside the left frame
+    const int rightX = mid + 1, rightW = w - 2 - mid; // inside the right one
+    const int listRows = listBottom - listTop - 1;
     const auto* player = app.bouncePlayer.get();
     const auto at = app.bouncePlaySeconds();
+    const bool bouncesFocused = app.pickArea == Area::bounces;
 
-    areaHeading (canvas, leftX, y, "recent sessions", app.pickArea == Area::sessions);
-    areaHeading (canvas, rightX, y, "recent bounces", app.pickArea == Area::bounces);
+    // The player sits at the foot of the bounces: there whenever they have the keys (so it's
+    // plain enter plays one), and while one plays.
+    const bool showPlayer = (bouncesFocused || player != nullptr) && listRows >= 3;
+    const int bounceRows = showPlayer ? listRows - 2 : listRows;
 
-    for (int r = 0; r <= listRows; ++r)
-        canvas.put (rightX - 2, y + r, L'\x2502', colour::faint);
+    areaBox (canvas, 0, listTop, mid - 1, listBottom, "recent sessions", app.pickArea == Area::sessions);
+    areaBox (canvas, mid, listTop, w - 1, listBottom, "recent bounces", bouncesFocused);
 
     ++y;
 
@@ -3552,14 +3599,14 @@ void Ui::drawTemplatePicker (App& app)
     }
 
     if (numBounces == 0)
-        canvas.text (rightX + 2, y, L"none yet \x00b7 b bounces, saving as you close bounces last-saved", colour::faint, -1, false, colW - 2);
+        canvas.text (rightX + 2, y, L"none yet \x00b7 b bounces, saving as you close bounces last-saved", colour::faint, -1, false, rightW - 2);
 
     {
-        const bool focused = app.pickArea == Area::bounces;
-        const int first = firstShown (app.bounceIndex, numBounces, listRows);
-        const int ageW = 11, nameW = juce::jmax (8, (colW - ageW - 5) * 3 / 5), sessionW = juce::jmax (0, colW - ageW - nameW - 5);
+        const bool focused = bouncesFocused;
+        const int first = firstShown (app.bounceIndex, numBounces, bounceRows);
+        const int ageW = 11, nameW = juce::jmax (8, (rightW - ageW - 5) * 3 / 5), sessionW = juce::jmax (0, rightW - ageW - nameW - 5);
 
-        for (int i = first, row = y; i < juce::jmin (numBounces, first + listRows); ++i, ++row)
+        for (int i = first, row = y; i < juce::jmin (numBounces, first + bounceRows); ++i, ++row)
         {
             const auto& b = app.recentBounces[(size_t) i];
             const bool sel = i == app.bounceIndex;
@@ -3581,23 +3628,32 @@ void Ui::drawTemplatePicker (App& app)
         }
     }
 
-    // The bounce playing: where, and how far through.
-    if (player != nullptr)
+    // The player: the bounce playing (where, and how far through), else the one picked, ready.
+    if (showPlayer)
     {
-        const auto len = app.bounceLengthSeconds();
-        int x = canvas.text (1, h - 4, at >= 0.0 ? L"\x25b6 " : L"\x25a0 ", colour::accent);
-        x = canvas.text (x, h - 4, player->file.getFileNameWithoutExtension(), colour::text, -1, true, 30);
+        const int py = listBottom - 1, right = w - 2;
+        areaRule (canvas, mid, w - 1, py - 1, bouncesFocused);
 
-        if (! player->started)
-            canvas.text (x + 2, h - 4, L"loading\x2026", colour::dim);
+        const bool playing = player != nullptr && at >= 0.0;
+        const auto* picked = app.bounceIndex < numBounces ? &app.recentBounces[(size_t) app.bounceIndex] : nullptr;
+        const auto name = player != nullptr ? player->file.getFileNameWithoutExtension()
+                        : picked != nullptr ? picked->file.getFileNameWithoutExtension()
+                                            : juce::String ("nothing to play yet");
+        int x = canvas.text (rightX + 1, py, playing ? L"\x25b6 " : L"\x25a0 ", playing ? colour::accent : colour::dim);
+        x = canvas.text (x, py, name, player != nullptr ? colour::text : colour::dim, -1, player != nullptr, juce::jmax (8, rightW / 2));
+
+        if (player != nullptr && ! player->started)
+            canvas.text (x + 2, py, L"loading\x2026", colour::dim, -1, false, right - x - 1);
         else
         {
-            x = canvas.text (x + 2, h - 4, clockText (juce::jmax (0.0, at)) + " / " + clockText (len), colour::dim);
-            const int barW = juce::jmax (0, w - 2 - (x + 2));
+            const auto len = app.bounceLengthSeconds();
+            const auto clock = player != nullptr ? clockText (juce::jmax (0.0, at)) + " / " + clockText (len) : juce::String (L"enter plays");
+            x = canvas.text (x + 2, py, clock, colour::dim, -1, false, right - x - 1);
+            const int barW = juce::jmax (0, right - (x + 2) + 1);
             const int filled = len > 0.0 && at >= 0.0 ? (int) (barW * at / len) : 0;
 
             for (int i = 0; i < barW; ++i)
-                canvas.put (x + 2 + i, h - 4, i < filled ? L'\x2501' : L'\x2500', i < filled ? colour::accent : colour::faint);
+                canvas.put (x + 2 + i, py, i < filled ? L'\x2501' : L'\x2500', i < filled ? colour::accent : colour::faint);
         }
     }
 
@@ -3631,15 +3687,15 @@ void Ui::drawTemplatePicker (App& app)
     }
 
 #if TAW_HUB
-    const juce::String areas (L"\x2190\x2192 area \x00b7 tab hub");
+    const juce::String areas (L"tab area \x00b7 alt+h hub");
 #else
-    const juce::String areas (L"\x2190\x2192 area");
+    const juce::String areas (L"tab area");
 #endif
     const auto hint = app.pickArea == Area::bounces
-                          ? L"enter play/stop \x00b7 shift \x2190\x2192 seek \x00b7 o session \x00b7 r reveal \x00b7 " + areas
+                          ? L"enter play/stop \x00b7 \x2190\x2192 seek (alt: 30 s) \x00b7 o session \x00b7 r reveal \x00b7 " + areas
                       : app.pickArea == Area::sessions
                           ? L"\x2191\x2193 choose \x00b7 enter open \x00b7 type: new session \x00b7 " + areas + L" \x00b7 esc quit"
-                          : L"type a name \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 " + areas + L" \x00b7 esc quit";
+                          : L"type a name (ctrl \x2190\x2192 by word) \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 " + areas + L" \x00b7 esc quit";
     canvas.text (1, h - 1, hint, colour::dim, -1, false, w - 2);
 }
 } // namespace taw

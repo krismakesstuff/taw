@@ -903,6 +903,28 @@ own, it shows the frame for where the playhead is, so it can't drift.
   `videoOffset`, `videoShown`. `syncVideo` reconciles the player with the tree every frame, so
   undo and opening sessions need nothing else.
 
+## Keycast
+
+A window showing the keys pressed, for screen recordings of taw (`KeyCast.h`). `keycast` shows
+or hides it; `keycast font <name>`, `color <colour>`, `bg <colour>` (#rrggbb or a name),
+`size 1.5` (the text's scale) and `fade 2` (seconds; 0 keeps them) set its look, `reset` puts
+the look back. All of it, and the window's place, is kept in settings.json (`keycast`), for
+every session.
+
+- **What it sees:** taw's own keys, as `App::handleKey` gets them (after it has handled one),
+  so it needs no keyboard hook or permission and nothing typed in other apps shows. Keys typed
+  into a plugin window or the MIDI editor that taw doesn't get don't show; mouse clicks don't.
+- **What it shows:** the last few presses, oldest dimmer, each fading on its own after `fade`
+  seconds untouched. The same key again within a second counts up (`→ ×6`). A key that leaves
+  text on the command line is typing: typed characters join into one word (`2v-6`), until a key
+  that isn't typing (Enter, Esc, an arrow). Names: `Ctrl+Space`, `Shift+R` (any uppercase
+  letter), `Alt+←` (`Opt+` on macOS), letters as caps.
+- **Window:** like the video window, a view only (ignores keys, never activates, hands the
+  keyboard back if it's activated anyway), and always on top. The text's height follows the
+  window's (times `size`); keys that don't fit are left out, and one alone that doesn't fit
+  shrinks. Its close button hides it until `keycast` (not saved, like the video's).
+  `--keycasttest` checks names, grouping, fading and colours.
+
 ## Hub
 
 The audio hub (`docs/plan-audio-hub.md`; macOS so far): one background taw that owns the

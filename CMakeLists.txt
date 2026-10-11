@@ -45,6 +45,7 @@ target_sources(taw PRIVATE
     src/Safety.cpp
     src/Editing.cpp
     src/Instruments.cpp
+    src/KeyCast.cpp
     src/Routing.cpp
     src/Inserts.cpp
     src/AlsImport.cpp

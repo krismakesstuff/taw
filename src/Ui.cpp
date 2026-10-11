@@ -2188,10 +2188,10 @@ void Ui::drawHelp (App& app)
             { Pair, L"dev  panel", L"audio device / driver", L"hub", L"the hub: routes, sessions" },
             { Pair, L"dark  light", L"themes (also: grey)", L"hub route", L"in 1 > Song  Song > out" },
             { Pair, L"project", L"the session's settings", L"hub stop", L"(start) run the hub" },
-            { Pair, L"stats", L"load: dsp, cpu, tracks", L"", L"" },
+            { Pair, L"stats", L"load: dsp, cpu, tracks", L"keycast", L"keys window (recording)" },
 #else
             { Pair, L"dev  panel", L"audio device / driver", L"stats", L"load: dsp, cpu, tracks" },
-            { Pair, L"dark  light", L"themes (also: grey)", L"", L"" },
+            { Pair, L"dark  light", L"themes (also: grey)", L"keycast", L"keys window (recording)" },
             { Pair, L"project", L"the session's settings", L"", L"" },
 #endif
 #if JUCE_WINDOWS

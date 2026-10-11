@@ -1916,6 +1916,102 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --keycasttest   check what the keycast window shows for keys: names, typing as
+    // words, repeats counted, fading, and the colours its command takes.
+    if (args[0] == "--keycasttest")
+    {
+        using taw::Key;
+        auto key = [] (Key::Code code, wchar_t ch = 0, bool ctrl = false, bool alt = false, bool shift = false)
+        {
+            Key k;
+            k.code = code;
+            k.ch = ch;
+            k.ctrl = ctrl;
+            k.alt = alt;
+            k.shift = shift;
+            return k;
+        };
+
+        int failures = 0;
+        auto check = [&failures] (const char* what, const juce::String& got, const juce::String& want)
+        {
+            const bool ok = got == want;
+            std::printf ("%-28s %-28s %s\n", what, got.toRawUTF8(), ok ? "ok" : "FAILED");
+            failures += ok ? 0 : 1;
+        };
+
+#if JUCE_MAC
+        const juce::String alt ("Opt+");
+#else
+        const juce::String alt ("Alt+");
+#endif
+        check ("ctrl+space", taw::KeyCastLog::name (key (Key::Char, L' ', true)), "Ctrl+Space");
+        check ("R (shift+r)", taw::KeyCastLog::name (key (Key::Char, L'R')), "Shift+R");
+        check ("ctrl+k", taw::KeyCastLog::name (key (Key::Char, L'k', true)), "Ctrl+K");
+        check ("{ with shift", taw::KeyCastLog::name (key (Key::Char, L'{', false, false, true)), "{");
+        check ("alt+left", taw::KeyCastLog::name (key (Key::Left, 0, false, true)), alt + juce::String (L"\x2190"));
+        check ("ctrl+shift+left", taw::KeyCastLog::name (key (Key::Left, 0, true, false, true)), juce::String (L"Ctrl+Shift+\x2190"));
+        check ("enter", taw::KeyCastLog::name (key (Key::Enter)), "Enter");
+
+        auto shown = [] (const taw::KeyCastLog& log)
+        {
+            juce::StringArray out;
+
+            for (const auto& e : log.recent())
+                out.add (e.shown());
+
+            return out.joinIntoString (" | ");
+        };
+
+        // A hotkey, a typed command (its first key starts the line), enter, then a held arrow.
+        {
+            taw::KeyCastLog log;
+            double t = 0.0;
+            log.press (key (Key::Char, L'r'), false, t += 100);
+            for (auto c : juce::String ("2v-6"))
+                log.press (key (Key::Char, (wchar_t) c), true, t += 100);
+            log.press (key (Key::Enter), false, t += 100);
+            for (int i = 0; i < 6; ++i)
+                log.press (key (Key::Right), false, t += 50);
+            log.press (key (Key::Char, L'r'), false, t += 100);
+            log.press (key (Key::Char, L'r'), false, t += 2000); // too late to count up
+            log.press (key (Key::Mouse), false, t += 100);       // never shown
+            check ("sequence", shown (log), juce::String (L"R | 2v-6 | Enter | \x2192 \x00d7") + "6 | R | R");
+
+            // Each key fades from its own last press: the older ones go first.
+            const auto last = t - 100.0; // the last R (the click wasn't one)
+            log.expire (2300.0, 2000.0); // the first key (at 100) only 2.2 s old
+            check ("none faded yet", juce::String ((int) log.recent().size()), "6");
+            check ("fade 0: they stay", juce::String ((int) log.recent().size()), log.expire (last + 1.0e6, 0.0) ? "6" : "0");
+            log.expire (last + 1000.0, 2000.0);
+            check ("the older ones gone", shown (log), "R");
+            log.expire (last + 2000.0 + taw::KeyCastLog::fadeOutMs + 1.0, 2000.0);
+            check ("all gone", juce::String ((int) log.recent().size()), "0");
+        }
+
+        // Only the latest few are kept.
+        {
+            taw::KeyCastLog log;
+            for (int i = 0; i < 20; ++i)
+                log.press (key (Key::Char, (wchar_t) ('a' + i)), false, i * 100.0);
+            check ("kept", juce::String ((int) log.recent().size()), juce::String (taw::KeyCastLog::maxEntries));
+        }
+
+        auto colour = [] (const char* text)
+        {
+            juce::Colour c;
+            return taw::KeyCast::parseColour (text, c) ? taw::KeyCast::colourText (c) : juce::String ("-");
+        };
+
+        check ("#ff8800", colour ("#ff8800"), "#ff8800");
+        check ("FF8800", colour ("FF8800"), "#ff8800");
+        check ("#80ff8800", colour ("#80ff8800"), "#80ff8800");
+        check ("yellow", colour ("yellow"), "#ffff00");
+        check ("black", colour ("black"), "#000000");
+        check ("nonsense", colour ("nonsense"), "-");
+        return failures;
+    }
+
 #if JUCE_MAC
     // taw --terminal-profile   add the "taw" Terminal.app profile (keys taw needs, Option as Alt)
     if (args[0] == "--terminal-profile")

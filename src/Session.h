@@ -106,6 +106,19 @@ public:
     static juce::ValueTree makeNote (double beat, double len, int pitch, int vel, int channel = 1);
     static juce::ValueTree makeControl (double beat, int num, int val, int channel = 1);
 
+    // Playlists (Pro Tools'): a track's own clips are its main playlist, the one that plays and
+    // records; PLAYLIST children hold the others, each a list of clips like a track's. Anything
+    // that reads a track's clips (clips(), midiClips()...) reads a PLAYLIST the same way.
+    static bool isClip (const juce::ValueTree& c) { return c.hasType (ids::CLIP) || isBeatClip (c); }
+    static std::vector<juce::ValueTree> playlists (const juce::ValueTree& track); // the others, in order
+    static juce::String mainPlaylistName (const juce::ValueTree& track);
+    static juce::String nextPlaylistName (const juce::ValueTree& track); // "Vox.03": one past the highest number
+    static juce::ValueTree soloedPlaylist (const juce::ValueTree& track); // invalid when none
+    static juce::ValueTree trackOf (const juce::ValueTree& clipHolder)     // a PLAYLIST's track, or the track itself
+    {
+        return clipHolder.hasType (ids::PLAYLIST) ? clipHolder.getParent() : clipHolder;
+    }
+
     // MIDI clips (and hit clips): a window [offset, offset + len) onto the clip's content (its NOTEs and CCs,
     // positioned in content beats), placed at beat on the timeline. Like an audio clip's window
     // into its file, trimming hides notes without losing them. A note belongs to the clip it

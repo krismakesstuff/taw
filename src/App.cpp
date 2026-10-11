@@ -590,6 +590,7 @@ int App::run()
         collectFinishedTakes();
         drainLiveOverviews();
         drainRecordedMidi();
+        pollLoopPasses(); // loop recording: a finished pass's MIDI and hits to a playlist
         pollControls(); // controllers mapped to automation
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
@@ -1129,13 +1130,16 @@ Result App::stop()
 
     // Blocks taw rendered too slowly this pass: each was a dropout (a click). None while you
     // heard clicks means they came from further down the chain (the driver, Voicemeeter).
+    const auto passes = std::exchange (loopNote, {});
+
     if (const auto late = engine.lateBlockCount(); late > 0)
         return Result::fail ((wasRecording ? juce::String (L"stopped \x00b7 saving take \x00b7 ") : juce::String ("stopped "))
                              + juce::String (late) + (late == 1 ? " dropout" : " dropouts") + L" \x2014 taw's audio ran late (worst block "
                              + juce::String (juce::roundToInt (engine.worstBlockLoad() * 100.0f))
                              + L"% of its time) \x00b7 a bigger buffer in dev, or fewer plugins, helps");
 
-    return Result::good (wasRecording ? juce::String (L"stopped \x00b7 saving take") : juce::String());
+    return Result::good (wasRecording ? juce::String (L"stopped \x00b7 saving take") + (passes.isNotEmpty() ? L" \x00b7 " + passes : juce::String())
+                                      : juce::String());
 }
 
 // Ctrl+Space / "rec": record the armed tracks. With tracks given ("1 rec", for scripts and
@@ -1171,12 +1175,15 @@ Result App::record (const std::vector<int>& tracks)
     if (auto r = startRecorders (armed); ! r.ok)
         return r;
 
-    const auto countIn = countInSamples (cursor, true);
+    // With the loop on it records from the loop's start, a take each pass (as play starts there).
+    const auto from = loopActive() ? (juce::int64) session->tree()[ids::loopStart] : cursor;
+    const auto countIn = countInSamples (from, true);
 
     if (! engine.isRolling())
     {
-        playStart = playFrom = cursor;
-        engine.play (cursor, countIn);
+        playStart = cursor;
+        playFrom = from;
+        engine.play (from, countIn);
     }
 
     juce::StringArray names;
@@ -1192,7 +1199,8 @@ Result App::punch()
     if (recording)
     {
         stopRecorders();
-        return Result::good (L"punched out \x00b7 still playing \x00b7 ctrl+space punches in again");
+        const auto passes = std::exchange (loopNote, {});
+        return Result::good (L"punched out \x00b7 still playing \x00b7 ctrl+space punches in again" + (passes.isNotEmpty() ? L" \x00b7 " + passes : juce::String()));
     }
 
     std::vector<int> armed;
@@ -1267,6 +1275,10 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
 
     // A punch starts where you are hearing; from a stop, at the cursor (after any count-in).
     midiPassStart = juce::jmax (0.0, (double) (engine.isRolling() ? heardPosition (engine.playhead()) : cursor) / session->samplesPerBeat());
+    loopRecording = false;
+
+    if (loopActive())
+        startLoopRecording();
 
     recording = true;
     rebuildGraph();
@@ -1285,7 +1297,12 @@ void App::stopRecorders()
             recs.push_back (l.recorder);
         }
 
-    finishHeldNotes (engine.playhead());
+    if (loopRecording)
+        loopNote = finishLoopRecording(); // each pass a take: the last on the main, the others playlists
+    else
+        finishHeldNotes (engine.playhead());
+
+    loopRecording = false;
     midiRecordTracks.clear();
     recording = false;
     rebuildGraph(); // a graph without the recorders; once it's live they get closed
@@ -1440,13 +1457,14 @@ void App::collectFinishedTakes()
         }
 
         beginEdit ("record track " + juce::String (f.trackIndex + 1));
-        placeTake (f.trackIndex, f.file, f.start, f.length, latencyCompensation());
+        const auto passes = placeTake (f.trackIndex, f.file, f.start, f.length, latencyCompensation());
 
         // Saved before the journal forgets the take, so a crash between the two can't lose it.
         persist();
         writeTakeJournal();
 
-        auto msg = L"take saved \x00b7 track " + juce::String (f.trackIndex + 1) + L" \x00b7 " + juce::String ((double) f.length / sampleRate(), 1) + " s";
+        auto msg = L"take saved \x00b7 track " + juce::String (f.trackIndex + 1) + L" \x00b7 " + juce::String ((double) f.length / sampleRate(), 1) + " s"
+                   + (passes.isNotEmpty() ? L" \x00b7 " + passes : juce::String());
 
         if (f.droppedBlocks > 0)
             say (Result::fail (msg + L" \x00b7 disk too slow, " + juce::String (f.droppedBlocks) + " blocks dropped"));
@@ -1455,15 +1473,24 @@ void App::collectFinishedTakes()
     }
 }
 
-void App::placeTake (int trackIndex, const juce::File& file, juce::int64 start, juce::int64 length, juce::int64 comp)
+juce::String App::placeTake (int trackIndex, const juce::File& file, juce::int64 start, juce::int64 length, juce::int64 comp)
 {
     start -= comp;
+    const auto rel = file.getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/');
+
+    // Recorded looping: a clip per pass, the earlier passes on playlists (Playlists.cpp).
+    if (const auto loop = loopTakes.find (rel); loop != loopTakes.end())
+    {
+        const auto info = loop->second;
+        loopTakes.erase (loop);
+        return placeLoopTake (trackIndex, rel, start, length, info);
+    }
 
     // A take recorded from the very start can land before zero once compensated: start the
     // clip at zero and skip into the file instead.
     const auto offset = start < 0 ? -start : (juce::int64) 0;
-    const auto rel = file.getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/');
     session->track (trackIndex).appendChild (Session::makeClip (rel, start + offset, offset, length - offset), um());
+    return {};
 }
 
 void App::beginEdit (const juce::String& name, const juce::String& coalesceKey)
@@ -1732,13 +1759,17 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
         tp.panCurve = automationCurve (t, "pan");
         tp.muteCurve = automationCurve (t, "mute");
 
+        // What plays: the main playlist, or the playlist lane soloed in its place.
+        const auto soloed = Session::soloedPlaylist (t);
+        const auto source = soloed.isValid() ? soloed : t;
+
         if (Session::isInstrumentTrack (t))
         {
             // Armed means "listening to the MIDI controller", not to an audio input.
             tp.midiLive = tp.armed && ! offline;
             tp.armed = false;
             tp.stereo = true;
-            tp.sequence = buildSequence (t, session->samplesPerBeat());
+            tp.sequence = buildSequence (source, session->samplesPerBeat());
 
             // Live: a plugin not loaded yet is queued and the track is silent until it is.
             if (auto* in = offline ? hostedEntry (t) : liveEntry (t); in != nullptr && in->slot != nullptr)
@@ -1795,7 +1826,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
                 tp.sampleLength = wanted > 0 ? juce::jmin (wanted, fileLength - tp.sampleOffset) : fileLength - tp.sampleOffset;
                 tp.stereo = data->audio->getNumChannels() > 1;
 
-                for (const auto& h : Session::placedHits (t))
+                for (const auto& h : Session::placedHits (source))
                     tp.hits.push_back ({ std::llround (h.beat * session->samplesPerBeat()), h.vel });
 
                 std::sort (tp.hits.begin(), tp.hits.end(), [] (const auto& a, const auto& b) { return a.pos < b.pos; });
@@ -1809,7 +1840,7 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             continue;
         }
 
-        for (const auto& c : Session::clips (t))
+        for (const auto& c : Session::clips (source))
         {
             const auto* data = clipFor (c);
 
@@ -2822,9 +2853,9 @@ void App::focusUp (bool extendSelection)
         return;
     }
 
-    if (topLane == TopLane::none && focused > 0 && ! extendSelection && ! lanesShown (focused - 1).empty())
+    if (topLane == TopLane::none && focused > 0 && ! extendSelection && lanesUnder (focused - 1) > 0)
     {
-        const auto lanes = (int) lanesShown (focused - 1).size();
+        const auto lanes = lanesUnder (focused - 1);
         focusTrack (focused - 1);
         focusedLane = lanes - 1;
         return;
@@ -2845,7 +2876,7 @@ void App::focusDown (bool extendSelection)
     // Down from a track's row through its open lanes, then on to the next track (the Mix row:
     // through the mix's lanes under it).
     if (topLane == TopLane::none && ! extendSelection && session != nullptr && focused <= session->numTracks()
-        && focusedLane + 1 < (int) lanesShown (ioTrack()).size())
+        && focusedLane + 1 < lanesUnder (ioTrack()))
     {
         ++focusedLane;
         trackAnchor = -1;
@@ -2925,7 +2956,7 @@ bool App::playPads (float velocity, bool repeat)
 
     if (rec)
     {
-        beat = juce::jmax (0.0, (double) heardPosition (engine.playhead()) / session->samplesPerBeat());
+        beat = recordedBeat (engine.playhead(), engine.loopWrapCount());
 
         if ((bool) session->tree()[ids::inputQuantize])
         {
@@ -3398,7 +3429,7 @@ Result App::moveToNextClipEdge (bool extendSelection)
     // Clip starts and ends on audio tracks; each hit on sample tracks.
     for (auto t : defaultTargets())
     {
-        const auto track = session->track (t);
+        const auto track = clipHolder (t); // the playlist lane you're on, else the track
 
         for (const auto& c : Session::clips (track))
         {
@@ -3406,7 +3437,7 @@ Result App::moveToNextClipEdge (bool extendSelection)
             consider ((juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
         }
 
-        if (Session::isSampleTrack (track))
+        if (Session::isSampleTrack (session->track (t)))
             for (const auto& h : Session::placedHits (track))
                 consider (std::llround (h.beat * session->samplesPerBeat()));
 
@@ -3686,7 +3717,7 @@ Result App::toggleEditor()
 
     if (Session::isInstrumentTrack (track))
     {
-        const auto clip = nearest (Session::midiClips (track), [spb] (const juce::ValueTree& c) { return (double) c[ids::beat] * spb; },
+        const auto clip = nearest (Session::midiClips (clipHolder (focused)), [spb] (const juce::ValueTree& c) { return (double) c[ids::beat] * spb; },
                                    [spb] (const juce::ValueTree& c) { return Session::clipEnd (c) * spb; });
 
         return clip.isValid() ? openMidiEditor (clip)
@@ -3695,7 +3726,7 @@ Result App::toggleEditor()
 
     if (Session::isAudioTrack (track))
     {
-        const auto clip = nearest (Session::clips (track), [] (const juce::ValueTree& c) { return (double) (juce::int64) c[ids::start]; },
+        const auto clip = nearest (Session::clips (clipHolder (focused)), [] (const juce::ValueTree& c) { return (double) (juce::int64) c[ids::start]; },
                                    [] (const juce::ValueTree& c) { return (double) ((juce::int64) c[ids::start] + (juce::int64) c[ids::length]); });
 
         return clip.isValid() ? openAudioEditor (clip) : Result::fail (label + L" has no clips \x2014 record or import one");
@@ -3723,7 +3754,7 @@ Result App::newMidiClipForEditor()
     const auto to = hasTimeSelection() ? snapBeats (timeSelection().getEnd()) : from + bar;
     beginEdit ("new MIDI clip");
     auto clip = Session::makeMidiClip (from, from, to - from);
-    session->track (focused).appendChild (clip, um());
+    clipHolder (focused).appendChild (clip, um());
 
     if (auto r = openMidiEditor (clip); ! r.ok)
         return r;
@@ -3736,7 +3767,7 @@ juce::ValueTree App::midiClipAt (int track, double from, double to) const
     if (session == nullptr || track < 0 || track >= session->numTracks())
         return {};
 
-    const auto midi = Session::beatClips (session->track (track));
+    const auto midi = Session::beatClips (clipHolder (track));
     const auto spb = session->samplesPerBeat();
 
     for (auto it = midi.rbegin(); it != midi.rend(); ++it)
@@ -3885,7 +3916,10 @@ void App::handleMainKey (const Key& k)
         // Alt moves the selected (or focused) tracks up or down a place (on a lane, its points).
         case Key::Up:
         case Key::Down:
-            if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
+            // Alt+shift+up on a playlist lane: its selection to the main (Pro Tools' key).
+            if (k.alt && k.shift && ! k.ctrl && k.code == Key::Up && focusedPlaylist().isValid())
+                say (promoteToMain());
+            else if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
             {
                 // On a lane: its points up or down (the selection's, or the one at the cursor).
                 beginEdit ("automation", "auto:" + juce::String (focused) + ":" + focusedLaneParam());
@@ -4008,6 +4042,13 @@ void App::handleMainKey (const Key& k)
         return;
     }
 
+    // Ctrl+alt+p: a copy of the main playlist becomes the main (Pro Tools' duplicate playlist).
+    if (k.code == Key::Char && k.ctrl && k.alt && (k.ch == 'p' || k.ch == 'P'))
+    {
+        say (newPlaylist (true));
+        return;
+    }
+
     // Ctrl shortcuts (AltGr arrives as ctrl+alt and types characters, so it's excluded).
     if (k.code == Key::Char && k.ctrl && ! k.alt)
     {
@@ -4047,6 +4088,8 @@ void App::handleMainKey (const Key& k)
             beginEdit ("duplicate");
             say (duplicateSelection (defaultTargets()));
         }
+        else if (k.ch == 'p') // a new empty playlist becomes the main (Pro Tools' new playlist)
+            say (newPlaylist (false));
 
 
         return; // never type ctrl+letters into the command line
@@ -4171,6 +4214,12 @@ void App::handleMainKey (const Key& k)
             // shift+O on a lane: its automation off (the setting plays, nothing's written) or on.
             else if (lineEmpty && k.ch == 'O' && session != nullptr && focusedLaneParam().isNotEmpty())
                 say (toggleLaneOff());
+            // shift+P: the focused track's playlists as lanes under it (or closed).
+            else if (lineEmpty && k.ch == 'P' && session != nullptr)
+                say (togglePlaylistLanes());
+            // shift+S on a playlist lane: it plays in the main's place.
+            else if (lineEmpty && k.ch == 'S' && focusedPlaylist().isValid())
+                say (soloPlaylistLane());
             else if (lineEmpty && (k.ch == 'R' || k.ch == 'S' || k.ch == 'M' || k.ch == 'I'))
                 say (execute (k.ch == 'R' ? "r" : k.ch == 'S' ? "s" : k.ch == 'M' ? "m" : "mon"));
             else if ((k.ch == 't' || k.ch == 'T') && tappingTempo())

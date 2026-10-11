@@ -186,7 +186,7 @@ for placing them precisely and taw's keys do the editing.
 - **A clip's edges:** drag to trim (it's a window into its file: never past the file, nothing
   lost). **Its name bar:** drag to move it.
 - **Height:** starts scaled to the track's loudest peak (a quiet take isn't a flat line); alt+wheel
-  changes it. Ctrl+wheel (or `+` `-`, around the cursor) zooms; the wheel scrolls.
+  changes it. Ctrl+wheel (or `r` `t` / `+` `-`, around the cursor) zooms; the wheel scrolls.
 
 ### The MIDI editor
 
@@ -211,8 +211,8 @@ One MIDI clip, for fine work with the mouse.
 - **Toolbar:** the grid (bar to 1/32, triplets, off; it starts at the session's `grid` step) and
   quantize (note starts in the selection, or the whole clip, to the grid; also `q`).
 - **Keys** while it's in front: Delete, ↑↓ transpose (shift: an octave), ←→ move by the grid
-  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `+` `-`
-  zoom, Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
+  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `r` `t`
+  (or `+` `-`) zoom the window around taw's cursor (the session's zoom stays), Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
   space plays, ctrl+z undoes, ctrl+s saves, shift+E closes it.
 - **Mouse wheel:** scrolls pitch; shift: time; ctrl: zoom time around the mouse; alt: row height.
 
@@ -601,6 +601,35 @@ sample tracks, MIDI clips on instrument tracks.
 - `Ctrl+C` with no range clears a typed command line; it never quits. Terminals turn `Ctrl+V`
   into pasted text, so `Ctrl+C` also puts `taw:paste` on the Windows clipboard; that text
   arriving is taken as the paste.
+
+### Playlists
+
+As in Pro Tools: other versions of a track's clips, so you re-record the takes you don't like
+and keep the ones you might. A track's own clips are its **main** playlist, the one that plays,
+records and bounces; the others are `PLAYLIST` children of the track (a name, the clips),
+which read like a track wherever clips are read. Automation belongs to the track and is shared
+by all of them. `Playlists.cpp`.
+
+| Key | Command | Does |
+|---|---|---|
+| `Ctrl+P` | `pl new` | a new empty playlist becomes the main (`Vox.01`, `Vox.02`...); the old main joins the others |
+| `Ctrl+Alt+P` | `pl copy` | likewise, starting as a copy of the main |
+| `Shift+P` | | the focused track's playlists as lanes under it, each as tall as the track (closes its automation lanes: a track shows one or the other) |
+| `Shift+S` on a lane | | it plays in the main's place, on that track only (one at a time; again: the main). Closing the lanes ends it |
+| `Alt+Shift+↑` on a lane | | its selection replaces that range on the main (Copy Selection to Main Playlist); no selection: the whole playlist becomes the main |
+| | `pl`, `pl 2`, `pl Vox.02` | list them; make one the main (numbered as the lanes are), the main taking its place |
+| | `pl del [n]` | delete one (its audio stays in `audio\`) |
+
+- On a playlist lane, copy, cut, paste, delete, duplicate, consolidate, Tab and shift+E act on
+  its clips, and none of it touches the automation. The track row shows the main's name.
+- **Loop recording:** with the loop on, recording starts at the loop and goes round it, each
+  pass a take. When it stops, the last whole pass is on the main and each one before it is a new
+  playlist (the main as it was, plus that take); a pass cut short by stopping is dropped, as in
+  Pro Tools (its audio stays in the file). Audio is one file through every pass, cut into a clip
+  per pass when it's placed (`loopTakes`); MIDI and pad hits are folded into the loop as they
+  come (the engine counts loop wraps, `TimedMidi::wraps`) and split off at each pass's end, as
+  heard. Recorded within one pass it's an ordinary take. `taw --playlisttest <session>` checks
+  the splitting.
 
 ## Headless commands
 

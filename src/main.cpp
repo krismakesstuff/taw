@@ -961,6 +961,78 @@ int main (int argc, char** argv)
     // goes to unsaved\ (session.json untouched), closing asks, "don't save" drops it, "save"
     // keeps it and bounces last-saved in the background with the session's own plugins, a
     // crash's changes come back, and the session screen lists and plays the bounce.
+    // taw --playlisttest <session>   loop recording's passes onto playlists (an empty session,
+    // made with --new; no device needed): an audio take cut per pass, pad hits split pass by pass.
+    if (args[0] == "--playlisttest" && args.size() >= 2)
+    {
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        auto appOwned = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        auto& app = *appOwned;
+        int failures = 0;
+        auto check = [&] (const char* what, bool ok)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        if (app.session == nullptr)
+            return 1;
+
+        using taw::Session;
+        namespace ids = taw::ids;
+        auto& s = *app.session;
+        app.execute ("add");
+        app.execute ("add");
+        auto audio = s.track (0), hits = s.track (1);
+        hits.setProperty (ids::kind, "sample", nullptr);
+        const auto spb = s.samplesPerBeat();
+        const auto pass = (juce::int64) std::llround (4.0 * spb); // a bar's loop from the start
+
+        // Audio: a take through two whole passes and half a third, 100 samples early (latency).
+        audio.appendChild (Session::makeClip ("audio/m.wav", 0, 0, 10), nullptr);
+        app.placeLoopTake (0, "audio/take.wav", -100, pass * 5 / 2 + 100, { 0, pass });
+        const auto audioLists = Session::playlists (audio);
+        const auto mainClips = Session::clips (audio);
+        check ("two passes: one playlist, the last on the main", audioLists.size() == 1 && mainClips.size() == 2);
+        check ("the playlist is the main as it was plus pass 1",
+               audioLists.size() == 1 && Session::clips (audioLists[0]).size() == 2 && (juce::int64) Session::clips (audioLists[0])[1][ids::offset] == 100
+                   && (juce::int64) Session::clips (audioLists[0])[1][ids::start] == 0 && (juce::int64) Session::clips (audioLists[0])[1][ids::length] == pass);
+        check ("pass 2 on the main, from the loop's start", mainClips.size() == 2 && (juce::int64) mainClips[1][ids::offset] == pass + 100
+                                                               && (juce::int64) mainClips[1][ids::start] == 0 && (juce::int64) mainClips[1][ids::length] == pass);
+        check ("named after the track", audioLists.size() == 1 && audioLists[0][ids::name].toString() == audio[ids::name].toString() + ".01");
+
+        // Pad hits: a hit each pass, the third pass cut short by stopping.
+        app.recording = app.loopRecording = true;
+        app.loopRecStart = 0;
+        app.loopRecEnd = pass;
+        app.loopWrapBase = app.loopPassesDone = 0;
+        app.midiPassStart = 0.0;
+        app.addHit (1, 1.0, 0.8f);
+        app.splitLoopPass();
+        app.addHit (1, 2.0, 0.8f);
+        app.splitLoopPass();
+        app.addHit (1, 0.5, 0.8f);
+        app.finishLoopRecording();
+        app.recording = app.loopRecording = false;
+        const auto hitLists = Session::playlists (hits);
+        const auto mainHits = Session::placedHits (hits);
+        check ("hits: pass 1 on a playlist", hitLists.size() == 1 && Session::placedHits (hitLists[0]).size() == 1
+                                                && std::abs (Session::placedHits (hitLists[0])[0].beat - 1.0) < 1e-9);
+        check ("hits: pass 2 on the main, the short pass dropped", mainHits.size() == 1 && std::abs (mainHits[0].beat - 2.0) < 1e-9);
+
+        // Choosing a playlist swaps it with the main, and back.
+        app.focusTrack (0);
+        app.execute ("pl 1");
+        check ("pl 1: the playlist plays", Session::mainPlaylistName (audio) == audio[ids::name].toString() + ".01"
+                                               && Session::clips (audio).size() == 2 && (juce::int64) Session::clips (audio)[1][ids::offset] == 100);
+        app.execute ("pl 1");
+        check ("pl 1 again: back as it was", ! audio.hasProperty (ids::playlist) && (juce::int64) Session::clips (audio)[1][ids::offset] == pass + 100);
+        app.execute ("pl new");
+        check ("pl new: an empty main named .02", Session::clips (audio).empty() && Session::mainPlaylistName (audio).endsWith (".02")
+                                                     && Session::playlists (audio).size() == 2);
+        return failures;
+    }
+
     if (args[0] == "--savetest" && args.size() >= 3)
     {
         const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
@@ -2046,7 +2118,7 @@ int main (int argc, char** argv)
             { "a", "a" }, { "\x7f", "Backspace" }, { "\r", "Enter" }, { "\t", "Tab" }, { "\x1b", "Escape" },
             { "\x1b[D", "Left" }, { "\x1b[1;2C", "shift+Right" }, { "\x1b[1;5D", "ctrl+Left" }, { "\x1b[1;3D", "alt+Left" },
             { "\x1b[1;7C", "ctrl+alt+Right" }, { "\x1b[1;6D", "ctrl+shift+Left" }, { "\x1b[1;2A", "shift+Up" },
-            { "\x1b" "b", "alt+Left" }, { "\x1b" "f", "alt+Right" }, { "\x1b\x1b[C", "alt+Right" }, { "\x1b/", "alt+/" },
+            { "\x1b" "b", "alt+Left" }, { "\x1b\x10", "ctrl+alt+p" }, { "\x1b" "f", "alt+Right" }, { "\x1b\x1b[C", "alt+Right" }, { "\x1b/", "alt+/" },
             { "\x1b[H", "Home" }, { "\x1b[F", "End" }, { "\x1b[1;2H", "shift+Home" }, { "\x1b[5~", "PageUp" },
             { "\x1b[6~", "PageDown" }, { "\x1b[3~", "Delete" }, { "\x1bOP", "F1" }, { "\x1bOD", "Left" },
             { "\x1a", "ctrl+z" }, { "\x19", "ctrl+y" }, { "\x03", "ctrl+c" }, { "\x16", "ctrl+v" }, { "\x1d", "ctrl+]" },

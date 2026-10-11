@@ -44,6 +44,7 @@ target_sources(taw PRIVATE
     src/Timing.cpp
     src/Safety.cpp
     src/Editing.cpp
+    src/Playlists.cpp
     src/Instruments.cpp
     src/KeyCast.cpp
     src/Routing.cpp

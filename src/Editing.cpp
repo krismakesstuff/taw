@@ -37,52 +37,63 @@ Clipboard App::gather (const std::vector<int>& tracks, juce::Range<juce::int64> 
     c.beats = to - from;
 
     for (auto t : tracks)
-    {
-        const auto track = session->track (t);
-        Clipboard::Lane lane;
-        lane.sample = Session::isSampleTrack (track);
-        lane.instrument = Session::isInstrumentTrack (track);
-
-        if (lane.instrument || lane.sample)
-        {
-            // MIDI or hit clips trimmed to the range, with the notes or hits that start in what's left.
-            for (const auto& clip : Session::beatClips (track))
-                if (auto piece = Session::trimmedMidiClip (clip, from, to); piece.isValid())
-                {
-                    piece.setProperty (ids::beat, (double) piece[ids::beat] - from, nullptr);
-                    lane.items.push_back (piece);
-                }
-        }
-        else
-        {
-            // Clips trimmed to the range, in their original order so layering is kept.
-            for (const auto& clip : Session::clips (track))
-            {
-                const auto s = (juce::int64) clip[ids::start], e = s + (juce::int64) clip[ids::length];
-
-                if (! overlaps (s, e, range))
-                    continue;
-
-                const auto lo = juce::jmax (s, range.getStart()), hi = juce::jmin (e, range.getEnd());
-                lane.items.push_back (Session::makeClip (clip[ids::file], lo - range.getStart(),
-                                                         (juce::int64) clip[ids::offset] + (lo - s), hi - lo));
-            }
-        }
-
-        // The automation over the range goes with the clips.
-        lane.automation = gatherAutomation (track, from, to);
-        c.lanes.push_back (std::move (lane));
-    }
+        c.lanes.push_back (gatherLane (session->track (t), clipHolder (t), range));
 
     return c;
 }
 
+// One track's clips over the range, from holder: the track, or one of its playlists (whose
+// clips leave the track's automation where it is).
+Clipboard::Lane App::gatherLane (const juce::ValueTree& track, const juce::ValueTree& holder, juce::Range<juce::int64> range) const
+{
+    const auto from = snapBeats (range.getStart()), to = snapBeats (range.getEnd());
+    Clipboard::Lane lane;
+    lane.sample = Session::isSampleTrack (track);
+    lane.instrument = Session::isInstrumentTrack (track);
+
+    if (lane.instrument || lane.sample)
+    {
+        // MIDI or hit clips trimmed to the range, with the notes or hits that start in what's left.
+        for (const auto& clip : Session::beatClips (holder))
+            if (auto piece = Session::trimmedMidiClip (clip, from, to); piece.isValid())
+            {
+                piece.setProperty (ids::beat, (double) piece[ids::beat] - from, nullptr);
+                lane.items.push_back (piece);
+            }
+    }
+    else
+    {
+        // Clips trimmed to the range, in their original order so layering is kept.
+        for (const auto& clip : Session::clips (holder))
+        {
+            const auto s = (juce::int64) clip[ids::start], e = s + (juce::int64) clip[ids::length];
+
+            if (! overlaps (s, e, range))
+                continue;
+
+            const auto lo = juce::jmax (s, range.getStart()), hi = juce::jmin (e, range.getEnd());
+            lane.items.push_back (Session::makeClip (clip[ids::file], lo - range.getStart(),
+                                                     (juce::int64) clip[ids::offset] + (lo - s), hi - lo));
+        }
+    }
+
+    // The automation over the range goes with the clips (the main's: it's the track's).
+    if (holder == track)
+        lane.automation = gatherAutomation (track, from, to);
+
+    return lane;
+}
+
 int App::clearRange (int trackIndex, juce::Range<juce::int64> range)
 {
-    auto track = session->track (trackIndex);
+    return clearClips (session->track (trackIndex), clipHolder (trackIndex), range);
+}
+
+int App::clearClips (const juce::ValueTree& kindOf, juce::ValueTree track, juce::Range<juce::int64> range)
+{
     int changed = 0;
 
-    if (Session::isInstrumentTrack (track) || Session::isSampleTrack (track))
+    if (Session::isInstrumentTrack (kindOf) || Session::isSampleTrack (kindOf))
     {
         // As with audio clips: trimmed, split or removed. Trimming only hides notes and hits; the
         // tail of a split keeps just the ones that start in it.
@@ -161,7 +172,6 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
     if (c.lanes.empty())
         return Result::fail (L"nothing copied \x2014 select a range (shift + \x2190 \x2192), then ctrl+c");
 
-    const auto atBeats = snapBeats (at);
     juce::StringArray pasted, skipped;
 
     for (size_t i = 0; i < c.lanes.size(); ++i)
@@ -190,29 +200,7 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
             continue;
         }
 
-        // A pasted loop of hits replaces what was under it (two loops at once would double
-        // every hit); MIDI clips add to what's there (overlapping ones both play).
-        if (lane.sample)
-            clearRange (t, { at, at + std::llround (c.beats * session->samplesPerBeat()) });
-
-        for (const auto& item : lane.items)
-        {
-            if (lane.instrument || lane.sample)
-            {
-                auto copy = item.createCopy();
-                copy.setProperty (ids::beat, atBeats + (double) item[ids::beat], nullptr);
-                track.appendChild (copy, um());
-            }
-            else
-            {
-                // Appended clips play over what's already there (later wins).
-                auto clip = item.createCopy();
-                clip.setProperty (ids::start, at + (juce::int64) item[ids::start], nullptr);
-                track.appendChild (clip, um());
-            }
-        }
-
-        pasteAutomation (track, lane.automation, atBeats, c.beats);
+        pasteLane (track, clipHolder (t), lane, at, c.beats);
         pasted.add (juce::String (t + 1));
     }
 
@@ -227,7 +215,39 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
     return Result::good (msg);
 }
 
-// Cut and delete: the clips in the range, and the automation under them.
+// One lane of a clipboard onto holder (the track, or one of its playlists) at a position.
+void App::pasteLane (const juce::ValueTree& track, juce::ValueTree holder, const Clipboard::Lane& lane, juce::int64 at, double beats)
+{
+    const auto atBeats = snapBeats (at);
+
+    // A pasted loop of hits replaces what was under it (two loops at once would double
+    // every hit); MIDI clips add to what's there (overlapping ones both play).
+    if (lane.sample)
+        clearClips (track, holder, { at, at + std::llround (beats * session->samplesPerBeat()) });
+
+    for (const auto& item : lane.items)
+    {
+        if (lane.instrument || lane.sample)
+        {
+            auto copy = item.createCopy();
+            copy.setProperty (ids::beat, atBeats + (double) item[ids::beat], nullptr);
+            holder.appendChild (copy, um());
+        }
+        else
+        {
+            // Appended clips play over what's already there (later wins).
+            auto clip = item.createCopy();
+            clip.setProperty (ids::start, at + (juce::int64) item[ids::start], nullptr);
+            holder.appendChild (clip, um());
+        }
+    }
+
+    if (holder == track)
+        pasteAutomation (track, lane.automation, atBeats, beats);
+}
+
+// Cut and delete: the clips in the range, and the automation under them (on a playlist lane,
+// only its clips: the automation is the track's).
 int App::clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64> range)
 {
     int n = 0;
@@ -235,7 +255,9 @@ int App::clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64> r
     for (auto t : tracks)
     {
         n += clearRange (t, range);
-        clearAutomationRange (session->track (t), snapBeats (range.getStart()), snapBeats (range.getEnd()));
+
+        if (clipHolder (t) == session->track (t))
+            clearAutomationRange (session->track (t), snapBeats (range.getStart()), snapBeats (range.getEnd()));
     }
 
     return n;
@@ -337,7 +359,7 @@ Result App::selectClipAtCursor()
     if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
         return Result::fail (L"sel clip selects the clip under the cursor \x2014 focus a track (\x2191\x2193)");
 
-    const auto track = session->track (focused);
+    const auto track = clipHolder (focused);
     const auto at = engine.isRolling() ? heardPlayhead() : cursor;
     juce::int64 from = -1, to = -1;
 
@@ -436,7 +458,8 @@ Result App::consolidate (const std::vector<int>& tracks)
 
     for (auto t : tracks)
     {
-        auto track = session->track (t);
+        const auto track = session->track (t);
+        auto holder = clipHolder (t); // the playlist lane you're on, else the track
         const auto label = juce::String (t + 1);
 
         if (Session::isBusTrack (track))
@@ -453,13 +476,13 @@ Result App::consolidate (const std::vector<int>& tracks)
 
             if (Session::isSampleTrack (track))
             {
-                for (const auto& h : Session::placedHits (track))
+                for (const auto& h : Session::placedHits (holder))
                     if (hitInRange (h.beat, from, to))
                         clip.appendChild (Session::makeHit (h.beat - from, h.vel), nullptr);
             }
             else
             {
-                for (const auto& n : Session::placedNotes (track))
+                for (const auto& n : Session::placedNotes (holder))
                     if (hitInRange (n.start, from, to))
                     {
                         auto copy = n.node.createCopy();
@@ -467,12 +490,12 @@ Result App::consolidate (const std::vector<int>& tracks)
                         clip.appendChild (copy, nullptr);
                     }
 
-                for (const auto& c : Session::placedControls (track))
+                for (const auto& c : Session::placedControls (holder))
                     if (hitInRange (c.at, from, to))
                         clip.appendChild (c.node.createCopy().setProperty (ids::beat, c.at - from, nullptr), nullptr);
             }
 
-            const auto clips = Session::beatClips (track);
+            const auto clips = Session::beatClips (holder);
 
             if (std::none_of (clips.begin(), clips.end(), [&] (const juce::ValueTree& c) { return (double) c[ids::beat] < to && Session::clipEnd (c) > from; }))
             {
@@ -481,7 +504,7 @@ Result App::consolidate (const std::vector<int>& tracks)
             }
 
             clearRange (t, range);
-            track.appendChild (clip, um());
+            holder.appendChild (clip, um());
             made.add (label);
             continue;
         }
@@ -493,7 +516,7 @@ Result App::consolidate (const std::vector<int>& tracks)
         std::vector<Piece> pieces;
         int channels = 1;
 
-        for (const auto& c : Session::clips (track))
+        for (const auto& c : Session::clips (holder))
             if (const auto s = (juce::int64) c[ids::start], e = s + (juce::int64) c[ids::length]; s < b && e > a)
                 if (const auto* data = clipFor (c))
                 {
@@ -544,7 +567,7 @@ Result App::consolidate (const std::vector<int>& tracks)
 
         writer.reset();
         clearRange (t, range);
-        track.appendChild (Session::makeClip (file.getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/'), a, 0, b - a), um());
+        holder.appendChild (Session::makeClip (file.getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/'), a, 0, b - a), um());
         made.add (label);
     }
 

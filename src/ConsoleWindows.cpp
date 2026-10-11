@@ -446,6 +446,14 @@ std::vector<Key> Console::poll()
             k.ch = (wchar_t) (e.wVirtualKeyCode - 'A' + 'a');
         }
 
+        // Ctrl+Alt+P (copy playlist) types nothing on most layouts: report the letter. Where
+        // AltGr+P types a character, that character stays.
+        if (k.ctrl && k.alt && e.wVirtualKeyCode == 'P' && e.uChar.UnicodeChar < 32)
+        {
+            k.code = Key::Char;
+            k.ch = L'p';
+        }
+
         if (k.code == Key::None)
             continue;
 

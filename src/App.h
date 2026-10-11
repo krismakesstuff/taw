@@ -803,14 +803,17 @@ private:
     double snapBeats (juce::int64 samples) const; // to beats, on a grid step if within half a sample
     bool hitInRange (double beat, double from, double to) const;
     Clipboard gather (const std::vector<int>& tracks, juce::Range<juce::int64>) const;
+    Clipboard::Lane gatherLane (const juce::ValueTree& track, const juce::ValueTree& holder, juce::Range<juce::int64>) const;
     int clearRange (int track, juce::Range<juce::int64>); // returns how many clips/hits it touched
+    int clearClips (const juce::ValueTree& track, juce::ValueTree holder, juce::Range<juce::int64>);
+    void pasteLane (const juce::ValueTree& track, juce::ValueTree holder, const Clipboard::Lane&, juce::int64 at, double beats);
     int clearTracks (const std::vector<int>& tracks, juce::Range<juce::int64>); // ...and their automation there
     Result pasteAt (const Clipboard&, const std::vector<int>& destTracks, juce::int64 at);
     Result checkEditable (const std::vector<int>& tracks, bool needsRange) const;
     juce::Result parsePosition (const juce::String& spec, juce::int64& pos) const; // "17", "17.3", "1:30"
 
     // Puts a finished take on its track as a clip. comp: latency compensation in samples.
-    void placeTake (int trackIndex, const juce::File&, juce::int64 start, juce::int64 length, juce::int64 comp);
+    juce::String placeTake (int trackIndex, const juce::File&, juce::int64 start, juce::int64 length, juce::int64 comp); // what loop recording made of it
     juce::int64 latencyCompensation();
 
     // The take journal (recording.json in the session) lists takes still being written, so a
@@ -910,6 +913,49 @@ public:
     Result setAutomationValue (int track, const juce::String& param, double value);
     Result nudgeAutomation (int direction);          // [ ] on a track showing automation
     Result clearAutomation();                        // delete on one
+
+    // Playlists (Playlists.cpp), as in Pro Tools: ctrl+p a new empty one, ctrl+alt+p a copy of
+    // the main; either becomes the main and the old main joins the others. shift+P shows them as
+    // lanes under the track (instead of its automation lanes); on one, shift+S plays it in the
+    // main's place, alt+shift+up copies the selection on it to the main (no selection: makes it
+    // the main), and edits (copy, cut, paste, delete) act on it. Automation stays the track's.
+    Result newPlaylist (bool copy);                            // ctrl+p / ctrl+alt+p, "pl new" / "pl copy"
+    Result playlistCommand (const juce::StringArray& args);    // "pl": list; "pl 2" / "pl Vox.02": the main; "pl del"
+    Result togglePlaylistLanes();                              // shift+P
+    Result soloPlaylistLane();                                 // shift+S on a playlist lane
+    Result promoteToMain();                                    // alt+shift+up on a playlist lane
+    Result makeMain (int track, juce::ValueTree playlist);
+    std::vector<juce::ValueTree> playlistsShown (int track) const; // the lanes under it (empty: closed)
+    juce::ValueTree focusedPlaylist() const;                   // the playlist lane you're on, or invalid
+    // Where a track's edits go: the playlist lane you're on (on the focused track), else the track.
+    juce::ValueTree clipHolder (int track) const;
+    int lanesUnder (int track) const; // automation or playlist lanes open under it (-1: the mix)
+    void closePlaylistLanes (juce::ValueTree track); // and their solos: nothing hidden plays
+    // Loop recording: each pass around the loop is a take. At the end the last whole pass is on
+    // the main and the ones before it are new playlists (the main as it was, plus that take); a
+    // pass cut short by stopping is dropped.
+    struct LoopTake
+    {
+        juce::int64 start = 0, end = 0; // the loop, samples
+    };
+    std::map<juce::String, LoopTake> loopTakes; // audio takes recorded looping, by file path
+    bool loopRecording = false;
+    juce::int64 loopRecStart = 0, loopRecEnd = 0;
+    int loopWrapBase = 0;   // the engine's wrap count when recording started
+    int loopPassesDone = 0; // passes MIDI and hits have been split into so far
+    struct PassTake { juce::ValueTree playlist, take; };
+    std::map<int, std::vector<PassTake>> loopPassTakes; // by track: the playlists the passes made
+    void startLoopRecording();  // when a recording starts with the loop on
+    void pollLoopPasses();      // each frame: a pass that has finished (as heard) is split off
+    void splitLoopPass();       // a pass finished: MIDI and hit tracks' takes go to new playlists
+    // Where something played at the playhead pos (wraps: the loop's count then) goes on the
+    // timeline, in beats: as heard, and while loop recording, folded into the loop.
+    double recordedBeat (juce::int64 pos, int wraps);
+    juce::String finishLoopRecording(); // stopped: the last whole pass to the main, a partial one dropped (what it did)
+    juce::ValueTree takePlaylist (juce::ValueTree track, juce::ValueTree take); // the main as it is + take, as a new playlist
+    juce::String placeLoopTake (int track, const juce::String& rel, juce::int64 start, juce::int64 length, const LoopTake&);
+    void closeEditorsOnPlaylists();
+    juce::String loopNote; // what the last loop recording did, for the stop message
 
     // Automation follows clip edits: copied, cut, pasted and moved with the clips over it
     // (ranges in beats). Clearing keeps the curve outside the range as it was.

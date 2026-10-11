@@ -1,0 +1,142 @@
+# A release: push a tag like v0.1.0 (it must match project(VERSION) in CMakeLists.txt). Builds
+# Windows and macOS, packages them, and makes a draft GitHub release with the notes from
+# CHANGELOG.md, to look over and publish by hand.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch: # a dry run: builds and uploads the packages as workflow artifacts, no release
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      ffmpeg: ${{ steps.v.outputs.ffmpeg }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        run: |
+          version=$(sed -n 's/^project(taw VERSION \([0-9.]*\).*/\1/p' CMakeLists.txt)
+          ffmpeg=$(sed -n 's|.*codexffmpeg/releases/download/\([0-9.]*\)/.*|\1|p' CMakeLists.txt)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ffmpeg=$ffmpeg" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME doesn't match CMakeLists.txt's version $version"
+            exit 1
+          fi
+
+  windows:
+    needs: version
+    runs-on: windows-2022
+    env:
+      PKG: taw-${{ needs.version.outputs.version }}-windows-x64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          cmake --build build --config Release --parallel
+
+      - name: Self-tests
+        shell: bash
+        run: |
+          taw=build/taw_artefacts/Release/taw.exe
+          "$taw" --version
+          "$taw" --keycasttest
+          "$taw" --counttest
+          "$taw" --livetest
+
+      - name: Package
+        shell: bash
+        run: |
+          out=build/taw_artefacts/Release
+          mkdir -p "dist/$PKG"
+          cp "$out"/taw.exe "$out"/*.dll "$out"/FFMPEG-LICENSE.txt "dist/$PKG/"
+          [ -f build/_deps/ffmpeg-src/README.txt ] && cp build/_deps/ffmpeg-src/README.txt "dist/$PKG/FFMPEG-README.txt"
+          cp LICENSE "dist/$PKG/LICENSE.txt"
+          cp README.md THIRD_PARTY_NOTICES.md "dist/$PKG/"
+          cd dist && 7z a -tzip "$PKG.zip" "$PKG" > /dev/null
+
+      # FFmpeg's DLLs are GPL: the release carries FFmpeg's source alongside them.
+      - name: FFmpeg source
+        shell: bash
+        env:
+          V: ${{ needs.version.outputs.ffmpeg }}
+        run: |
+          curl -fsSL -o "dist/ffmpeg-$V-source.tar.xz" "https://ffmpeg.org/releases/ffmpeg-$V.tar.xz" ||
+            curl -fsSL -o "dist/ffmpeg-$V-source.tar.gz" "https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n$V.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.zip
+            dist/*-source.tar.*
+
+  macos:
+    needs: version
+    runs-on: macos-15
+    env:
+      PKG: taw-${{ needs.version.outputs.version }}-macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: FFmpeg (video, MP3)
+        run: brew install ffmpeg
+
+      - name: Build
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0
+          cmake --build build --config Release --parallel
+
+      - name: Self-tests
+        run: |
+          taw=build/taw_artefacts/Release/taw
+          "$taw" --version
+          "$taw" --keytest
+          "$taw" --keycasttest
+          "$taw" --counttest
+          "$taw" --livetest
+
+      # ditto keeps the bundles' (ad-hoc) signatures intact.
+      - name: Package
+        run: |
+          out=build/taw_artefacts/Release
+          mkdir -p "dist/$PKG"
+          cp "$out/taw" "dist/$PKG/"
+          [ -d "$out/taw hub.app" ] && ditto "$out/taw hub.app" "dist/$PKG/taw hub.app"
+          [ -d "$out/taw.driver" ] && ditto "$out/taw.driver" "dist/$PKG/taw.driver"
+          cp LICENSE README.md THIRD_PARTY_NOTICES.md "dist/$PKG/"
+          cd dist && ditto -c -k --keepParent "$PKG" "$PKG.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: dist/*.zip
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [version, windows, macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          cd dist && sha256sum * > SHA256SUMS.txt && cd ..
+          # This version's section of CHANGELOG.md (from its heading to the next).
+          awk -v v="$VERSION" '$0 ~ "^## \\[?" v "\\]?" {on=1; next} /^## / && on {exit} on' CHANGELOG.md > notes.md
+          gh release create "$GITHUB_REF_NAME" dist/* --draft --title "taw $VERSION" --notes-file notes.md

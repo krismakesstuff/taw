@@ -8,6 +8,28 @@ Early proof of concept. See [docs/design.md](docs/design.md) for the design and 
 **Platforms:** Windows (cmd / Windows Terminal, ASIO) and macOS (Terminal, CoreAudio; in
 progress). Linux will follow; the engine, sessions and command language are platform-neutral.
 
+## Download
+
+Ready-made builds are on the [Releases](../../releases) page. They aren't code-signed yet, so the
+first run takes one extra step.
+
+**Windows (x64):** unzip `taw-<version>-windows-x64.zip` anywhere and run `taw.exe` from cmd or
+Windows Terminal, in the folder where you keep your sessions. If SmartScreen says "Windows
+protected your PC", choose **More info → Run anyway**. Video works out of the box (FFmpeg's DLLs
+come with it).
+
+**macOS (Apple Silicon, macOS 13 or later):** unzip `taw-<version>-macos-arm64.zip`, then clear
+the download quarantine once, from Terminal, or macOS will refuse to open it:
+
+```
+xattr -dr com.apple.quarantine ~/Downloads/taw-<version>-macos-arm64
+~/Downloads/taw-<version>-macos-arm64/taw
+```
+
+For MP3 bounces and video, `brew install ffmpeg`. Intel Macs: build from source (below).
+
+Or build it yourself:
+
 ## Build (Windows)
 
 Needs Visual Studio 2022 (C++ workload) and CMake 3.24+. JUCE, the Steinberg ASIO SDK and
@@ -143,7 +165,13 @@ Next up, roughly in order:
   bypassed instead of taking the session down; CLAP alongside VST3.
 - **Cross-platform:** macOS (in progress), then Linux.
 
+## Contributing
+
+Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). What's changed in
+each release is in [CHANGELOG.md](CHANGELOG.md).
+
 ## License
 
-AGPLv3. JUCE is used under the AGPLv3; the ASIO SDK under its GPLv3 option. FFmpeg (a GPL
-build, shipped as DLLs next to taw.exe with its licence) under the GPL.
+AGPLv3 ([LICENSE](LICENSE)). JUCE is used under the AGPLv3; the ASIO SDK under its GPLv3 option.
+FFmpeg (a GPL build, shipped as DLLs next to taw.exe with its licence, its source attached to
+each release) under the GPL. Details in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -537,7 +537,7 @@ Result App::setSendBus (int track, int slot, int busId)
     if (! send.isValid())
     {
         send = juce::ValueTree (ids::SEND);
-        send.setProperty (ids::slot, Session::slotName (slot).toLowerCase(), nullptr).setProperty (ids::db, 0.0, nullptr);
+        send.setProperty (ids::slot, Session::slotName (slot).toLowerCase(), nullptr).setProperty (ids::db, -6.0, nullptr); // a new send starts at -6 dB
         send.setProperty (ids::to, busId, nullptr);
         t.appendChild (send, um());
     }
@@ -754,6 +754,12 @@ Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& a
     }
 
     const auto msg = done.joinIntoString (juce::String (L" \x00b7 "));
+
+    // A bus made by the send opens the effects picker for its insert A, so finding its reverb
+    // (or whatever it's for) starts straight away; esc leaves it empty.
+    if (made.isNotEmpty() && console.isOpen())
+        openPluginPicker (session->findBus (busId), 0);
+
     return Result::good (made.isNotEmpty() ? made + L" \x00b7 " + msg : msg);
 }
 
@@ -852,6 +858,10 @@ bool App::handleBusPickerKey (const Key& k)
 
                 auto r = busPickCell == 0 ? setOutputBus (busPickTrack, busId) : setSendBus (busPickTrack, busPickCell - 1, busId);
                 say (r.ok ? Result::good (made + r.message) : r);
+
+                // As with "2 send verb": a new bus a send made, its effect next.
+                if (r.ok && made.isNotEmpty() && busPickCell != 0)
+                    openPluginPicker (session->findBus (busId), 0);
             }
             return true;
         case Key::Char:

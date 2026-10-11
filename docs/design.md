@@ -518,7 +518,9 @@ Stereo one. Typed names pick the same way.
 - **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →
   fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped
   too, so tails ring out and monitored inputs go through them. New sends are post-fader at
-  0 dB. Mute silences a track's sends too. A mono track enters a bus at the pan law.
+  −6 dB. A bus a send makes (`2 send verb` with no Verb yet, or a new name picked with `|` on
+  a send) opens the effects picker for its insert A, so its reverb (or whatever it's for) is
+  the next thing chosen; esc leaves it empty. Mute silences a track's sends too. A mono track enters a bus at the pan law.
 - **Effects follow the track's width.** A mono track's effects are asked for mono in and out,
   else mono in and stereo out (a mono-to-stereo reverb: the rest of the track is stereo from
   there); a stereo track's for stereo. A plugin that takes neither runs as it is, fed both

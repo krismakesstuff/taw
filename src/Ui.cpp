@@ -328,6 +328,7 @@ void Ui::drawMain (App& app)
 
     drawBottom (app);
     drawFocusFrame();
+    drawTyping (app);
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
@@ -2078,6 +2079,38 @@ void Ui::drawFocusFrame()
 
     if (f.title.isNotEmpty())
         canvas.text (f.x0 + 2, f.y0, " " + f.title + " ", f.colour, -1, true, f.x1 - f.x0 - 3);
+}
+
+// Text in the command line changes what keys do (space and letters type instead of playing),
+// so it's plain at a glance: the line over it lit and saying so, the line itself lit, and a
+// chip at its end with the way out.
+void Ui::drawTyping (App& app)
+{
+    if (app.commandLine.isEmpty() || app.namingMarker.isValid())
+        return; // naming a marker has its own label
+
+    const int w = canvas.width(), h = canvas.height(), sepY = h - 4, cmdY = h - 2;
+
+    canvas.fill (0, sepY, w, L'\x2501', colour::accent);
+    canvas.text (2, sepY, L" TYPING \x00b7 space and letters go to the command line ", colour::accent, -1, true, w - 4);
+
+    int used = 0; // past what's on the row: a status label, the prompt, the text and its cursor
+
+    for (int x = 0; x < w; ++x)
+    {
+        auto& cell = canvas.at (x, cmdY);
+
+        if (cell.ch != L' ' || cell.bg >= 0)
+            used = x + 1;
+
+        if (cell.bg < 0)
+            cell.bg = colour::focusBg;
+    }
+
+    const juce::String chip (L" enter runs it \x00b7 esc clears ");
+
+    if (const int chipX = w - 1 - chip.length(); chipX > used + 1)
+        canvas.text (chipX, cmdY, chip, 16, colour::accent, true);
 }
 
 void Ui::drawVolume (int x, int y, double db, int bg, bool automated)

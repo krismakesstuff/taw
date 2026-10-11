@@ -89,6 +89,11 @@ your OS, terminal and audio device, and the steps). Questions are issues too.
 
 Security problems: don't open an issue; see [SECURITY.md](SECURITY.md).
 
+## Releases
+
+Releases are made by the maintainer from the `publish` branch: see
+[docs/releasing.md](docs/releasing.md). Pull requests go to `main`.
+
 ## Code of conduct
 
 Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).

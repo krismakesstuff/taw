@@ -1,12 +1,20 @@
-# A release: push a tag like v0.1.0 (it must match project(VERSION) in CMakeLists.txt). Builds
-# Windows and macOS, packages them, and makes a draft GitHub release with the notes from
-# CHANGELOG.md, to look over and publish by hand.
+# A release: merge main into the publish branch and push it. Builds Windows and macOS from
+# publish, packages them, and makes a draft GitHub release for the version in CMakeLists.txt
+# (project(VERSION)), with that version's notes from CHANGELOG.md, to look over and publish by
+# hand. Publishing the draft creates the tag (v0.1.0) on the commit it was built from.
+#
+# Nothing else makes a release: not pushes to main, not tags. A version that already has a
+# release (or a tag) stops the run before anything is built: bump the version first.
 name: Release
 
 on:
   push:
-    tags: ['v*']
-  workflow_dispatch: # a dry run: builds and uploads the packages as workflow artifacts, no release
+    branches: [publish]
+  workflow_dispatch: # a dry run from any branch: builds and uploads the packages as workflow artifacts, no release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   version:
@@ -22,8 +30,14 @@ jobs:
           ffmpeg=$(sed -n 's|.*codexffmpeg/releases/download/\([0-9.]*\)/.*|\1|p' CMakeLists.txt)
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "ffmpeg=$ffmpeg" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::tag $GITHUB_REF_NAME doesn't match CMakeLists.txt's version $version"
+
+          if ! grep -Eq "^## \[?$version\]?" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = push ] && [ -n "$(git ls-remote --tags origin "refs/tags/v$version")" ]; then
+            echo "::error::v$version is already released (the tag exists): bump the version in CMakeLists.txt and CHANGELOG.md"
             exit 1
           fi
 
@@ -118,7 +132,7 @@ jobs:
           path: dist/*.zip
 
   release:
-    if: github.ref_type == 'tag'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/publish'
     needs: [version, windows, macos]
     runs-on: ubuntu-latest
     permissions:
@@ -139,4 +153,12 @@ jobs:
           cd dist && sha256sum * > SHA256SUMS.txt && cd ..
           # This version's section of CHANGELOG.md (from its heading to the next).
           awk -v v="$VERSION" '$0 ~ "^## \\[?" v "\\]?" {on=1; next} /^## / && on {exit} on' CHANGELOG.md > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --draft --title "taw $VERSION" --notes-file notes.md
+
+          # A draft for this version already (made by an earlier push, not yet published): stop,
+          # rather than make a second one. Delete the old draft to rebuild it.
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            echo "::error::there's already a release or draft for v$VERSION: delete the draft to rebuild, or bump the version"
+            exit 1
+          fi
+
+          gh release create "v$VERSION" dist/* --draft --target "$GITHUB_SHA" --title "taw $VERSION" --notes-file notes.md

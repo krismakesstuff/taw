@@ -55,7 +55,7 @@ juce::String parseSelector (const juce::String& text, int numTracks, std::vector
 
 // Every verb, so a verb glued to its argument can be split off: "2i2", "2v-6", "bpm92".
 const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", "l", "loop", "b", "bounce", "bounces", "import", "imp", "undo", "redo", "dev", "panel",
-                              "help", "q", "quit", "exit", "save", "cons", "consolidate", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
+                              "help", "q", "quit", "exit", "save", "cons", "consolidate", "sep", "separate", "split", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "stats", "fill",
@@ -925,6 +925,7 @@ Result App::execute (const juce::String& line)
     if (v == "sel" && p.args[0].equalsIgnoreCase ("clip")) return selectClipAtCursor();
     if (v == "sel")   return selectRange (p.args[0], p.args[1]);
     if (v == "cons" || v == "consolidate") return consolidate (p.hasSelector ? p.tracks : defaultTargets());
+    if (v == "sep" || v == "separate" || v == "split") return separateClips (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "copy")  return copySelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "cut")   return cutSelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "del")   return deleteSelection (p.hasSelector ? p.tracks : defaultTargets());

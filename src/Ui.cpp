@@ -2148,7 +2148,7 @@ void Ui::drawBottom (App& app)
     else if (app.topLane == App::TopLane::video)
         hints = L"VIDEO  \x2190\x2192 a frame (hold to scrub) \x00b7 ctrl a second \x00b7 alt a beat \x00b7 shift selects \x00b7 tab its start / end \x00b7 click or drag scrubs \x00b7 bv bounces with picture \x00b7 video at moves it";
     else if (app.hasTimeSelection())
-        hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
+        hints = L"ctrl c copy \x00b7 x cut \x00b7 d duplicate \x00b7 e separate \x00b7 del clear \x00b7 alt+shift+3 consolidate \x00b7 l loop \x00b7 b bounce (b mp3) \x00b7 pat x... fills it \x00b7 esc clears \x00b7 shift \x2190\x2192 extend";
     else if (app.ioCell >= 0 && app.session != nullptr && app.mixFocused())
         hints = L"MIX INSERTS (after the mix volume) \x00b7 \x2190\x2192 A-E \x00b7 | opens (empty: pick an effect) \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes \x00b7 esc or \\ leaves";
     else if (app.ioCell >= 0 && app.session != nullptr && ! app.onTopLane())
@@ -2220,6 +2220,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"sel 3 5", L"select bars 3 to 5", L"grid 16", L"steps of a 16th" },
             { Pair, L"sel clip", L"select the clip here", L"snap 50", L"quantize hits (50%)" },
             { Pair, L"alt+shift+3", L"consolidate (cons)", L"alt+/", L"toggle a hit at cursor" },
+            { Pair, L"ctrl e", L"cut clips here (sep)", nullptr, nullptr },
             { Note, L"Automation goes with the clips: copy, cut, paste and duplicate carry it." },
             { Pair, L"ctrl+p", L"new playlist (empty)", L"shift+P", L"playlists as lanes" },
             { Pair, L"ctrl+alt+p", L"copy of the main", L"shift+S lane", L"plays in the main's place" },

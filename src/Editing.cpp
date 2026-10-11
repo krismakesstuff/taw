@@ -354,6 +354,96 @@ Result App::duplicateSelection (const std::vector<int>& tracks)
 
     return Result::good ("duplicated to " + formatBars (timeAnchor) + L" \x2192 " + formatBars (timeHead) + L" \x00b7 ctrl+d again repeats");
 }
+// Every clip on holder (a track, or one of its playlists) that runs across at becomes two:
+// the head keeps its place, the tail goes right above it, carrying on where the head now ends.
+int App::splitClipsAt (juce::ValueTree holder, juce::int64 at)
+{
+    int n = 0;
+
+    for (auto clip : Session::clips (holder))
+    {
+        const auto s = (juce::int64) clip[ids::start], e = s + (juce::int64) clip[ids::length];
+
+        if (at <= s || at >= e)
+            continue;
+
+        auto tail = clip.createCopy(); // whatever else it carries goes with both halves
+        tail.setProperty (ids::start, at, nullptr)
+            .setProperty (ids::offset, (juce::int64) clip[ids::offset] + (at - s), nullptr)
+            .setProperty (ids::length, e - at, nullptr);
+        clip.setProperty (ids::length, at - s, um());
+        holder.addChild (tail, holder.indexOf (clip) + 1, um());
+        ++n;
+    }
+
+    // MIDI and hit clips: as when a range is cleared out of one, the tail keeps the notes and
+    // hits that start in it.
+    const auto beat = snapBeats (at);
+    const auto slack = 0.5 / session->samplesPerBeat();
+
+    for (auto clip : Session::beatClips (holder))
+    {
+        const double s = clip[ids::beat], e = Session::clipEnd (clip);
+
+        if (beat <= s + slack || beat >= e - slack)
+            continue;
+
+        holder.addChild (Session::trimmedMidiClip (clip, beat, e), holder.indexOf (clip) + 1, um());
+        clip.setProperty (ids::len, beat - s, um());
+        ++n;
+    }
+
+    return n;
+}
+
+// Ctrl+E (Pro Tools' separate clip): with a range selected, the clips are cut at both its
+// edges, so what's inside becomes a clip of its own (one clip makes three); without one, at
+// the cursor (the playhead, while playing) on the nearest grid line (with the grid on).
+Result App::separateClips (const std::vector<int>& tracks)
+{
+    if (auto r = checkEditable (tracks, false); ! r.ok)
+        return r;
+
+    const bool ranged = hasTimeSelection();
+    std::vector<juce::int64> cuts;
+
+    if (ranged)
+    {
+        cuts = { timeSelection().getStart(), timeSelection().getEnd() };
+    }
+    else
+    {
+        // The grid off: right where it is.
+        const auto at = engine.isRolling() ? heardPlayhead() : cursor;
+        const auto step = session->gridOn() ? hitStepBeats() * session->samplesPerBeat() : 0.0;
+        cuts = { step > 0.0 ? std::llround (std::round ((double) at / step) * step) : at };
+    }
+
+    int n = 0;
+    juce::StringArray on;
+
+    for (auto t : tracks)
+    {
+        int here = 0;
+
+        for (auto at : cuts)
+            here += splitClipsAt (clipHolder (t), at);
+
+        if (here > 0)
+            on.add (juce::String (t + 1));
+
+        n += here;
+    }
+
+    const auto where = ranged ? formatBars (cuts[0]) + L" \x2192 " + formatBars (cuts[1]) : formatBars (cuts[0]);
+
+    if (n == 0)
+        return Result::fail ((ranged ? "no clip runs across " : "no clip runs through ") + where + " on " + trackList (tracks));
+
+    return Result::good ((ranged ? "separated " + where + " into a clip of its own" : "separated at " + where) + " on "
+                         + (on.size() == 1 ? "track " : "tracks ") + on.joinIntoString (",") + L" \x00b7 ctrl+z undoes");
+}
+
 Result App::selectClipAtCursor()
 {
     if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())

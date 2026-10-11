@@ -4088,6 +4088,11 @@ void App::handleMainKey (const Key& k)
             beginEdit ("duplicate");
             say (duplicateSelection (defaultTargets()));
         }
+        else if (k.ch == 'e') // separate: the selection becomes its own clip, else a cut at the cursor
+        {
+            beginEdit ("separate");
+            say (separateClips (defaultTargets()));
+        }
         else if (k.ch == 'p') // a new empty playlist becomes the main (Pro Tools' new playlist)
             say (newPlaylist (false));
 

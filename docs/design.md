@@ -587,6 +587,7 @@ sample tracks, MIDI clips on instrument tracks.
 | | `sel 3 5` | select bars 3 to 5 (any `@` position: `sel 1.2 1:30`) |
 | double-click | `sel clip` | select the clip under the cursor on the focused track (a MIDI or audio clip also opens its editor on double-click) |
 | `Alt+Shift+3` | `cons` | consolidate: what plays in the range becomes one clip per track (below) |
+| `Ctrl+E` | `sep` | separate (Pro Tools' separate clip): with a range, the clips are cut at both its edges, so the range becomes a clip of its own (one clip makes three); with none, cut at the cursor (the playhead while playing) on the nearest grid line. The halves of an audio clip point into the same file; a MIDI or hit clip's tail keeps the notes and hits that start in it |
 
 - Pasted audio clips layer on top (later wins); pasted hit clips replace what was under them
   (two loops at once would double every hit); pasted MIDI clips add to what's there.

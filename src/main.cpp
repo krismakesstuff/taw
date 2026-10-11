@@ -1033,6 +1033,84 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --separatetest <session>   ctrl+e / sep on an empty session (made with --new; no device
+    // needed): a selection makes one clip three, no selection cuts at the cursor on the grid.
+    if (args[0] == "--separatetest" && args.size() >= 2)
+    {
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        auto appOwned = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        auto& app = *appOwned;
+        int failures = 0;
+        auto check = [&] (const char* what, bool ok)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        if (app.session == nullptr)
+            return 1;
+
+        using taw::Session;
+        namespace ids = taw::ids;
+        auto& s = *app.session;
+        app.execute ("add");
+        app.execute ("add");
+        auto audio = s.track (0), keys = s.track (1);
+        keys.setProperty (ids::kind, "instrument", nullptr);
+        const auto spb = s.samplesPerBeat();
+        const auto bar = (juce::int64) std::llround (4.0 * spb);
+        auto clipAt = [] (const juce::ValueTree& c) { return std::make_tuple ((juce::int64) c[ids::start], (juce::int64) c[ids::offset], (juce::int64) c[ids::length]); };
+        using Span = std::tuple<juce::int64, juce::int64, juce::int64>;
+
+        // Audio: four bars from file offset 100, bar 2 selected.
+        audio.appendChild (Session::makeClip ("audio/a.wav", 0, 100, 4 * bar), nullptr);
+        app.focusTrack (0);
+        app.timeAnchor = bar;
+        app.timeHead = 2 * bar;
+        auto r = app.execute ("sep");
+        auto clips = Session::clips (audio);
+        check ("a selection inside a clip makes three", r.ok && clips.size() == 3);
+        check ("...head, selection, tail, each from where it was in the file",
+               clips.size() == 3 && clipAt (clips[0]) == Span (0, 100, bar) && clipAt (clips[1]) == Span (bar, 100 + bar, bar)
+                   && clipAt (clips[2]) == Span (2 * bar, 100 + 2 * bar, 2 * bar));
+        check ("...the selection stays on the new clip", app.timeSelection() == juce::Range<juce::int64> (bar, 2 * bar));
+        std::printf ("       %s\n", r.message.toRawUTF8());
+
+        // No selection: the cursor a little past bar 4's line is cut on the line.
+        app.clearTimeSelection();
+        app.setCursor (3 * bar + (juce::int64) (spb * 0.05));
+        r = app.execute ("sep");
+        clips = Session::clips (audio);
+        check ("no selection: cut at the cursor, on the grid", r.ok && clips.size() == 4 && clipAt (clips[2]) == Span (2 * bar, 100 + 2 * bar, bar)
+                                                                   && clipAt (clips[3]) == Span (3 * bar, 100 + 3 * bar, bar));
+        std::printf ("       %s\n", r.message.toRawUTF8());
+
+        app.execute ("undo");
+        check ("undo puts the clip back whole", Session::clips (audio).size() == 3);
+
+        app.setCursor (6 * bar);
+        check ("no clip there: says so, changes nothing", ! app.execute ("sep").ok && Session::clips (audio).size() == 3);
+
+        // MIDI: one clip of four bars with a note in each; bar 2 selected.
+        auto midi = Session::makeMidiClip (0.0, 0.0, 16.0);
+
+        for (double b : { 1.0, 5.0, 9.0, 13.0 })
+            midi.appendChild (Session::makeNote (b, 1.0, 60, 100), nullptr);
+
+        keys.appendChild (midi, nullptr);
+        app.focusTrack (1);
+        app.timeAnchor = bar;
+        app.timeHead = 2 * bar;
+        r = app.execute ("sep");
+        const auto beatClips = Session::midiClips (keys);
+        const auto notes = Session::placedNotes (keys);
+        check ("MIDI: a selection makes three clips", r.ok && beatClips.size() == 3);
+        check ("...the middle one exactly the selection", beatClips.size() == 3 && std::abs ((double) beatClips[1][ids::beat] - 4.0) < 1e-9
+                                                              && std::abs ((double) beatClips[1][ids::len] - 4.0) < 1e-9);
+        check ("...every note still plays where it did", notes.size() == 4 && std::abs (notes[1].start - 5.0) < 1e-9 && std::abs (notes[3].start - 13.0) < 1e-9);
+        return failures;
+    }
+
     if (args[0] == "--savetest" && args.size() >= 3)
     {
         const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);

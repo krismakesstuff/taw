@@ -548,6 +548,10 @@ public:
     // Consolidate (alt+shift+3, as in Pro Tools): what plays in the selection becomes one new
     // clip per track: MIDI and hits gathered into one clip, audio rendered to a new file.
     Result consolidate (const std::vector<int>& tracks);
+    // Separate (ctrl+e, as in Pro Tools): cut the clips at the selection's edges (what's inside
+    // becomes its own clip), or with no selection at the cursor on the grid.
+    Result separateClips (const std::vector<int>& tracks);
+    int splitClipsAt (juce::ValueTree holder, juce::int64 at); // the clips split there
     // A hit at a timeline beat on a sample track: into the clip there, this record pass's clip,
     // or a clip for its bar (growing the one just before when it reaches the bar).
     void addHit (int track, double beat, float vel);

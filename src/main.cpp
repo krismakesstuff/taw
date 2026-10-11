@@ -2629,7 +2629,16 @@ int main (int argc, char** argv)
 #endif
 
     const auto cwd = juce::File::getCurrentWorkingDirectory();
-    const auto target = args.isEmpty() ? cwd : cwd.getChildFile (args[0]);
+    auto target = args.isEmpty() ? cwd : cwd.getChildFile (args[0]);
+
+    // Plain taw from inside a session (its audio folder, say) opens that session.
+    if (args.isEmpty())
+        for (auto up = cwd; up != up.getParentDirectory(); up = up.getParentDirectory())
+            if (taw::Session::existsIn (up))
+            {
+                target = up;
+                break;
+            }
 
     juce::File openDir, newParent;
     juce::String newName;

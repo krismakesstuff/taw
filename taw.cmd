@@ -5,7 +5,8 @@ rem   taw               open or start a session in .\sessions
 rem   taw my-song       open or create sessions\my-song
 rem   taw build         build Release, then exit
 rem
-rem Sessions made from here live in .\sessions (git-ignored) so they stay out of the source tree.
+rem Sessions made from the repo root live in .\sessions (git-ignored) so they stay out of the
+rem source tree. Put this folder on PATH and `taw` anywhere else works in that folder.
 
 setlocal
 set "ROOT=%~dp0"
@@ -30,6 +31,13 @@ if exist "%REL%" if exist "%DBG%" (
 if not defined EXE (
     echo No build yet. Run: taw build
     exit /b 1
+)
+
+rem Started from the repo root: sessions go in .\sessions. Anywhere else (on PATH): taw runs
+rem right there, so `taw` in a session's folder opens it.
+if /i not "%CD%\"=="%ROOT%" (
+    "%EXE%" %*
+    exit /b
 )
 
 if not exist "%ROOT%sessions" mkdir "%ROOT%sessions"

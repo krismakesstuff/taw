@@ -8,7 +8,7 @@
 #
 # Sessions made from here live in ./sessions (git-ignored) so they stay out of the source tree.
 
-ROOT="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd -P)"
 REL="$ROOT/build/taw_artefacts/Release/taw"
 DBG="$ROOT/build/taw_artefacts/Debug/taw"
 
@@ -28,6 +28,10 @@ if [ -z "$EXE" ]; then
     echo "No build yet. Run: ./taw build"
     exit 1
 fi
+
+# Started from the repo root: sessions go in ./sessions. Anywhere else (on PATH): taw runs
+# right there, so `taw` in a session's folder opens it.
+[ "$(pwd -P)" = "$ROOT" ] || exec "$EXE" "$@"
 
 mkdir -p "$ROOT/sessions"
 cd "$ROOT/sessions" && exec "$EXE" "$@"

@@ -30,7 +30,7 @@ void App::showWaiting (const juce::String& title, const juce::String& what, cons
         ui.render (*this);
 }
 
-static juce::String kHz (double rate) { return juce::String (rate / 1000.0, rate == std::floor (rate / 1000.0) * 1000.0 ? 0 : 1) + " kHz"; }
+static juce::String kHz (double rate) { return juce::String (rate / 1000.0, juce::exactlyEqual (rate, std::floor (rate / 1000.0) * 1000.0) ? 0 : 1) + " kHz"; }
 
 //==============================================================================
 void MeterState::update (float peak, double now, double dt)
@@ -343,7 +343,7 @@ bool App::handleClosePromptKey (const Key& k)
 // save: the changes kept, and <session>-last-saved.mp3 bounced from the session's own plugins once
 // it's closed. Otherwise they're dropped (and it bounces only if it was saved this visit with
 // nothing changed since, so the file is always what's saved).
-void App::startClosing (bool thenQuit, bool save, bool bounce)
+void App::startClosing (bool thenQuit, bool save, bool bounceAsked)
 {
     if (recording || engine.isRolling())
     {
@@ -357,7 +357,7 @@ void App::startClosing (bool thenQuit, bool save, bool bounce)
         }
     }
 
-    const bool bounceIt = save ? bounce : savedThisVisit && ! hasUnsavedChanges();
+    const bool bounceIt = save ? bounceAsked : savedThisVisit && ! hasUnsavedChanges();
 
     // The video window's place, for next time (not an edit worth asking about).
     if (save && video != nullptr)
@@ -741,10 +741,10 @@ void App::proceedToSession()
 
     if (pendingTemplate.isNotEmpty())
     {
-        for (const auto& t : templates)
-            if (t.name.equalsIgnoreCase (pendingTemplate))
+        for (const auto& tmpl : templates)
+            if (tmpl.name.equalsIgnoreCase (pendingTemplate))
             {
-                say (createSession (t));
+                say (createSession (tmpl));
                 return;
             }
 
@@ -864,7 +864,7 @@ void App::matchDeviceSampleRate()
 {
     auto* device = engine.devices().getCurrentAudioDevice();
 
-    if (device == nullptr || session == nullptr || device->getCurrentSampleRate() == session->sampleRate())
+    if (device == nullptr || session == nullptr || juce::exactlyEqual (device->getCurrentSampleRate(), session->sampleRate()))
         return;
 
     // Changing rate can take the driver several seconds (and the interface's MIDI ports wait
@@ -885,7 +885,7 @@ void App::matchDeviceSampleRate()
 
     if (const auto headset = headsetWarning(); headset.isNotEmpty())
         say (Result::fail (headset));
-    else if (device = engine.devices().getCurrentAudioDevice(); device != nullptr && device->getCurrentSampleRate() != session->sampleRate())
+    else if (device = engine.devices().getCurrentAudioDevice(); device != nullptr && ! juce::exactlyEqual (device->getCurrentSampleRate(), session->sampleRate()))
         say (Result::fail ("device runs at " + juce::String (device->getCurrentSampleRate()) + " Hz but the session is "
                            + juce::String (session->sampleRate()) + L" Hz \x2014 playback will be off-speed"));
 }
@@ -2783,7 +2783,7 @@ void App::keepInView (juce::int64 pos)
     {
         // Page so the position sits a quarter of the way in, aligned to a column.
         const auto spc = samplesPerColumn();
-        viewStart = juce::jmax<juce::int64> (0, (juce::int64) (std::floor (((double) pos - span / 4.0) / spc) * spc));
+        viewStart = juce::jmax<juce::int64> (0, (juce::int64) (std::floor (((double) pos - (double) span / 4.0) / spc) * spc));
     }
 }
 
@@ -3085,7 +3085,7 @@ App::GridSpacing App::gridSpacing() const
     while (g.bars < spc * minColumns)
         g.bars *= 2.0; // zoomed far out: every 2, 4, 8 bars
 
-    if (g.bars == session->samplesPerBar())
+    if (juce::exactlyEqual (g.bars, session->samplesPerBar())) // not zoomed out past a bar
         for (double step = session->samplesPerBeat(); step >= spc * minColumns && step > session->samplesPerBeat() / 16.0; step /= 2.0)
             g.sub = step; // beats, then halves, quarters, eighths of a beat
 

@@ -78,6 +78,10 @@ tools and CMake on macOS.
   CI runs these on Windows and macOS for every pull request.
 - **Try it by hand** in taw itself, and say in the pull request what you tried it on (platform,
   terminal, audio device).
+- **No new warnings.** taw's own code builds warning-free with clang's strict set (macOS, and
+  clang-cl on Windows) and MSVC's `/W4`, and CI treats any warning as an error. To check
+  locally, configure with `-DTAW_WARNINGS_AS_ERRORS=ON`. For a float compared exactly on
+  purpose, say so with `juce::exactlyEqual`.
 - **Match the code around you:** its naming, its spacing (`f (x)`), its comments (short and
   plain, saying why). New behaviour belongs in docs/design.md too.
 - **One change per pull request**, linked to its issue.

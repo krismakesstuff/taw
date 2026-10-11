@@ -45,7 +45,8 @@ bool useEdgeFont (HANDLE out)
         return false;
 
     fontChanged = true;
-    CONSOLE_FONT_INFOEX now { sizeof (now) };
+    CONSOLE_FONT_INFOEX now {};
+    now.cbSize = sizeof (now);
     // Windows quietly substitutes a font that isn't installed.
     return GetCurrentConsoleFontEx (out, FALSE, &now) && std::wcscmp (now.FaceName, L"Cascadia Mono") == 0;
 }

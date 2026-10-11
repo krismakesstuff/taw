@@ -298,7 +298,7 @@ private:
                 if (connect (false).isEmpty())
                 {
                     if (layout.numInputs == before.numInputs && layout.numOutputs == before.numOutputs
-                        && layout.blockSize == before.blockSize && sampleRate == rate)
+                        && layout.blockSize == before.blockSize && juce::exactlyEqual (sampleRate, rate))
                         break;
 
                     callback->audioDeviceError ("the hub came back at another rate or block size: choose the device again (dev)");

@@ -713,7 +713,7 @@ struct VideoPlayer::Impl final : private juce::Thread
     {
         // Set up before it's on the desktop: JUCE brings a window to the front, keyboard and all,
         // when changing these remakes the native window.
-        Window (View& view)
+        Window (View& content)
             : DocumentWindow ("taw video", juce::Colours::black, DocumentWindow::allButtons, false)
         {
             setUsingNativeTitleBar (true);
@@ -721,7 +721,7 @@ struct VideoPlayer::Impl final : private juce::Thread
             setResizeLimits (160, 90, 16000, 9000);
             setWantsKeyboardFocus (false);
             setMouseClickGrabsKeyboardFocus (false); // clicks don't take the keyboard from the terminal
-            setContentNonOwned (&view, false);
+            setContentNonOwned (&content, false);
             centreWithSize (960, 540);
             addToDesktop();
             noActivate();

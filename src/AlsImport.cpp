@@ -173,10 +173,15 @@ std::vector<Device> devicesOf (const Xml& track)
 // into the lane's.
 struct Target
 {
+    enum class Convert { gainToDb, sendToDb, same, bool01Inverted, normalise };
+
+    Target (juce::String p = {}, Convert c = Convert::same, double lo = 0.0, double hi = 1.0, juce::String why = {})
+        : param (std::move (p)), convert (c), min (lo), max (hi), skipped (std::move (why)) {}
+
     juce::String param;
-    enum class Convert { gainToDb, sendToDb, same, bool01Inverted, normalise } convert = Convert::same;
-    double min = 0.0, max = 1.0;  // normalise: the parameter's range in Live
-    juce::String skipped;         // why it can't come across (empty: it can)
+    Convert convert;
+    double min, max;      // normalise: the parameter's range in Live
+    juce::String skipped; // why it can't come across (empty: it can)
 };
 
 double convertValue (const Target& t, double v)
@@ -818,7 +823,7 @@ AbletonSet readAbletonSet (const juce::File& als, double sampleRate)
         return out;
     }
 
-    TrackReader reader { sampleRate, 120.0, als.getParentDirectory(), out };
+    TrackReader reader { sampleRate, 120.0, als.getParentDirectory(), out, {}, {}, {}, 0 };
     reader.bpm = juce::jlimit (20.0, 999.0, number (master, "DeviceChain/Mixer/Tempo/Manual", 120.0));
 
     // Live's time signature is one number: numerator - 1 + 99 x log2 (denominator). 201 is 4/4.

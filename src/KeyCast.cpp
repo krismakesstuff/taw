@@ -118,8 +118,8 @@ struct KeyCast::Impl
 
         void paint (juce::Graphics& g) override
         {
-            const auto& style = owner.style;
-            g.fillAll (style.background);
+            const auto& look = owner.style;
+            g.fillAll (look.background);
 
             const auto& entries = owner.log.recent();
 
@@ -131,10 +131,10 @@ struct KeyCast::Impl
 
             // The text follows the window's height (times size), but never taller than a key fits.
             const auto capHeight = 1.5f; // a key's box, in text heights
-            auto height = juce::jmin ((float) getHeight() * 0.45f * (float) style.size, area.getHeight() / capHeight);
+            auto height = juce::jmin ((float) getHeight() * 0.45f * (float) look.size, area.getHeight() / capHeight);
             height = juce::jmax (4.0f, height);
 
-            const auto fontName = style.font.isNotEmpty() ? style.font : juce::Font::getDefaultMonospacedFontName();
+            const auto fontName = look.font.isNotEmpty() ? look.font : juce::Font::getDefaultMonospacedFontName();
             auto font = juce::Font (juce::FontOptions (fontName, height, juce::Font::bold));
 
             // A long word (a path) shows its end, where the typing is.
@@ -163,7 +163,7 @@ struct KeyCast::Impl
 
                 // Fading: full until fade seconds untouched, then gone over fadeOutMs. Older keys dimmer.
                 const auto age = now - it->at;
-                const auto fadeMs = style.fade * 1000.0;
+                const auto fadeMs = look.fade * 1000.0;
                 auto alpha = fadeMs <= 0.0 || age < fadeMs ? 1.0 : juce::jmax (0.0, 1.0 - (age - fadeMs) / KeyCastLog::fadeOutMs);
                 alpha *= shown.empty() ? 1.0 : 0.6;
 
@@ -189,9 +189,9 @@ struct KeyCast::Impl
             for (auto it = shown.rbegin(); it != shown.rend(); ++it) // oldest at the left
             {
                 const juce::Rectangle<float> cap (x, y, it->width, capH);
-                g.setColour (style.text.withMultipliedAlpha (0.14f * it->alpha));
+                g.setColour (look.text.withMultipliedAlpha (0.14f * it->alpha));
                 g.fillRoundedRectangle (cap, height * 0.25f);
-                g.setColour (style.text.withMultipliedAlpha (it->alpha));
+                g.setColour (look.text.withMultipliedAlpha (it->alpha));
                 g.drawText (it->text, cap.reduced (pad, 0.0f), juce::Justification::centred, false);
                 x += it->width + gap;
             }
@@ -204,7 +204,7 @@ struct KeyCast::Impl
     // On top, so it stays in the recording over the terminal.
     struct Window final : juce::DocumentWindow
     {
-        explicit Window (View& view)
+        explicit Window (View& content)
             : DocumentWindow ("taw keys", juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton, false)
         {
             setUsingNativeTitleBar (true);
@@ -213,7 +213,7 @@ struct KeyCast::Impl
             setAlwaysOnTop (true);
             setWantsKeyboardFocus (false);
             setMouseClickGrabsKeyboardFocus (false); // clicks don't take the keyboard from the terminal
-            setContentNonOwned (&view, false);
+            setContentNonOwned (&content, false);
             centreWithSize (960, 120);
             addToDesktop();
             noActivate();

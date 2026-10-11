@@ -678,14 +678,14 @@ private:
                 if (p % 12 == 0)
                 {
                     g.setColour (colours.faint);
-                    g.fillRect ((float) roll.getX(), y + rowH - 1.0f, (float) roll.getWidth(), 1.0f);
+                    g.fillRect ((float) roll.getX(), y + (float) rowH - 1.0f, (float) roll.getWidth(), 1.0f);
                 }
             }
 
             // Outside the clip: shaded.
             g.setColour (colours.outside.withAlpha (0.6f));
-            g.fillRect (juce::Rectangle<float> ((float) roll.getX(), (float) roll.getY(), std::max (0.0f, xOf (clipStart()) - roll.getX()), (float) roll.getHeight()));
-            g.fillRect (juce::Rectangle<float> (xOf (clipEnd()), (float) roll.getY(), std::max (0.0f, roll.getRight() - xOf (clipEnd())), (float) roll.getHeight()));
+            g.fillRect (juce::Rectangle<float> ((float) roll.getX(), (float) roll.getY(), std::max (0.0f, xOf (clipStart()) - (float) roll.getX()), (float) roll.getHeight()));
+            g.fillRect (juce::Rectangle<float> (xOf (clipEnd()), (float) roll.getY(), std::max (0.0f, (float) roll.getRight() - xOf (clipEnd())), (float) roll.getHeight()));
 
             // Grid: the chosen grid faintly (when there's room), beats, bars.
             if (g0 > 0.0 && g0 * pxPerBeat >= 6.0)
@@ -783,7 +783,7 @@ private:
                 if (p % 12 == 0 || p % 12 == 5)
                 {
                     g.setColour (colours.dim);
-                    g.fillRect (0.0f, y + rowH - 1.0f, (float) (keysW - 1), 1.0f);
+                    g.fillRect (0.0f, y + (float) rowH - 1.0f, (float) (keysW - 1), 1.0f);
                 }
             }
 
@@ -862,8 +862,8 @@ private:
             juce::Graphics::ScopedSaveState clipLane (g);
             g.reduceClipRegion (lane);
             g.setColour (colours.outside.withAlpha (0.6f));
-            g.fillRect (juce::Rectangle<float> ((float) lane.getX(), (float) lane.getY(), std::max (0.0f, xOf (clipStart()) - lane.getX()), (float) lane.getHeight()));
-            g.fillRect (juce::Rectangle<float> (xOf (clipEnd()), (float) lane.getY(), std::max (0.0f, lane.getRight() - xOf (clipEnd())), (float) lane.getHeight()));
+            g.fillRect (juce::Rectangle<float> ((float) lane.getX(), (float) lane.getY(), std::max (0.0f, xOf (clipStart()) - (float) lane.getX()), (float) lane.getHeight()));
+            g.fillRect (juce::Rectangle<float> (xOf (clipEnd()), (float) lane.getY(), std::max (0.0f, (float) lane.getRight() - xOf (clipEnd())), (float) lane.getHeight()));
 
             if (laneNum < 0)
             {
@@ -904,7 +904,7 @@ private:
         {
             const auto x = xOf ((double) pos / spb());
 
-            if (x >= keysW && x <= getWidth())
+            if (x >= (float) keysW && x <= (float) getWidth())
             {
                 g.setColour (c);
                 g.fillRect (x, (float) toolbarH, w, (float) (getHeight() - toolbarH));
@@ -1218,7 +1218,7 @@ private:
 
             case Drag::velocityAll:
             {
-                const auto delta = (int) std::round ((downAt.y - p.y) / (laneArea().getHeight() - 12.0f) * 127.0f);
+                const auto delta = (int) std::round ((downAt.y - p.y) / ((float) laneArea().getHeight() - 12.0f) * 127.0f);
 
                 for (auto& o : originals)
                     o.node.setProperty (ids::vel, juce::jlimit (1, 127, o.vel + delta), um());
@@ -1316,7 +1316,7 @@ private:
         {
             const auto pitch = pitchAt (e.position.y);
             rowH = juce::jlimit (6, 32, rowH + (dy > 0 ? 2 : -2));
-            scrollY = (127 - pitch) * (double) rowH - (e.position.y - rollTop());
+            scrollY = (127 - pitch) * (double) rowH - (e.position.y - (float) rollTop());
         }
         else if (e.mods.isShiftDown() || w.deltaX != 0.0f)
         {
@@ -1324,7 +1324,7 @@ private:
         }
         else
         {
-            scrollY -= dy * rowH * 12.0;
+            scrollY -= (double) dy * rowH * 12.0;
         }
 
         viewBeat = std::max (-visibleBeats() * 0.5, viewBeat);
@@ -1439,7 +1439,7 @@ private:
 //==============================================================================
 struct MidiEditor::Window final : EditorWindow<Roll>
 {
-    explicit Window (App& app) : EditorWindow<Roll> ("MIDI editor", new Roll (app), 1100, 640) {}
+    explicit Window (App& owner) : EditorWindow<Roll> ("MIDI editor", new Roll (owner), 1100, 640) {}
 };
 
 MidiEditor::MidiEditor (App& a) : app (a) {}

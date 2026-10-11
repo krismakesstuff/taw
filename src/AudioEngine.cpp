@@ -16,7 +16,7 @@ void automatePlugins (TrackPlay& tp, juce::int64 pos)
 
         const auto value = juce::jlimit (0.0f, 1.0f, p.curve.at (pos));
 
-        if (value != p.last)
+        if (! juce::exactlyEqual (value, p.last))
         {
             p.plugin->setParameter (p.index, value);
             p.last = value;

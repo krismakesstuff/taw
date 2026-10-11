@@ -81,8 +81,8 @@ juce::LookAndFeel& windowLook() { return titleLook(); }
 
 struct PluginSlot::EditorWindow final : juce::DocumentWindow, TitledWindow
 {
-    EditorWindow (const juce::String& title, juce::AudioProcessorEditor* editor)
-        : DocumentWindow (title, juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton), title (title)
+    EditorWindow (const juce::String& windowTitle, juce::AudioProcessorEditor* editor)
+        : DocumentWindow (windowTitle, juce::Colours::black, DocumentWindow::closeButton | DocumentWindow::minimiseButton), title (windowTitle)
     {
         setLookAndFeel (&titleLook());
         setUsingNativeTitleBar (false);

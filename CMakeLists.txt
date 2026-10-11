@@ -1,5 +1,5 @@
 ﻿cmake_minimum_required(VERSION 3.24)
-project(taw VERSION 0.1.0 LANGUAGES C CXX)
+project(taw VERSION 0.2.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -141,11 +141,22 @@ if (WIN32)
 
     # Delay-loaded: taw starts (and loads ~130 MB less) until a video is opened, and without the
     # DLLs it still runs, just without video. They're copied next to taw.exe, with FFmpeg's licence.
-    set(TAW_FFMPEG_LIBS avformat avcodec avutil swscale)
+    # The build's own .lib files are MinGW import libraries, which MSVC links but can't delay-load
+    # (LNK4199, and taw.exe wouldn't start without the DLLs): import libraries made here from its
+    # .def files instead.
     set(TAW_FFMPEG_DLLS avformat-63 avcodec-63 avutil-61 swscale-10)
-    target_include_directories(taw PRIVATE ${ffmpeg_SOURCE_DIR}/include)
-    foreach(lib ${TAW_FFMPEG_LIBS})
-        target_link_libraries(taw PRIVATE ${ffmpeg_SOURCE_DIR}/lib/${lib}.lib)
+    set(TAW_FFMPEG_IMPLIB_DIR ${CMAKE_BINARY_DIR}/ffmpeg-implib)
+    file(MAKE_DIRECTORY ${TAW_FFMPEG_IMPLIB_DIR})
+    target_include_directories(taw SYSTEM PRIVATE ${ffmpeg_SOURCE_DIR}/include) # its headers' warnings aren't ours
+    foreach(dll ${TAW_FFMPEG_DLLS})
+        execute_process(
+            COMMAND ${CMAKE_AR} /nologo /machine:x64 /def:${ffmpeg_SOURCE_DIR}/lib/${dll}.def
+                    /name:${dll}.dll /out:${TAW_FFMPEG_IMPLIB_DIR}/${dll}.lib
+            RESULT_VARIABLE implib_result OUTPUT_QUIET)
+        if (NOT implib_result EQUAL 0)
+            message(FATAL_ERROR "couldn't make an import library for ${dll}.dll")
+        endif()
+        target_link_libraries(taw PRIVATE ${TAW_FFMPEG_IMPLIB_DIR}/${dll}.lib)
     endforeach()
     target_link_libraries(taw PRIVATE delayimp)
     foreach(dll ${TAW_FFMPEG_DLLS})
@@ -174,7 +185,7 @@ if (APPLE)
     endforeach()
 
     if (TAW_FFMPEG_FOUND)
-        target_include_directories(taw PRIVATE ${TAW_FFMPEG_INCLUDE})
+        target_include_directories(taw SYSTEM PRIVATE ${TAW_FFMPEG_INCLUDE}) # its headers' warnings aren't ours
         foreach(lib avformat avcodec avutil swscale)
             target_link_options(taw PRIVATE "LINKER:-weak_library,${TAW_FFMPEG_${lib}}")
         endforeach()
@@ -193,3 +204,40 @@ target_link_libraries(taw PRIVATE
     juce::juce_events
     juce::juce_recommended_config_flags
     juce::juce_recommended_warning_flags)
+
+# Warnings: taw's own files (not JUCE's, the SDKs' or FFmpeg's) are held to clang's strict set
+# wherever clang compiles them. That's JUCE's recommended list, which JUCE gives Clang and
+# AppleClang but not clang-cl (only /W4), so it's spelled out here too. Less -Wswitch-enum:
+# taw's key handlers switch on the key with a default for the many they ignore; -Wswitch
+# still catches a switch without a default that misses a case. MSVC keeps JUCE's /W4.
+# TAW_WARNINGS_AS_ERRORS (CI turns it on) fails the build on any of them.
+option(TAW_WARNINGS_AS_ERRORS "Fail the build on a warning in taw's own code" OFF)
+
+get_target_property(taw_own_sources taw SOURCES)
+list(FILTER taw_own_sources INCLUDE REGEX "^src/|/generated/BuildInfo\\.cpp$")
+
+if (CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    set(taw_warnings
+        -Wall -Wshadow-all -Wshorten-64-to-32 -Wstrict-aliasing -Wuninitialized -Wunused-parameter
+        -Wconversion -Wsign-compare -Wint-conversion -Wconditional-uninitialized -Wconstant-conversion
+        -Wsign-conversion -Wbool-conversion -Wextra-semi -Wunreachable-code -Wcast-align
+        -Wshift-sign-overflow -Wmissing-prototypes -Wnullable-to-nonnull-conversion -Wno-ignored-qualifiers
+        -Wpedantic -Wdeprecated -Wfloat-equal -Wmissing-field-initializers
+        -Wzero-as-null-pointer-constant -Wunused-private-field -Woverloaded-virtual -Wreorder
+        -Winconsistent-missing-destructor-override
+        -Wno-switch-enum)
+
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        list(TRANSFORM taw_warnings REPLACE "^-Wall$" "/clang:-Wall") # clang-cl reads -Wall as /Wall: everything
+    endif()
+
+    set_property(SOURCE ${taw_own_sources} APPEND PROPERTY COMPILE_OPTIONS ${taw_warnings})
+endif()
+
+if (TAW_WARNINGS_AS_ERRORS)
+    if (CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC" OR MSVC)
+        set_property(SOURCE ${taw_own_sources} APPEND PROPERTY COMPILE_OPTIONS /WX)
+    else()
+        set_property(SOURCE ${taw_own_sources} APPEND PROPERTY COMPILE_OPTIONS -Werror)
+    endif()
+endif()

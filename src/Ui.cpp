@@ -22,7 +22,7 @@ int ok, error, meterGreen, meterYellow, meterRed, meterBg;
 bool lightScreen = false; // light and grey: darker kind colours
 
 // A sample kind's colour, the same on the browser's badges, map and list.
-int kind (const juce::String& k)
+static int kind (const juce::String& k)
 {
     static const std::pair<const char*, std::pair<int, int>> table[] = {
         { "kick", { 203, 160 } }, { "snare", { 214, 166 } }, { "clap", { 150, 64 } }, { "rim", { 74, 31 } },
@@ -38,7 +38,7 @@ int kind (const juce::String& k)
 }
 
 // A palette index as the colour terminals show it (the xterm 256-colour table).
-juce::Colour xtermColour (int index)
+static juce::Colour xtermColour (int index)
 {
     static const juce::uint32 basic[16] = { 0x000000, 0x800000, 0x008000, 0x808000, 0x000080, 0x800080, 0x008080, 0xc0c0c0,
                                             0x808080, 0xff0000, 0x00ff00, 0xffff00, 0x0000ff, 0xff00ff, 0x00ffff, 0xffffff };
@@ -60,7 +60,7 @@ juce::Colour xtermColour (int index)
     return juce::Colour (level (i / 36), level ((i / 6) % 6), level (i % 6));
 }
 
-void apply (const juce::String& theme)
+static void apply (const juce::String& theme)
 {
     lightScreen = theme == "grey" || theme == "light";
 
@@ -1131,8 +1131,8 @@ void Ui::drawTimeline (App& app)
         if (rowsPerTrack == 1)
         {
             const auto level = waveLevel (peak);
-            const auto n = level <= 0.0 ? 0 : juce::jlimit (1, 8, juce::roundToInt (level * 8.0));
-            return { n == 8 ? L' ' : eighths[n], n == 8 };
+            const auto filled = level <= 0.0 ? 0 : juce::jlimit (1, 8, juce::roundToInt (level * 8.0));
+            return { filled == 8 ? L' ' : eighths[filled], filled == 8 };
         }
 
         // In eighths from the track's bottom: the fill spans [bottom, top) around the middle.
@@ -1414,11 +1414,11 @@ void Ui::drawTimeline (App& app)
             canvas.put (0, y + r, focusedRow ? L'\x2588' : L'\x258c', typeColour, bg);
 
         // The type label: a chip of the type's colour (red when something's wrong, dim while loading).
-        auto chip = [&] (const juce::String& text, int fill)
+        auto chip = [&] (const juce::String& text, int chipBg)
         {
             const int x = leftW - 6;
-            canvas.fill (x, y, 6, L' ', -1, fill);
-            canvas.text (x + 1, y, text, fill == colour::busColour ? colour::busText : colour::chipText, fill, true, 5);
+            canvas.fill (x, y, 6, L' ', -1, chipBg);
+            canvas.text (x + 1, y, text, chipBg == colour::busColour ? colour::busText : colour::chipText, chipBg, true, 5);
         };
 
         canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);
@@ -1471,7 +1471,7 @@ void Ui::drawTimeline (App& app)
 
         // Lane: the track's clips at rowY, or (live false) one of its playlists in a lane under it,
         // without what's recording.
-        auto drawContent = [&] (const juce::ValueTree& source, int rowY, int laneBg, bool rowInTimeSelection, bool live)
+        auto drawContent = [&] (const juce::ValueTree& source, int rowY, int contentBg, bool rowSelected, bool live)
         {
             struct LaneClip
             {
@@ -1485,8 +1485,8 @@ void Ui::drawTimeline (App& app)
 
             if (sampleTrack)
             {
-                for (const auto& h : Session::placedHits (source))
-                    laneHits.push_back ({ h.beat * s.samplesPerBeat(), h.vel });
+                for (const auto& hit : Session::placedHits (source))
+                    laneHits.push_back ({ hit.beat * s.samplesPerBeat(), hit.vel });
 
                 std::sort (laneHits.begin(), laneHits.end());
 
@@ -1511,14 +1511,14 @@ void Ui::drawTimeline (App& app)
                     liveTake = &l;
 
             if (instrumentTrack)
-                drawNotes (i, source, rowY, laneBg, bg, rowInTimeSelection, live);
+                drawNotes (i, source, rowY, contentBg, bg, rowSelected, live);
             else
             {
                 for (int c = 0; c < laneW; ++c)
                 {
                     const auto t0 = origin + c * spc, t1 = t0 + spc;
                     wchar_t ch = L' ';
-                    int fg = colour::wave, cellBg = laneBg;
+                    int fg = colour::wave, cellBg = contentBg;
                     bool inClip = false;
                     std::optional<WavePoint> wave; // a clip or take here: drawn per row by waveCell
                     wchar_t edgeCh = 0;            // a clip's first or last column
@@ -1618,7 +1618,7 @@ void Ui::drawTimeline (App& app)
                         }
                     }
 
-                    if (rowInTimeSelection && inTimeSelection (t0, t1))
+                    if (rowSelected && inTimeSelection (t0, t1))
                         cellBg = (cellBg == colour::clipBg || cellBg == colour::clipAltBg) ? colour::selClipBg : colour::selBg;
 
                     // The playhead and the cursor colour the cell behind what's there, so a clip's edge
@@ -2174,7 +2174,14 @@ void Ui::drawHelp (App& app)
     // Pages of two columns of "keys  what it does", so it fits a small screen (80 x 24). The
     // tabs run along the top; headings span a column, notes span the box.
     enum Kind { Pair, Heading, Note };
-    struct Row { Kind kind; const wchar_t *k1, *d1, *k2, *d2; };
+    struct Row
+    {
+        Row (Kind kd, const wchar_t* a, const wchar_t* b = nullptr, const wchar_t* c = nullptr, const wchar_t* d = nullptr)
+            : kind (kd), k1 (a), d1 (b), k2 (c), d2 (d) {}
+
+        Kind kind;
+        const wchar_t *k1, *d1, *k2, *d2;
+    };
     struct Page { const wchar_t* name; std::vector<Row> rows; };
 
     static const std::vector<Page> pages = {
@@ -3608,7 +3615,7 @@ void Ui::drawTemplatePicker (App& app)
 
         const auto pct = " " + juce::String (juce::roundToInt (progress * 100.0f)) + "%";
         const int barW = juce::jmax (0, w - 2 - (x + 1) - pct.length());
-        const int filled = (int) (barW * progress);
+        const int filled = (int) ((float) barW * progress);
 
         for (int i = 0; i < barW; ++i)
             canvas.put (x + 1 + i, h - 3, i < filled ? L'\x2588' : L'\x2591', i < filled ? colour::marker : colour::faint);

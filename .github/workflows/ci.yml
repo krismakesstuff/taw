@@ -1,0 +1,81 @@
+# Builds taw on Windows and macOS and runs the self-tests that need no audio device.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DTAW_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Self-tests
+        shell: bash
+        run: |
+          taw=build/taw_artefacts/Release/taw.exe
+          "$taw" --version
+          "$taw" --keycasttest
+          "$taw" --counttest
+          "$taw" --livetest
+          "$taw" --cliptest
+          "$taw" --paralleltest
+          # (no --bouncetest: Windows Server images may lack the MP3 encoder)
+
+  # taw's own files compiled with clang on Windows too (clang-cl, the same strict warnings as
+  # macOS, as errors), so the Windows-only code is held to clang's rules. Only taw's objects:
+  # JUCE's are compiled and tested by the windows job.
+  windows-clang:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ilammy/msvc-dev-cmd@v1.13.0 # the compiler's environment, for clang-cl and Ninja
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=clang-cl -DCMAKE_CXX_COMPILER=clang-cl -DTAW_WARNINGS_AS_ERRORS=ON
+
+      - name: Compile taw's files
+        shell: bash
+        run: |
+          objs=$(ninja -C build -t targets all | grep -oE '^CMakeFiles/taw\.dir/(src|generated)/[^:]+\.obj')
+          ninja -C build $objs
+
+  macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: FFmpeg (video)
+        run: brew install ffmpeg
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DTAW_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Self-tests
+        run: |
+          taw=build/taw_artefacts/Release/taw
+          "$taw" --version
+          "$taw" --keytest
+          "$taw" --keycasttest
+          "$taw" --counttest
+          "$taw" --livetest
+          "$taw" --cliptest
+          "$taw" --paralleltest
+          "$taw" --bouncetest "$RUNNER_TEMP/bouncetest"

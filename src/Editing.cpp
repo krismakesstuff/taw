@@ -453,7 +453,6 @@ Result App::consolidate (const std::vector<int>& tracks)
 
     const auto range = timeSelection();
     const auto from = snapBeats (range.getStart()), to = snapBeats (range.getEnd());
-    const auto spb = session->samplesPerBeat();
     juce::StringArray made, skipped;
 
     for (auto t : tracks)
@@ -495,9 +494,9 @@ Result App::consolidate (const std::vector<int>& tracks)
                         clip.appendChild (c.node.createCopy().setProperty (ids::beat, c.at - from, nullptr), nullptr);
             }
 
-            const auto clips = Session::beatClips (holder);
+            const auto holderClips = Session::beatClips (holder);
 
-            if (std::none_of (clips.begin(), clips.end(), [&] (const juce::ValueTree& c) { return (double) c[ids::beat] < to && Session::clipEnd (c) > from; }))
+            if (std::none_of (holderClips.begin(), holderClips.end(), [&] (const juce::ValueTree& c) { return (double) c[ids::beat] < to && Session::clipEnd (c) > from; }))
             {
                 skipped.add (label + " (empty)");
                 continue;

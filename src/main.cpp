@@ -459,7 +459,7 @@ int main (int argc, char** argv)
         {
             const auto frame = (juce::int64) rng.nextInt ((int) (info.duration * info.fps) - 2);
             const auto start = now();
-            const auto got = dec.seek ((frame + 0.25) / info.fps);
+            const auto got = dec.seek (((double) frame + 0.25) / info.fps);
             const auto ms = now() - start;
             worst = juce::jmax (worst, ms);
             total += ms;
@@ -520,13 +520,13 @@ int main (int argc, char** argv)
                 break;
             }
 
-            dec.seek ((frame + 0.5) / info.fps);
+            dec.seek (((double) frame + 0.5) / info.fps);
             juce::Image mine;
             dec.render (mine, w, h);
             const auto dSame = difference (mine, same), dBefore = difference (mine, before), dAfter = difference (mine, after);
             const bool exact = dSame < dBefore && dSame < dAfter && dSame < 6.0;
             std::printf ("frame %lld: off by %.2f from ffmpeg's (its neighbours: %.2f, %.2f) %s\n", (long long) frame, dSame, dBefore, dAfter,
-                         exact ? "ok" : dBefore == dSame || dAfter == dSame ? "FAILED (or the picture doesn't move there)" : "FAILED");
+                         exact ? "ok" : juce::exactlyEqual (dBefore, dSame) || juce::exactlyEqual (dAfter, dSame) ? "FAILED (or the picture doesn't move there)" : "FAILED");
             ok = ok && exact;
         }
 
@@ -752,7 +752,7 @@ int main (int argc, char** argv)
                 tp.clips.push_back ({ tone, 0, 0, length });
 
                 if (t % 3 == 0)
-                    tp.sends.push_back ({ 0, 0.7f, t % 2 == 0 });
+                    tp.sends.push_back ({ 0, 0.7f, t % 2 == 0, {}, {} });
 
                 if (t == 5)
                     tp.out = 1; // only to the second bus
@@ -899,7 +899,7 @@ int main (int argc, char** argv)
             for (const auto& b : blocks)
                 sorted.push_back (b.ms);
             std::sort (sorted.begin(), sorted.end());
-            const auto pct = [&] (double p) { return sorted[(size_t) std::min ((double) sorted.size() - 1, p * sorted.size())] / budgetMs * 100.0; };
+            const auto pct = [&] (double p) { return sorted[(size_t) std::min ((double) sorted.size() - 1, p * (double) sorted.size())] / budgetMs * 100.0; };
             const auto over = std::count_if (sorted.begin(), sorted.end(), [&] (double ms) { return ms > budgetMs; });
             const auto close80 = std::count_if (sorted.begin(), sorted.end(), [&] (double ms) { return ms > budgetMs * 0.8; });
 
@@ -910,9 +910,9 @@ int main (int argc, char** argv)
 
             for (int t = 0; t < numTracks; ++t)
                 if (most[(size_t) t] > 0.05)
-                    std::printf ("     %-60s %5.2f  %6.2f\n", trackName (t).substring (0, 60).toRawUTF8(), sum[(size_t) t] / blocks.size(), most[(size_t) t]);
+                    std::printf ("     %-60s %5.2f  %6.2f\n", trackName (t).substring (0, 60).toRawUTF8(), sum[(size_t) t] / (double) blocks.size(), most[(size_t) t]);
 
-            std::printf ("     %-60s %5.2f  %6.2f\n", "mix inserts", mixSum / blocks.size(), mixMost);
+            std::printf ("     %-60s %5.2f  %6.2f\n", "mix inserts", mixSum / (double) blocks.size(), mixMost);
 
             // The worst blocks: when, and who took the time.
             std::vector<size_t> order (blocks.size());
@@ -1081,7 +1081,7 @@ int main (int argc, char** argv)
 
                 taw::Key k;
                 k.code = taw::Key::Char;
-                k.ch = (juce::juce_wchar) answer[0];
+                k.ch = (wchar_t) answer[0];
                 app.pressKey (k);
             }
 
@@ -1103,7 +1103,7 @@ int main (int argc, char** argv)
             check (sessionFile.getLastModificationTime() == before, "session.json untouched");
             close (*app, "d");
             check (! work.exists(), "don't save: unsaved\\ is gone");
-            check (bpmOnDisk() == bpm0, "don't save: session.json as it was");
+            check (juce::exactlyEqual (bpmOnDisk(), bpm0), "don't save: session.json as it was");
             check (app->backgroundBounces.empty(), "don't save: no bounce");
         }
 
@@ -1114,7 +1114,7 @@ int main (int argc, char** argv)
             app->pumpBackgroundWork();
             close (*app, "s");
             check (! work.exists(), "save: unsaved\\ is gone");
-            check (bpmOnDisk() == bpm0 + 9, "save: session.json has the edit");
+            check (juce::exactlyEqual (bpmOnDisk(), bpm0 + 9), "save: session.json has the edit");
             check (app->backgroundBounces.size() == 1, "save: last-saved is bouncing");
             std::printf ("%s", app->screenText (100, 12).toRawUTF8());
 
@@ -1156,7 +1156,7 @@ int main (int argc, char** argv)
                 const auto it = std::find (app->recent.begin(), app->recent.end(), dir);
                 const auto i = (size_t) (it - app->recent.begin());
                 check (it != app->recent.end() && i < app->recentSummaries.size() && app->recentSummaries[i].ok
-                           && app->recentSummaries[i].tracks == app->recentSummaries[i].tracks && app->recentSummaries[i].bpm == bpm0 + 9,
+                           && app->recentSummaries[i].tracks == app->recentSummaries[i].tracks && juce::exactlyEqual (app->recentSummaries[i].bpm, bpm0 + 9),
                        "recent sessions: tracks, bpm, plugins, length");
                 std::printf ("%s", app->screenText (140, 20).toRawUTF8());
             }
@@ -1198,7 +1198,7 @@ int main (int argc, char** argv)
             app->execute ("bpm " + juce::String (bpm0 + 10));
             app->pumpBackgroundWork();
             close (*app, "o");
-            check (bpmOnDisk() == bpm0 + 10, "save only: session.json has the edit");
+            check (juce::exactlyEqual (bpmOnDisk(), bpm0 + 10), "save only: session.json has the edit");
             check (app->backgroundBounces.empty() && mp3.getLastModificationTime() == bounced, "save only: no bounce");
         }
 
@@ -1217,12 +1217,12 @@ int main (int argc, char** argv)
         }
 
         check (work.getChildFile ("session.json").existsAsFile(), "window closed on changes: kept in unsaved\\");
-        check (bpmOnDisk() == bpm0 + 10, "...and session.json not changed");
+        check (juce::exactlyEqual (bpmOnDisk(), bpm0 + 10), "...and session.json not changed");
 
         {
             auto app = open();
             check (app->unsaved && app->session->recovered, "reopened: the changes are back, unsaved");
-            check ((double) app->session->tree()[taw::ids::bpm] == bpm0 + 11, "...with the edit");
+            check (juce::exactlyEqual ((double) app->session->tree()[taw::ids::bpm], bpm0 + 11), "...with the edit");
             close (*app, "d");
         }
 
@@ -1304,7 +1304,7 @@ int main (int argc, char** argv)
                                                                          { "right", taw::Key::Right }, { "up", taw::Key::Up }, { "down", taw::Key::Down },
                                                                          { "del", taw::Key::Delete }, { "tab", taw::Key::Tab }, { "backspace", taw::Key::Backspace } };
                 k.code = taw::Key::Char;
-                k.ch = name[0];
+                k.ch = (wchar_t) name[0];
 
                 for (const auto& [n, code] : named)
                     if (name.equalsIgnoreCase (n))
@@ -1569,7 +1569,7 @@ int main (int argc, char** argv)
         check (openBoth(), "two sessions connect");
         check (a->getOutputLatencyInSamples() == block && a->getInputLatencyInSamples() == 0,
                "A's device reports a block of output latency (" + juce::String (a->getOutputLatencyInSamples()) + ")");
-        check (a->getActiveInputChannels().countNumberOfSetBits() == taw::hub::sessionInputs (channels) && a->getCurrentSampleRate() == rate,
+        check (a->getActiveInputChannels().countNumberOfSetBits() == taw::hub::sessionInputs (channels) && juce::exactlyEqual (a->getCurrentSampleRate(), rate),
                "A runs at the hub's rate, with " + juce::String (a->getActiveInputChannels().countNumberOfSetBits()) + " inputs");
 
         measure (3.0);
@@ -1581,10 +1581,10 @@ int main (int argc, char** argv)
         check (lateB > 0, "B's stalls were counted (" + juce::String (lateB) + " blocks late)");
 
         // Routes, as taw's hub command asks for them: A off the interface, then back on.
-        auto ask = [] (const juce::String& type, const juce::String& from, int fromChannel, const juce::String& to, int toChannel)
+        auto ask = [] (const juce::String& requestType, const juce::String& from, int fromChannel, const juce::String& to, int toChannel)
         {
             auto* m = new juce::DynamicObject();
-            m->setProperty ("type", type);
+            m->setProperty ("type", requestType);
             m->setProperty ("from", from);
             m->setProperty ("fromChannel", fromChannel);
             m->setProperty ("to", to);
@@ -1953,8 +1953,8 @@ int main (int argc, char** argv)
                 check ("...with every hit where it was", hits.size() == 3 && approx (hits[1].beat, 10.5) && std::abs (hits[1].vel - 0.5f) < 1e-6f);
 
                 // Trimming a hit clip keeps its kind and only the hits inside.
-                const auto piece = Session::trimmedMidiClip (clips[0], 8.0, 12.0);
-                check ("a trimmed hit clip is a hit clip with its hits", piece.hasType (ids::HITCLIP) && piece.getNumChildren() == 1);
+                const auto hitPiece = Session::trimmedMidiClip (clips[0], 8.0, 12.0);
+                check ("a trimmed hit clip is a hit clip with its hits", hitPiece.hasType (ids::HITCLIP) && hitPiece.getNumChildren() == 1);
             }
             else
             {
@@ -2587,8 +2587,9 @@ int main (int argc, char** argv)
 
         for (int i = 0; i < 100; ++i)
         {
-            for (const auto& f : engine.poll())
+            if (const auto takes = engine.poll(); ! takes.empty()) // the first take that's finished
             {
+                const auto& f = takes.front();
                 std::unique_ptr<juce::AudioFormatReader> r (engine.formats().createReaderFor (f.file));
                 std::printf ("take: start %lld  written %lld  on disk %lld  dropped %d  input-1 peak %.1f dB\n", (long long) f.start,
                              (long long) f.length, r ? (long long) r->lengthInSamples : -1LL, f.droppedBlocks,

@@ -385,7 +385,7 @@ private:
 
         for (int ch = 0; ch < channels; ++ch)
         {
-            const auto band = r.withY (r.getY() + ch * bandH).withHeight (bandH);
+            const auto band = r.withY (r.getY() + (float) ch * bandH).withHeight (bandH);
             const auto mid = band.getCentreY(), half = band.getHeight() * 0.48f * (float) ampZoom;
             auto yOf = [&] (float v) { return juce::jlimit (band.getY(), band.getBottom(), mid - v * half); };
 
@@ -655,7 +655,7 @@ private:
         else if (e.mods.isAltDown())
             ampZoom = juce::jlimit (0.25, 64.0, ampZoom * std::pow (1.25, dy * 4.0));
         else
-            viewStart -= dy * getWidth() * spp * 0.25;
+            viewStart -= (double) dy * getWidth() * spp * 0.25;
 
         viewStart = std::max (-getWidth() * spp * 0.5, viewStart);
         repaint();
@@ -736,7 +736,7 @@ private:
 //==============================================================================
 struct AudioEditor::Window final : EditorWindow<Wave>
 {
-    explicit Window (App& app) : EditorWindow<Wave> ("audio editor", new Wave (app), 1100, 520) {}
+    explicit Window (App& owner) : EditorWindow<Wave> ("audio editor", new Wave (owner), 1100, 520) {}
 };
 
 AudioEditor::AudioEditor (App& a) : app (a) {}

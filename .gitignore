@@ -9,3 +9,4 @@ sessions/
 # crash dumps from the shell, and --bouncetest output
 *.stackdump
 bouncetest/
+build-clang/

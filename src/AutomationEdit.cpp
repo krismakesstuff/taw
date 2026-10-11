@@ -48,7 +48,7 @@ double valueIn (const std::vector<Point>& pts, double beat, bool steps, double o
 
     const auto& a = *(it - 1);
     const auto& b = *it;
-    return steps || b.beat == a.beat ? a.val : a.val + (b.val - a.val) * (beat - a.beat) / (b.beat - a.beat);
+    return steps || juce::exactlyEqual (b.beat, a.beat) ? a.val : a.val + (b.val - a.val) * (beat - a.beat) / (b.beat - a.beat);
 }
 
 constexpr double sameBeat = 1.0e-6;

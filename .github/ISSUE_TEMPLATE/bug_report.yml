@@ -1,0 +1,57 @@
+name: Bug report
+description: Something in taw doesn't work as it should.
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The keys and commands, in order. A session or file that shows it helps a lot.
+      placeholder: |
+        1. taw my-song
+        2. add Vox in2
+        3. ctrl+space
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: taw version
+      description: The output of `taw --version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS (Apple Silicon)
+        - macOS (Intel, built from source)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: terminal
+    attributes:
+      label: Terminal
+      placeholder: Windows Terminal, cmd, Terminal.app, iTerm2, Ghostty...
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Audio device and driver
+      placeholder: Focusrite Scarlett 2i2, ASIO, 48 kHz, 128 samples
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: Plugins involved, crash logs, screenshots.

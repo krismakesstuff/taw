@@ -47,7 +47,7 @@ std::vector<FilterTerm> filterTerms (const juce::String& filter)
             {
                 auto number = token.substring (op + 1).trim().toLowerCase();
 
-                if (number.isEmpty() || ! juce::CharacterFunctions::isDigit (number[0]) && number[0] != '-' && number[0] != '.')
+                if (number.isEmpty() || (! juce::CharacterFunctions::isDigit (number[0]) && number[0] != '-' && number[0] != '.'))
                     continue; // still typing
 
                 double scale = 1.0;
@@ -188,7 +188,7 @@ const App::AxisCache& App::axes() const
         {
             auto hi = lo;
 
-            while (hi + 1 < v.size() && v[hi + 1].first == v[lo].first)
+            while (hi + 1 < v.size() && juce::exactlyEqual (v[hi + 1].first, v[lo].first))
                 ++hi;
 
             const float r = v.size() > 1 ? (float) (lo + hi) / 2.0f / (float) (v.size() - 1) : 0.5f;
@@ -474,7 +474,7 @@ bool App::handleBrowserKey (const Key& k)
         {
             // The sample nearest the clicked cell's centre.
             browserFocus = BrowserFocus::map;
-            const float cx = (k.x - g.mapX + 0.5f) / (float) g.mapW, cy = (k.y - g.mapY + 0.5f) / (float) g.mapH;
+            const float cx = ((float) (k.x - g.mapX) + 0.5f) / (float) g.mapW, cy = ((float) (k.y - g.mapY) + 0.5f) / (float) g.mapH;
             int best = -1;
             float bestD = 1.0e9f;
 

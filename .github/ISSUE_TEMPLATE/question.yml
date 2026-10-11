@@ -1,0 +1,15 @@
+name: Question
+description: How do I...? Why does taw...?
+labels: [question]
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: taw version and platform
+      placeholder: taw 0.2.0 on Windows 11, Windows Terminal

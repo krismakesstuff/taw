@@ -64,7 +64,8 @@ void SystemStats::sample()
     if (GetProcessMemoryInfo (GetCurrentProcess(), (PROCESS_MEMORY_COUNTERS*) &pmc, sizeof (pmc)))
         tawMemoryMB = (double) pmc.PrivateUsage / (1024.0 * 1024.0);
 
-    MEMORYSTATUSEX mem { sizeof (mem) };
+    MEMORYSTATUSEX mem {};
+    mem.dwLength = sizeof (mem);
 
     if (GlobalMemoryStatusEx (&mem))
     {

@@ -32,7 +32,7 @@ What's left before taw goes public and ships its first downloads. Tick items off
 
 See [releasing.md](releasing.md) for the steps.
 
-- [ ] Merge the release setup (CI, release workflow, contributing files) into `main`.
+- [x] Merge the release setup (CI, release workflow, contributing files) into `main`.
 - [ ] **Dry run:** Actions → Release → Run workflow on `main`. It's the first real test of the
       Windows and macOS builds. macOS minutes are expensive on a private repository and free on a
       public one.

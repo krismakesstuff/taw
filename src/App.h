@@ -9,6 +9,7 @@
 #include "MidiEditor.h"
 #include "Plugins.h"
 #include "Console.h"
+#include "KeyCast.h"
 #include "Session.h"
 #include "SystemStats.h"
 #include "Timing.h"
@@ -696,7 +697,8 @@ public:
     std::array<MeterState, 2> masterMeters;
 
 private:
-    void handleKey (const Key&);
+    void handleKey (const Key&); // dispatchKey, then the keycast window sees it
+    void dispatchKey (const Key&);
     void handleMainKey (const Key&);
     void handleMouse (const Key&);
     // The MIDI or hit clip on top in [from, to) samples on a track, or invalid.
@@ -851,6 +853,14 @@ public:
     juce::int64 frameStart (juce::int64 pos) const;     // the first sample showing the frame at pos
     Result stepFrame (int direction, bool second, bool extendSelection); // the video row's arrows
     bool scrubbing = false; // a click on the video row: dragging moves the cursor (and the picture)
+
+    // Keycast (KeyCast.h): a window showing the keys pressed, for screen recordings. "keycast"
+    // shows or hides it and sets its look; that and its place are kept in settings.json.
+    KeyCast keycast;
+    bool keycastShown = false;  // settings.json
+    bool keycastClosed = false; // its close button hid it (until "keycast"); not saved, like the video's
+    Result keycastCommand (const juce::String& rest);
+    void syncKeycast();
 
 private:
     // What the decoder thread's clock reads (it can't touch the session): set each frame.

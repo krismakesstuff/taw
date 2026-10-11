@@ -104,6 +104,9 @@ App::~App()
     backgroundBounces.clear(); // quitting anyway: an unfinished last-saved is dropped (the old one stays)
     releaseSession();
     safety::setEmergencySave (nullptr, nullptr);
+
+    if (keycast.wasShown())
+        saveSettings(); // where its window was, for next time
 }
 
 // Stops the transport (keeping any take), saves (unless the close decided already), and lets
@@ -634,6 +637,7 @@ int App::run()
         }
 
         syncVideo();
+        syncKeycast();
 
         if (mode == Mode::Hub)
             refreshHub (false); // the sessions coming and going, their late blocks
@@ -3191,6 +3195,19 @@ void App::loadSettings()
     if (const auto* off = json["midiOff"].getArray())
         for (const auto& name : *off)
             midiOff.add (name.toString());
+
+    if (const auto kc = json["keycast"]; kc.isObject())
+    {
+        KeyCast::Style style;
+        style.font = kc["font"].toString();
+        KeyCast::parseColour (kc["color"].toString(), style.text);
+        KeyCast::parseColour (kc["bg"].toString(), style.background);
+        style.size = juce::jlimit (0.25, 4.0, (double) kc.getProperty ("size", 1.0));
+        style.fade = juce::jlimit (0.0, 60.0, (double) kc.getProperty ("fade", 2.0));
+        keycast.setStyle (style);
+        keycast.restoreWindowState (kc["window"].toString());
+        keycastShown = (bool) kc["shown"];
+    }
 }
 
 void App::saveSettings() const
@@ -3212,6 +3229,17 @@ void App::saveSettings() const
         off.add (name);
 
     o->setProperty ("midiOff", off);
+
+    auto* kc = new juce::DynamicObject();
+    const auto& style = keycast.style();
+    kc->setProperty ("shown", keycastShown);
+    kc->setProperty ("font", style.font);
+    kc->setProperty ("color", KeyCast::colourText (style.text));
+    kc->setProperty ("bg", KeyCast::colourText (style.background));
+    kc->setProperty ("size", style.size);
+    kc->setProperty ("fade", style.fade);
+    kc->setProperty ("window", keycast.windowState());
+    o->setProperty ("keycast", juce::var (kc));
     const juce::var mine (o);
 
     // Other taws share the file: write only what this one changed since it last read or wrote
@@ -3227,6 +3255,100 @@ void App::saveSettings() const
 
     settingsFile().replaceWithText (juce::JSON::toString (merged));
     settingsSeen = mine; // what wasn't written is what this taw saw anyway
+}
+
+// Keycast: shown when settings.json says so, unless its close button hid it this run. Only on
+// screen in an interactive taw (headless runs never make the window).
+void App::syncKeycast()
+{
+    if (keycast.takeCloseRequest())
+        keycastClosed = true;
+
+    if (const bool shown = interactive && keycastShown && ! keycastClosed; keycast.isVisible() != shown)
+        keycast.setVisible (shown);
+
+    keycast.tick();
+
+    // It's only a view: the keyboard stays with taw.
+    if (keycast.hasKeyboard())
+        console.focusTerminal();
+}
+
+// keycast                 show / hide
+// keycast font <name>     its font (alone: the default)
+// keycast color <colour>  the keys' colour: #rrggbb or a name (white, yellow)
+// keycast bg <colour>     the background
+// keycast size 1.5        the text's scale (on top of the window's size)
+// keycast fade 2          seconds before keys fade (0: they stay)
+// keycast reset           the default look
+Result App::keycastCommand (const juce::String& rest)
+{
+    const auto first = rest.upToFirstOccurrenceOf (" ", false, false).toLowerCase();
+    const auto value = rest.fromFirstOccurrenceOf (" ", false, false).trim();
+    auto style = keycast.style();
+    juce::String said;
+
+    if (first.isEmpty() || first == "on" || first == "off")
+    {
+        const bool show = first == "on" || (first.isEmpty() && ! (keycastShown && ! keycastClosed));
+        keycastShown = show;
+        keycastClosed = false;
+        saveSettings();
+        return Result::good (show ? juce::String (L"keycast shown \x00b7 drag its corner to size the keys")
+                                  : juce::String (L"keycast hidden \x00b7 keycast shows it"));
+    }
+
+    if (first == "font")
+    {
+        if (value.isNotEmpty() && ! juce::Font::findAllTypefaceNames().contains (value, true))
+            return Result::fail ("no font called " + value);
+
+        // The installed name, as the system spells it.
+        const auto names = juce::Font::findAllTypefaceNames();
+        style.font = value.isEmpty() ? juce::String() : names[names.indexOf (value, true)];
+        said = "keycast font " + (style.font.isEmpty() ? juce::String ("default (") + juce::Font::getDefaultMonospacedFontName() + ")" : style.font);
+    }
+    else if (first == "color" || first == "colour" || first == "bg" || first == "background")
+    {
+        const bool bg = first == "bg" || first == "background";
+        juce::Colour c;
+
+        if (! KeyCast::parseColour (value, c))
+            return Result::fail ("not a colour: " + value + L" \x00b7 #rrggbb or a name (white, yellow, black)");
+
+        (bg ? style.background : style.text) = c;
+        said = juce::String (bg ? "keycast background " : "keycast color ") + KeyCast::colourText (c);
+    }
+    else if (first == "size")
+    {
+        if (! value.containsOnly ("0123456789.") || value.isEmpty())
+            return Result::fail (L"keycast size 1.5 \x00b7 the text's scale, 0.25 to 4");
+
+        style.size = juce::jlimit (0.25, 4.0, value.getDoubleValue());
+        said = "keycast size " + juce::String (style.size, 2) + L" \x00b7 drag its corner for more";
+    }
+    else if (first == "fade")
+    {
+        if (! value.containsOnly ("0123456789.") || value.isEmpty())
+            return Result::fail (L"keycast fade 2 \x00b7 seconds before keys fade (0: they stay)");
+
+        style.fade = juce::jlimit (0.0, 60.0, value.getDoubleValue());
+        said = style.fade <= 0.0 ? juce::String ("keycast keys stay") : "keycast keys fade after " + juce::String (style.fade, 1) + " s";
+    }
+    else if (first == "reset")
+    {
+        style = {};
+        said = "keycast's look back to the default";
+    }
+    else
+        return Result::fail (L"keycast \x00b7 keycast font|color|bg|size|fade|reset");
+
+    // Changing its look shows it: that's what you're looking at.
+    keycast.setStyle (style);
+    keycastShown = true;
+    keycastClosed = false;
+    saveSettings();
+    return Result::good (said);
 }
 
 // The markers row: the arrows (and tab) go marker to marker, selecting the one they land on and
@@ -3367,6 +3489,15 @@ juce::String App::formatTime (juce::int64 pos) const
 // Input
 
 void App::handleKey (const Key& k)
+{
+    dispatchKey (k);
+
+    // After the key's done its job: if the command line has text, the key was typing.
+    if (k.code != Key::Mouse)
+        keycast.press (k, commandLine.isNotEmpty());
+}
+
+void App::dispatchKey (const Key& k)
 {
     if (opening != nullptr || closing != nullptr)
         return; // keys wait until the session is open (or closed)

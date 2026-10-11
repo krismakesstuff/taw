@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "stats", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -356,6 +356,7 @@ std::vector<App::Setting> App::projectSettings() const
         { "Theme (all sessions)", theme, {} },
         { "New session rate", juce::String (newRate / 1000.0, newRate == 44100.0 || newRate == 88200.0 ? 1 : 0) + L" kHz  (all sessions)", {} },
         { "Dated new sessions", dateSessionNames ? "on  (" + datedName ("name") + ", all sessions)" : juce::String ("off"), {} },
+        { "Keycast (all sessions)", keycastShown && ! keycastClosed ? juce::String ("shown  (keycast font|color|bg|size|fade)") : juce::String ("hidden"), "keycast " },
     };
 }
 
@@ -407,6 +408,7 @@ Result App::stepSetting (int index, int direction)
         return Result::good (dateSessionNames ? "new sessions are named " + datedName ("name") : juce::String ("new sessions keep the name you type"));
     }
 
+    if (name.startsWith ("Keycast")) return execute ("keycast");
     if (name.startsWith ("Show bounces")) return execute ((bool) s[ids::bounceReveal] ? "bounces off" : "bounces on");
 
     // The video: left/right shows or hides it, moves its start a frame, or its offset a frame.
@@ -819,6 +821,7 @@ Result App::execute (const juce::String& line)
     }
     if (v == "bounces")            return revealBounces (p.args[0].toLowerCase());
     if (v == "video")              return videoCommand (p.args, p.rest.trim());
+    if (v == "keycast")            return keycastCommand (p.rest.trim());
     if (v == "import" || v == "imp")
         return startImport (splitPaths (p.rest), p.hasSelector && ! p.tracks.empty() ? p.tracks.front() : -1);
     if (v == "undo")               return undoEdit();

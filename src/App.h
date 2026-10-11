@@ -496,10 +496,14 @@ public:
     bool trackMenuVisible = false;
     int trackMenuIndex = 0;
     std::vector<int> trackMenuTracks;
+    bool trackMenuDuplicating = false; // u: the menu asks what the copy's main playlist starts with
     std::vector<TrackMenuItem> trackMenuItems();
     Result openTrackMenu();
     bool handleTrackMenuKey (const Key&);
     Result removeTracks (std::vector<int> tracks); // "2 remove"
+    // "2 dup track" (or "2 dup track empty"): a copy under each, plugins, sends and automation
+    // and all; its main playlist a copy of the original's, or empty.
+    Result duplicateTracks (std::vector<int> tracks, bool withClips);
     Result moveTracks (int direction);             // alt+up/down: the selected (or focused) tracks, one place
 
     PluginSlot* instrumentFor (int track); // the loaded plugin, or nullptr

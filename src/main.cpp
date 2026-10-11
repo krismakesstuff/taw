@@ -1111,6 +1111,93 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --duptracktest <session>   "dup track" on an empty session (made with --new; no device
+    // or plugins needed): the copy's place, name, mixer, sends, automation, playlists, and a
+    // plugin's state in a file of its own.
+    if (args[0] == "--duptracktest" && args.size() >= 2)
+    {
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        auto appOwned = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        auto& app = *appOwned;
+        int failures = 0;
+        auto check = [&] (const char* what, bool ok)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        if (app.session == nullptr)
+            return 1;
+
+        using taw::Session;
+        namespace ids = taw::ids;
+        auto& s = *app.session;
+        app.execute ("add Vox");
+        app.execute ("add Gtr");
+        app.execute ("bus Verb");
+        app.execute ("1 send a verb");
+        app.execute ("1 v -6");
+        auto vox = s.track (0);
+        vox.setProperty (ids::armed, true, nullptr);
+
+        // A stand-in effect (not installed), its settings on disk.
+        juce::ValueTree fx (ids::INSERT);
+        fx.setProperty (ids::slot, "b", nullptr).setProperty (ids::plugin, "none", nullptr).setProperty (ids::pluginName, "Fake Comp", nullptr)
+            .setProperty (ids::pluginState, "plugins/01-Fake_Comp.state", nullptr);
+        vox.appendChild (fx, nullptr);
+        dir.getChildFile ("plugins").createDirectory();
+        dir.getChildFile ("plugins/01-Fake_Comp.state").replaceWithText ("the knobs");
+
+        juce::ValueTree lane (ids::AUTO);
+        lane.setProperty (ids::param, "vol", nullptr);
+        juce::ValueTree point (ids::POINT);
+        point.setProperty (ids::beat, 4.0, nullptr).setProperty (ids::val, 0.5, nullptr);
+        lane.appendChild (point, nullptr);
+        vox.appendChild (lane, nullptr);
+
+        vox.appendChild (Session::makeClip ("audio/v.wav", 0, 0, 1000), nullptr);
+        juce::ValueTree alt (ids::PLAYLIST);
+        alt.setProperty (ids::name, "Vox.01", nullptr);
+        vox.appendChild (alt, nullptr);
+
+        auto count = [] (const juce::ValueTree& t, const juce::Identifier& type)
+        {
+            int n = 0;
+            for (const auto& c : t)
+                n += c.hasType (type) ? 1 : 0;
+            return n;
+        };
+
+        auto r = app.execute ("1 dup track");
+        std::printf ("       %s\n", r.message.toRawUTF8());
+        const auto copy = s.track (1);
+        check ("the copy goes right under the original", r.ok && s.numTracks() == 4 && copy[ids::name].toString() == "Vox.dup1"
+                                                             && s.track (2)[ids::name].toString() == "Gtr");
+        check ("...with its volume, send and automation", std::abs ((double) copy[ids::gainDb] + 6.0) < 1e-9 && Session::send (copy, 0).isValid()
+                                                              && count (copy, ids::AUTO) == 1 && count (copy.getChildWithName (ids::AUTO), ids::POINT) == 1);
+        check ("...the main playlist's clips, not the other playlists", Session::clips (copy).size() == 1 && count (copy, ids::PLAYLIST) == 0
+                                                                            && count (vox, ids::PLAYLIST) == 1);
+        check ("...not armed", ! (bool) copy[ids::armed]);
+
+        const auto copyFx = Session::insert (copy, 1);
+        const auto statePath = copyFx[ids::pluginState].toString();
+        check ("...its effect in the same slot, with a state file of its own",
+               copyFx.isValid() && copyFx[ids::pluginName].toString() == "Fake Comp" && statePath.isNotEmpty() && statePath != fx[ids::pluginState].toString()
+                   && dir.getChildFile (statePath).loadFileAsString() == "the knobs");
+
+        r = app.execute ("1 dup track empty");
+        check ("empty: a new name, no clips", r.ok && s.track (1)[ids::name].toString() == "Vox.dup2" && Session::clips (s.track (1)).empty()
+                                                  && count (s.track (1), ids::AUTO) == 1);
+
+        app.execute ("undo");
+        app.execute ("undo");
+        check ("undo takes the copies away", s.numTracks() == 3 && s.track (1)[ids::name].toString() == "Gtr");
+
+        r = app.execute ("3 dup track");
+        check ("a bus copy is a bus of its own", r.ok && Session::isBusTrack (s.track (3)) && (int) s.track (3)[ids::busId] != (int) s.track (2)[ids::busId]);
+        return failures;
+    }
+
     if (args[0] == "--savetest" && args.size() >= 3)
     {
         const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);

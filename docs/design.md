@@ -245,6 +245,7 @@ records the selected tracks, else whatever is armed.
 | `2 n Vox` | rename |
 | `Alt+↑` / `Alt+↓` | move the selected tracks (or the focused one) up / down a place, swapping with the neighbour; ctrl+z puts it back |
 | `2 remove` / `2-4 remove` | delete tracks (`rm` too); a bus's feeds go back to the mix and sends to it go; ctrl+z brings it all back |
+| `2 dup track` / `2 dup track empty` | duplicate tracks (`u` in the track menu, which asks which): each copy goes right under its original as `Vox.dup1`, with its plugins as they're set now (in state files of its own), inserts, sends, output, volume, pan, mute, solo and automation. Its main playlist is a copy of the original's clips, or empty; the other playlists stay with the original. The copy isn't armed. A copy of a bus is a new bus (what feeds the original stays there). One undo step |
 | `@17` / `@17.3` / `@1:30` | move cursor to bar 17 / bar 17 beat 3 / 1 min 30 s |
 | `mix v -3` | set the mix volume |
 | `add` / `add 3` / `add Vox` / `add 2 Gtr` | new tracks; each takes the lowest unused input |

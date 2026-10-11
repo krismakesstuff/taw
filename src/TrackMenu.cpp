@@ -73,6 +73,122 @@ Result App::removeTracks (std::vector<int> tracks)
 }
 
 //==============================================================================
+// Duplicating tracks: "2 dup track" (or "2 dup track empty"), or u in the track menu. Each copy
+// goes right under its original with the same plugins (as they're set now, in state files of
+// its own), inserts, sends, output, volume, pan and automation. Its main playlist is a copy of
+// the original's, or empty; the other playlists stay with the original. One undo step.
+
+Result App::duplicateTracks (std::vector<int> tracks, bool withClips)
+{
+    if (session == nullptr)
+        return Result::fail ("no session open");
+
+    if (recording)
+        return Result::fail (L"not while recording \x2014 stop first");
+
+    std::sort (tracks.begin(), tracks.end());
+    tracks.erase (std::unique (tracks.begin(), tracks.end()), tracks.end());
+    tracks.erase (std::remove_if (tracks.begin(), tracks.end(), [this] (int t) { return t < 0 || t >= session->numTracks(); }), tracks.end());
+
+    if (tracks.empty())
+        return Result::fail (L"which track? shift+T on one (\x2191\x2193), or 2 dup track");
+
+    auto nameTaken = [this] (const juce::String& name)
+    {
+        for (int t = 0; t < session->numTracks(); ++t)
+            if (session->track (t)[ids::name].toString().equalsIgnoreCase (name))
+                return true;
+
+        return false;
+    };
+
+    juce::StringArray reserved; // state files named in this go, not written yet
+    std::vector<int> made;
+
+    // A plugin's settings as they are now (its window may have changed them since the last
+    // save) into a state file of the copy's own.
+    auto copyState = [&] (juce::ValueTree node, const juce::ValueTree& from, int index)
+    {
+        juce::MemoryBlock state;
+        bool have = false;
+
+        for (auto& in : hosted)
+            if (in.node == from && in.slot != nullptr)
+            {
+                state = in.slot->getState();
+                have = true;
+            }
+
+        if (const auto path = from[ids::pluginState].toString(); ! have && path.isNotEmpty())
+            have = pluginStateFile (path, false).loadFileAsData (state);
+
+        const auto base = juce::String (index + 1).paddedLeft ('0', 2) + "-"
+                          + juce::File::createLegalFileName (from[ids::pluginName].toString()).replaceCharacter (' ', '_');
+        auto rel = juce::String();
+
+        for (int n = 1; rel.isEmpty() || reserved.contains (rel); ++n)
+            rel = newPluginStateFile (n > 1 ? base + "_" + juce::String (n) : base).getRelativePathFrom (session->folder()).replaceCharacter ('\\', '/');
+
+        reserved.add (rel);
+        node.setProperty (ids::pluginState, rel, nullptr);
+
+        if (have)
+        {
+            const auto file = pluginStateFile (rel, true);
+            file.getParentDirectory().createDirectory();
+            file.replaceWithData (state.getData(), state.getSize());
+        }
+    };
+
+    // Copies go in from the top, so each one moves the originals below it down a place.
+    for (size_t i = 0; i < tracks.size(); ++i)
+    {
+        const auto index = tracks[i] + (int) i;
+        const auto original = session->track (index);
+        auto copy = original.createCopy();
+
+        for (int c = copy.getNumChildren(); --c >= 0;)
+            if (const auto child = copy.getChild (c); child.hasType (ids::PLAYLIST) || (! withClips && Session::isClip (child)))
+                copy.removeChild (c, nullptr);
+
+        // Its main playlist takes its name; armed too it would record the same input twice.
+        copy.removeProperty (ids::playlist, nullptr);
+        copy.removeProperty (ids::playlists, nullptr);
+        copy.setProperty (ids::armed, false, nullptr);
+
+        // Pro Tools' names: Vox.dup1, Vox.dup2...
+        const auto base = original[ids::name].toString().upToLastOccurrenceOf (".dup", false, false);
+        auto name = juce::String();
+
+        for (int n = 1; name.isEmpty() || nameTaken (name); ++n)
+            name = base + ".dup" + juce::String (n);
+
+        copy.setProperty (ids::name, name, nullptr);
+
+        // A bus copy is a bus of its own: what goes into the original stays there.
+        if (Session::isBusTrack (copy))
+            copy.setProperty (ids::busId, session->nextBusId(), nullptr);
+
+        if (Session::isInstrumentTrack (copy) && original[ids::pluginState].toString().isNotEmpty())
+            copyState (copy, original, index + 1);
+
+        for (int k = 0; k < Session::numSends; ++k)
+            if (auto ins = Session::insert (copy, k); ins.isValid())
+                copyState (ins, Session::insert (original, k), index + 1);
+
+        session->tree().addChild (copy, session->tree().indexOf (original) + 1, um());
+        made.push_back (index + 1);
+    }
+
+    clearSelection();
+    ioCell = -1;
+    focusTrack (made.front());
+
+    const auto playlist = withClips ? juce::String ("its clips") : juce::String ("an empty playlist");
+    return Result::good ("duplicated " + trackList (tracks) + L" \x2192 " + trackList (made) + " with " + playlist + L" \x00b7 ctrl+z undoes");
+}
+
+//==============================================================================
 // Moving tracks: alt+up/down swaps the selected tracks (or the focused one) with the track
 // next to them, so they move as a block. The focus and selection go with them.
 
@@ -156,6 +272,14 @@ std::vector<App::TrackMenuItem> App::trackMenuItems()
         };
     };
 
+    // Duplicating: the copy's main playlist, the original's clips or none.
+    if (trackMenuDuplicating)
+    {
+        items.push_back ({ 'c', "Copy the main playlist", sel + " dup track", [this, sel] { return execute (sel + " dup track"); } });
+        items.push_back ({ 'e', "New empty playlist", sel + " dup track empty", [this, sel] { return execute (sel + " dup track empty"); } });
+        return items;
+    }
+
     items.push_back ({ 'n', one ? "Rename" : "Name them", sel + " n <name>", typeIn (sel + " n ") });
 
     if (! bus)
@@ -206,6 +330,14 @@ std::vector<App::TrackMenuItem> App::trackMenuItems()
                            [this, sel, sample] { return execute (sel + (sample ? " audio" : " sample")); } });
     }
 
+    // The menu stays up and asks what the copy starts with.
+    items.push_back ({ 'u', one ? L"Duplicate\x2026" : L"Duplicate them\x2026", sel + " dup track", [this]
+                       {
+                           trackMenuDuplicating = trackMenuVisible = true;
+                           trackMenuIndex = 0;
+                           return Result::good();
+                       } });
+
     items.push_back ({ 'd', one ? "Delete track" : "Delete tracks", sel + " remove",
                        [this, sel] { return execute (sel + " remove"); }, true });
 
@@ -219,6 +351,7 @@ Result App::openTrackMenu()
 
     trackMenuTracks = defaultTargets();
     trackMenuIndex = 0;
+    trackMenuDuplicating = false;
     trackMenuVisible = ! trackMenuTracks.empty();
     return Result::good();
 }
@@ -233,7 +366,7 @@ bool App::handleTrackMenuKey (const Key& k)
 
     auto run = [&] (int i)
     {
-        trackMenuVisible = false;
+        trackMenuVisible = trackMenuDuplicating = false;
 
         if (i >= 0 && i < n)
             say (items[(size_t) i].run());

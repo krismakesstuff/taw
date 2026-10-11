@@ -2209,6 +2209,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"2n Vox", L"rename", L"2x", L"drop latest clip" },
             { Pair, L"alt \x2191 \x2193", L"move tracks up / down", L"2 remove", L"delete track 2 (undo ok)" },
             { Pair, L"shift+T", L"track menu", L"2 stereo", L"stereo (inputs 3-4)" },
+            { Pair, L"2 dup track", L"duplicate (+ empty)", nullptr, nullptr },
             { Pair, L"2 pan l30", L"pan (alt+[ ] nudges)", L"height 3", L"rows per track (1-4)" },
         } },
         { L"EDIT", {
@@ -2491,7 +2492,8 @@ void Ui::drawTrackMenu (App& app)
         canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
 
     const auto& tracks = app.trackMenuTracks;
-    const auto title = tracks.size() == 1 ? juce::String ("TRACK ") + juce::String (tracks.front() + 1) : juce::String ("TRACKS");
+    const auto title = juce::String (app.trackMenuDuplicating ? "DUPLICATE " : "")
+                       + (tracks.size() == 1 ? juce::String ("TRACK ") + juce::String (tracks.front() + 1) : juce::String ("TRACKS"));
     const auto what = tracks.size() == 1 ? app.session->track (tracks.front())[ids::name].toString() : trackList (tracks).fromFirstOccurrenceOf (" ", false, false);
     canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
     canvas.text (x0 + 3 + title.length(), y0 + 1, what, colour::dim, bg, false, boxW - title.length() - 5);

@@ -929,6 +929,8 @@ Result App::execute (const juce::String& line)
     if (v == "copy")  return copySelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "cut")   return cutSelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "del")   return deleteSelection (p.hasSelector ? p.tracks : defaultTargets());
+    if (v == "dup" && p.args[0].equalsIgnoreCase ("track"))
+        return duplicateTracks (p.hasSelector ? p.tracks : defaultTargets(), ! p.args[1].equalsIgnoreCase ("empty"));
     if (v == "dup")   return duplicateSelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "paste")
     {

@@ -1,7 +1,8 @@
 # Plan: clip fades, the browser window, kits
 
-Status (2026-10-11): decided with the user, nothing built yet. Order: fades, then the browser
-window, then kits (which need both).
+Status (2026-10-11): step 1 (fades) built on branch `fades` (see "Fades" in `docs/design.md`);
+the rest decided, not built. Order: fades, then the browser window, then kits (which need both).
+Typed fade commands are `clip fade ...` and `xfade` (not `fade`: `f` is the fill hotkey).
 
 Written so another agent can pick it up. Read `docs/design.md` first (Threads, Editing,
 Sample tracks), and the memories on Pro Tools keys and recording-first patterns.

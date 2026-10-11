@@ -95,6 +95,11 @@ TAW_ID (start)  // CLIP: timeline position, samples
 TAW_ID (offset) // CLIP: where in the file it starts playing, samples; MIDICLIP, HITCLIP: where in its content, beats
 TAW_ID (length)
 TAW_ID (position)
+TAW_ID (fadeIn)       // CLIP: fade in from its start, samples; over another clip it's a crossfade (absent = none)
+TAW_ID (fadeOut)      // CLIP: fade out to its end, the same
+TAW_ID (fadeInShape)  // ...its curve: "eqp" (equal power, default) | "lin" | "s" | "exp"
+TAW_ID (fadeOutShape)
+TAW_ID (declickMs)    // SESSION: the fade every audio clip edge gets when it has none (absent = 2, 0 = off)
 
 #undef TAW_ID
 } // namespace taw::ids

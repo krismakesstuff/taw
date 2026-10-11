@@ -55,12 +55,49 @@ struct Recorder
     int ovCount = 0;
 };
 
+// A fade's curve. Each runs 0 to 1 over t; what fades the other way under it takes the same
+// curve backwards, so equal power keeps the level of unrelated material steady across a
+// crossfade and linear keeps the level of the same material (a cut in one take) steady.
+enum class FadeShape : std::uint8_t { equalPower, linear, sCurve, exponential };
+
+inline float fadeCurve (FadeShape shape, float t) noexcept
+{
+    switch (shape)
+    {
+        case FadeShape::linear:      return t;
+        case FadeShape::sCurve:      return 0.5f - 0.5f * std::cos (juce::MathConstants<float>::pi * t);
+        case FadeShape::exponential: return t * t;
+        case FadeShape::equalPower:  break;
+    }
+
+    return std::sin (juce::MathConstants<float>::halfPi * t);
+}
+
+// As session.json and the status line name them: "eqp", "lin", "s", "exp".
+inline const char* fadeShapeName (FadeShape shape) noexcept
+{
+    constexpr const char* names[] = { "eqp", "lin", "s", "exp" };
+    return names[(int) shape];
+}
+
+inline FadeShape fadeShapeFromName (const juce::String& name) noexcept
+{
+    for (int s = 0; s < 4; ++s)
+        if (name.equalsIgnoreCase (fadeShapeName ((FadeShape) s)))
+            return (FadeShape) s;
+
+    return FadeShape::equalPower;
+}
+
 // A window into an audio file, placed on the timeline: plays audio[offset, offset + length)
 // from timeline sample start. Many clips can share one file (that's how copy/paste works).
+// Its fades, in samples, crossfade with whatever is under it (silence: a plain fade).
 struct ClipPlay
 {
     std::shared_ptr<const juce::AudioBuffer<float>> audio;
     juce::int64 start = 0, offset = 0, length = 0;
+    juce::int64 fadeIn = 0, fadeOut = 0;
+    FadeShape fadeInShape = FadeShape::equalPower, fadeOutShape = FadeShape::equalPower;
 };
 
 // A delay on one route (a track's output or a send), so every path reaches the mix, or a bus,
@@ -256,22 +293,50 @@ inline void setPan (TrackPlay& tp, float pan)
 inline bool isStereo (const TrackPlay& tp) { return tp.stereo; }
 
 // Writes a track's clips for [pos, pos + n) into its left/right bus at unity (mono clips go to
-// both sides). Each clip overwrites what's under it, so the later clip wins where they overlap.
-// Shared by live playback and bounces so the two can't drift apart.
+// both sides). Each clip overwrites what's under it, so the later clip wins where they overlap,
+// except over its fades: there it crossfades with what's under it (what earlier clips wrote, or
+// silence). Shared by live playback and bounces so the two can't drift apart.
 inline void renderClips (const TrackPlay& tp, juce::int64 pos, int n, float* left, float* right)
 {
     for (const auto& c : tp.clips)
     {
         const auto from = juce::jmax (pos, c.start);
-        const auto to = juce::jmin (pos + n, c.start + c.length);
+        const auto end = c.start + c.length;
+        const auto to = juce::jmin (pos + n, end);
 
         if (to <= from)
             continue;
 
-        const auto src = (int) (c.offset + (from - c.start)), count = (int) (to - from);
-        const auto lastChannel = c.audio->getNumChannels() - 1;
-        juce::FloatVectorOperations::copy (left + (from - pos), c.audio->getReadPointer (0, src), count);
-        juce::FloatVectorOperations::copy (right + (from - pos), c.audio->getReadPointer (juce::jmin (1, lastChannel), src), count);
+        const auto* srcL = c.audio->getReadPointer (0, (int) c.offset);
+        const auto* srcR = c.audio->getReadPointer (juce::jmin (1, c.audio->getNumChannels() - 1), (int) c.offset);
+
+        // The fades fit in the clip (the fade in first).
+        const auto fadeIn = juce::jlimit<juce::int64> (0, c.length, c.fadeIn);
+        const auto fadeOut = juce::jlimit<juce::int64> (0, c.length - fadeIn, c.fadeOut);
+        const auto bodyFrom = juce::jmax (from, c.start + fadeIn), bodyTo = juce::jmin (to, end - fadeOut);
+
+        if (bodyTo > bodyFrom)
+        {
+            const auto count = (int) (bodyTo - bodyFrom);
+            juce::FloatVectorOperations::copy (left + (bodyFrom - pos), srcL + (bodyFrom - c.start), count);
+            juce::FloatVectorOperations::copy (right + (bodyFrom - pos), srcR + (bodyFrom - c.start), count);
+        }
+
+        // t runs 0 to 1 into the clip: up from its start, down to its last sample.
+        auto blend = [&] (juce::int64 x, FadeShape shape, float t)
+        {
+            const auto in = fadeCurve (shape, t), out = fadeCurve (shape, 1.0f - t);
+            auto& l = left[x - pos];
+            auto& r = right[x - pos];
+            l = l * out + srcL[x - c.start] * in;
+            r = r * out + srcR[x - c.start] * in;
+        };
+
+        for (auto x = from; x < juce::jmin (to, c.start + fadeIn); ++x)
+            blend (x, c.fadeInShape, (float) (x - c.start) / (float) fadeIn);
+
+        for (auto x = juce::jmax (from, end - fadeOut); x < to; ++x)
+            blend (x, c.fadeOutShape, (float) (end - 1 - x) / (float) fadeOut);
     }
 }
 

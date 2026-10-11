@@ -616,6 +616,40 @@ sample tracks, MIDI clips on instrument tracks.
   into pasted text, so `Ctrl+C` also puts `taw:paste` on the Windows clipboard; that text
   arriving is taken as the paste.
 
+### Fades
+
+Audio clips only (`Fades.cpp`). `Ctrl+F` (Pro Tools' fades) works from the selection, on each
+selected audio track:
+
+| Selection | Makes |
+|---|---|
+| from a clip's start (or before it) into it | a fade in, to the selection's end |
+| from inside a clip to its end (or past it) | a fade out, from the selection's start |
+| across where two clips meet (touch or overlap) | a crossfade spanning the selection |
+
+Several at once are all made; a whole clip inside the selection gets nothing. `Ctrl+F` again
+on the same fades moves each to its next curve: equal power (`eqp`, default), linear (`lin`),
+S-curve (`s`), exponential (`exp`). Typed (not `fade`: `f` is a hotkey): `clip fade` (as
+`Ctrl+F`), `clip fade in 10ms [shape]`, `clip fade out 1/4`, `clip fade off` on the clip under
+the cursor; `xfade 20ms [shape]` where two clips meet nearest the cursor (left selected, so
+`Ctrl+F` changes its curve); `declick 2` / `declick off`. Lengths: `ms`, `s`, note values
+(`1/4` a beat), a bare number in ms.
+
+- **Model:** `fadeIn`, `fadeOut` (samples) and `fadeInShape`, `fadeOutShape` on the CLIP.
+  `renderClips` crossfades a clip's fades with what's under it (what earlier clips wrote, or
+  silence): `under * curve(1 - t) + clip * curve(t)`. So a crossfade is the later clip
+  overlapping the earlier one with a fade as long as the overlap; making one stretches both
+  into their handles (the file past their edges), and refuses, saying how much there is, when
+  a handle is too short. Only the top clip of a crossfade keeps a fade on that side.
+- **Declick:** every audio clip edge without a fade gets one of `declickMs` (session, default
+  2, 0 off) when the graph is built, except where another clip butts against it exactly (a cut
+  in one take carries straight on).
+- **Edits:** edges a cut, delete, separate or copy makes are new, so they lose their fades;
+  edges that stay keep them.
+- **Screen:** on the clip's top row, `╱` over a fade in, `╲` over a fade out, `╳` over a
+  crossfade. Declick isn't drawn.
+- **Next:** curves and corner handles in the audio editor; clip gain in the same render.
+
 ### Playlists
 
 As in Pro Tools: other versions of a track's clips, so you re-record the takes you don't like

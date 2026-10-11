@@ -1499,6 +1499,7 @@ void Ui::drawTimeline (App& app)
             {
                 const ClipData* data;
                 juce::int64 start, offset, length;
+                juce::int64 fadeIn, fadeOut; // as set (the declick isn't drawn)
             };
 
             std::vector<LaneClip> laneClips;
@@ -1523,7 +1524,8 @@ void Ui::drawTimeline (App& app)
             {
                 for (const auto& c : Session::clips (source))
                     if (auto it = app.clips.find (c[ids::file].toString()); it != app.clips.end())
-                        laneClips.push_back ({ &it->second, (juce::int64) c[ids::start], (juce::int64) c[ids::offset], (juce::int64) c[ids::length] });
+                        laneClips.push_back ({ &it->second, (juce::int64) c[ids::start], (juce::int64) c[ids::offset], (juce::int64) c[ids::length],
+                                               (juce::int64) c[ids::fadeIn], (juce::int64) c[ids::fadeOut] });
             }
 
             const LiveTake* liveTake = nullptr;
@@ -1544,6 +1546,7 @@ void Ui::drawTimeline (App& app)
                     bool inClip = false;
                     std::optional<WavePoint> wave; // a clip or take here: drawn per row by waveCell
                     wchar_t edgeCh = 0;            // a clip's first or last column
+                    wchar_t fadeCh = 0;            // over a fade, on the top row: in, out or crossfade
 
                     const auto line = gridLevel (t0, t1);
 
@@ -1611,6 +1614,16 @@ void Ui::drawTimeline (App& app)
                                 else if (end > t0 && end <= t1)
                                     edgeCh = edges ? L'\x2595' : L'\x2590';
                             }
+
+                            const bool fadingIn = lc.fadeIn > 0 && t0 < start + (double) lc.fadeIn;
+                            const bool fadingOut = lc.fadeOut > 0 && t1 > end - (double) lc.fadeOut;
+
+                            if (fadingIn || fadingOut)
+                            {
+                                const bool over = std::any_of (laneClips.begin(), laneClips.begin() + k, [&] (const LaneClip& u)
+                                                               { return t1 > (double) u.start && t0 < (double) (u.start + u.length); });
+                                fadeCh = over ? L'\x2573' : fadingIn ? L'\x2571' : L'\x2572';
+                            }
                             break;
                         }
                     }
@@ -1633,7 +1646,7 @@ void Ui::drawTimeline (App& app)
                         if (t1 > from && t0 < end)
                         {
                             wave = waveRange (liveTake->overview, nullptr, takeStart, std::max (t0, from), t1);
-                            edgeCh = 0;
+                            edgeCh = fadeCh = 0;
                             inClip = false;
                             fg = colour::liveWave;
                             cellBg = colour::recBg;
@@ -1652,8 +1665,8 @@ void Ui::drawTimeline (App& app)
                     for (int r = 0; r < rowsPerTrack; ++r)
                     {
                         const auto cell = edgeCh == 0 && wave ? waveCell (*wave, r) : WaveCell { edgeCh != 0 ? edgeCh : ch, false };
-                        auto rowCh = cell.ch;
-                        auto rowFg = fg;
+                        auto rowCh = r == 0 && fadeCh != 0 ? fadeCh : cell.ch;
+                        auto rowFg = r == 0 && fadeCh != 0 ? colour::accent : fg;
                         auto rowBg = cellBg;
                         const bool empty = ! cell.invert && (rowCh == L' ' || rowCh == gridMark);
 
@@ -2338,7 +2351,8 @@ void Ui::drawHelp (App& app)
             { Pair, L"sel 3 5", L"select bars 3 to 5", L"grid 16", L"steps of a 16th" },
             { Pair, L"sel clip", L"select the clip here", L"snap 50", L"quantize hits (50%)" },
             { Pair, L"alt+shift+3", L"consolidate (cons)", L"alt+/", L"toggle a hit at cursor" },
-            { Pair, L"ctrl e", L"cut clips here (sep)", nullptr, nullptr },
+            { Pair, L"ctrl e", L"cut clips here (sep)", L"ctrl f", L"fade/crossfade selection" },
+            { Pair, L"xfade 20ms", L"crossfade nearest here", L"clip fade", L"in 10ms, out 1/4, off" },
             { Note, L"Automation goes with the clips: copy, cut, paste and duplicate carry it." },
             { Pair, L"ctrl+p", L"new playlist (empty)", L"shift+P", L"playlists as lanes" },
             { Pair, L"ctrl+alt+p", L"copy of the main", L"shift+S lane", L"plays in the main's place" },

@@ -19,6 +19,7 @@
 #include <functional>
 #include <optional>
 #include <map>
+#include <set>
 #include <thread>
 
 namespace taw
@@ -573,6 +574,20 @@ public:
     // becomes its own clip), or with no selection at the cursor on the grid.
     Result separateClips (const std::vector<int>& tracks);
     int splitClipsAt (juce::ValueTree holder, juce::int64 at); // the clips split there
+
+    // Fades (Fades.cpp). ctrl+f: by what the selection covers on each track, a fade in, a fade
+    // out or a crossfade; again on the same fades, the next curve. "clip fade in 10ms",
+    // "clip fade out 1/4", "clip fade off" on the clip under the cursor; "xfade 20ms" where two
+    // clips meet nearest the cursor; "declick 2" (ms, off).
+    struct FadePlan;
+    Result fadeSelection (const std::vector<int>& tracks);
+    Result clipCommand (const juce::StringArray& args);
+    Result crossfadeCommand (const juce::StringArray& args);
+    Result setDeclick (const juce::String& arg);
+    Result planFades (juce::ValueTree holder, juce::Range<juce::int64> range, FadePlan& plan);
+    Result applyFades (FadePlan& plan, std::optional<FadeShape> shape);
+    juce::int64 lengthInSamples (const juce::String& spec) const; // "10ms", "0.5s", "1/4", "20" (ms); -1 if it isn't one
+    juce::ValueTree clipUnderCursor() const;                      // the focused track's topmost audio clip there
     // A hit at a timeline beat on a sample track: into the clip there, this record pass's clip,
     // or a clip for its bar (growing the one just before when it reaches the bar).
     void addHit (int track, double beat, float vel);

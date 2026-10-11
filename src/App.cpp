@@ -1840,7 +1840,19 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             continue;
         }
 
-        for (const auto& c : Session::clips (source))
+        // Declick: an edge without a fade gets a short one, unless another clip butts against it
+        // there (a cut in one take carries straight on; a crossfade is ctrl+f's).
+        const auto clipList = Session::clips (source);
+        const auto declick = (juce::int64) std::llround ((double) session->tree().getProperty (ids::declickMs, 2.0) * 0.001 * sampleRate());
+        std::set<juce::int64> starts, ends;
+
+        for (const auto& c : clipList)
+        {
+            starts.insert ((juce::int64) c[ids::start]);
+            ends.insert ((juce::int64) c[ids::start] + (juce::int64) c[ids::length]);
+        }
+
+        for (const auto& c : clipList)
         {
             const auto* data = clipFor (c);
 
@@ -1851,10 +1863,16 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
             const auto fileLength = (juce::int64) data->audio->getNumSamples();
             const auto offset = juce::jlimit<juce::int64> (0, fileLength, (juce::int64) c[ids::offset]);
             const auto length = juce::jlimit<juce::int64> (0, fileLength - offset, (juce::int64) c[ids::length]);
+            const auto start = (juce::int64) c[ids::start];
 
             if (length > 0)
             {
-                tp.clips.push_back ({ data->audio, (juce::int64) c[ids::start], offset, length });
+                ClipPlay play { data->audio, start, offset, length };
+                play.fadeIn = std::max ((juce::int64) c[ids::fadeIn], ends.count (start) > 0 ? 0 : declick);
+                play.fadeOut = std::max ((juce::int64) c[ids::fadeOut], starts.count (start + length) > 0 ? 0 : declick);
+                play.fadeInShape = fadeShapeFromName (c[ids::fadeInShape]);
+                play.fadeOutShape = fadeShapeFromName (c[ids::fadeOutShape]);
+                tp.clips.push_back (std::move (play));
                 tp.stereo = tp.stereo || data->audio->getNumChannels() > 1;
             }
         }
@@ -4094,6 +4112,11 @@ void App::handleMainKey (const Key& k)
         {
             beginEdit ("separate");
             say (separateClips (defaultTargets()));
+        }
+        else if (k.ch == 'f') // fades from the selection (Pro Tools' ctrl+f); again: the next curve
+        {
+            beginEdit ("fade");
+            say (fadeSelection (defaultTargets()));
         }
         else if (k.ch == 'p') // a new empty playlist becomes the main (Pro Tools' new playlist)
             say (newPlaylist (false));

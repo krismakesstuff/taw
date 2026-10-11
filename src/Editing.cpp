@@ -10,6 +10,18 @@ namespace taw
 namespace
 {
 bool overlaps (juce::int64 s, juce::int64 e, juce::Range<juce::int64> r) { return s < r.getEnd() && e > r.getStart(); }
+
+void clearFadeIn (juce::ValueTree clip, juce::UndoManager* um)
+{
+    clip.removeProperty (ids::fadeIn, um);
+    clip.removeProperty (ids::fadeInShape, um);
+}
+
+void clearFadeOut (juce::ValueTree clip, juce::UndoManager* um)
+{
+    clip.removeProperty (ids::fadeOut, um);
+    clip.removeProperty (ids::fadeOutShape, um);
+}
 } // namespace
 
 double App::snapBeats (juce::int64 samples) const
@@ -71,9 +83,20 @@ Clipboard::Lane App::gatherLane (const juce::ValueTree& track, const juce::Value
             if (! overlaps (s, e, range))
                 continue;
 
+            // A fade comes along with its edge; an edge the range cuts is new.
             const auto lo = juce::jmax (s, range.getStart()), hi = juce::jmin (e, range.getEnd());
-            lane.items.push_back (Session::makeClip (clip[ids::file], lo - range.getStart(),
-                                                     (juce::int64) clip[ids::offset] + (lo - s), hi - lo));
+            auto piece = clip.createCopy();
+            piece.setProperty (ids::start, lo - range.getStart(), nullptr)
+                .setProperty (ids::offset, (juce::int64) clip[ids::offset] + (lo - s), nullptr)
+                .setProperty (ids::length, hi - lo, nullptr);
+
+            if (lo != s)
+                clearFadeIn (piece, nullptr);
+
+            if (hi != e)
+                clearFadeOut (piece, nullptr);
+
+            lane.items.push_back (piece);
         }
     }
 
@@ -148,19 +171,26 @@ int App::clearClips (const juce::ValueTree& kindOf, juce::ValueTree track, juce:
         }
         else if (s < a && e > b)
         {
-            // The range is inside the clip: keep the head, add the tail right above it.
-            track.addChild (Session::makeClip (clip[ids::file], b, offset + (b - s), e - b), track.indexOf (clip) + 1, um());
+            // The range is inside the clip: keep the head, add the tail right above it. The
+            // edges the range leaves are new, so they have no fades.
+            auto tail = clip.createCopy();
+            tail.setProperty (ids::start, b, nullptr).setProperty (ids::offset, offset + (b - s), nullptr).setProperty (ids::length, e - b, nullptr);
+            clearFadeIn (tail, nullptr);
+            track.addChild (tail, track.indexOf (clip) + 1, um());
             clip.setProperty (ids::length, a - s, um());
+            clearFadeOut (clip, um());
         }
         else if (s < a)
         {
             clip.setProperty (ids::length, a - s, um());
+            clearFadeOut (clip, um());
         }
         else
         {
             clip.setProperty (ids::start, b, um())
                 .setProperty (ids::offset, offset + (b - s), um())
                 .setProperty (ids::length, e - b, um());
+            clearFadeIn (clip, um());
         }
     }
 
@@ -371,7 +401,9 @@ int App::splitClipsAt (juce::ValueTree holder, juce::int64 at)
         tail.setProperty (ids::start, at, nullptr)
             .setProperty (ids::offset, (juce::int64) clip[ids::offset] + (at - s), nullptr)
             .setProperty (ids::length, e - at, nullptr);
+        clearFadeIn (tail, nullptr); // the cut is a new edge on both sides
         clip.setProperty (ids::length, at - s, um());
+        clearFadeOut (clip, um());
         holder.addChild (tail, holder.indexOf (clip) + 1, um());
         ++n;
     }

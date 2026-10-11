@@ -10,6 +10,8 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
 - Audio, MIDI and sample tracks; VST3 instruments and effects (Audio Units too on macOS), five
   inserts and five sends per track, buses, latency compensation and a low-latency mode.
 - Editing: copy, cut, paste, duplicate, consolidate, undo; markers; loop recording onto playlists.
+- Clip fades and crossfades (`Ctrl+F` from the selection, `xfade`, `clip fade`), with a short
+  declick on every clip edge.
 - Automation lanes, written by hand or recorded from MIDI controllers.
 - A sample library and browser, with a sound-alike map.
 - Video for scoring to picture, and bouncing with picture (`bv`).

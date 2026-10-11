@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "stats", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl", "clip", "xfade", "declick" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -941,6 +941,12 @@ Result App::execute (const juce::String& line)
     if (v == "sel")   return selectRange (p.args[0], p.args[1]);
     if (v == "cons" || v == "consolidate") return consolidate (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "sep" || v == "separate" || v == "split") return separateClips (p.hasSelector ? p.tracks : defaultTargets());
+
+    // Fades (ctrl+f makes them from the selection): "clip fade in 10ms", "xfade 20ms",
+    // "declick 2". Not "fade": f is a hotkey on an empty line.
+    if (v == "clip")    { if (p.hasSelector && ! p.tracks.empty()) focusTrack (p.tracks.front()); return clipCommand (p.args); }
+    if (v == "xfade")   { if (p.hasSelector && ! p.tracks.empty()) focusTrack (p.tracks.front()); return crossfadeCommand (p.args); }
+    if (v == "declick") return setDeclick (p.args[0]);
     if (v == "copy")  return copySelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "cut")   return cutSelection (p.hasSelector ? p.tracks : defaultTargets());
     if (v == "del")   return deleteSelection (p.hasSelector ? p.tracks : defaultTargets());

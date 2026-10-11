@@ -2000,6 +2000,78 @@ int main (int argc, char** argv)
         std::printf ("%-44s %s\n", "block size doesn't matter", same ? "ok" : "FAILED");
         failures += same ? 0 : 1;
 
+        // Fades: a constant 1.0 clip, so what comes out is the curve itself.
+        {
+            auto ones = [] (int len) { auto b = std::make_shared<juce::AudioBuffer<float>> (1, len); for (int i = 0; i < len; ++i) b->setSample (0, i, 1.0f); return b; };
+            auto twos = [] (int len) { auto b = std::make_shared<juce::AudioBuffer<float>> (1, len); for (int i = 0; i < len; ++i) b->setSample (0, i, 2.0f); return b; };
+            std::vector<float> fl, fr;
+
+            auto render = [&] (const taw::TrackPlay& t, int len, int block)
+            {
+                fl.assign ((size_t) len, 0.0f);
+                fr.assign ((size_t) len, 0.0f);
+                for (int pos = 0; pos < len; pos += block)
+                    taw::renderClips (t, pos, std::min (block, len - pos), fl.data() + pos, fr.data() + pos);
+            };
+
+            auto expectF = [&] (int i, float v, const char* what)
+            {
+                const bool ok = std::abs (fl[(size_t) i] - v) < 1e-4f && std::abs (fr[(size_t) i] - v) < 1e-4f;
+                std::printf ("%-44s sample %3d = %.4f (want %.4f) %s\n", what, i, fl[(size_t) i], v, ok ? "ok" : "FAILED");
+                failures += ok ? 0 : 1;
+            };
+
+            // Fade in over the first 10 samples, out over the last 20, over silence.
+            taw::TrackPlay f;
+            taw::ClipPlay c { ones (100), 0, 0, 100 };
+            c.fadeIn = 10;
+            c.fadeOut = 20;
+            c.fadeInShape = taw::FadeShape::linear;
+            c.fadeOutShape = taw::FadeShape::linear;
+            f.clips.push_back (c);
+            render (f, 100, 100);
+            expectF (0, 0.0f, "fade in starts silent");
+            expectF (5, 0.5f, "linear fade in, halfway");
+            expectF (10, 1.0f, "after the fade in: the clip");
+            expectF (79, 1.0f, "just before the fade out");
+            expectF (89, 10.0f / 20.0f, "linear fade out, halfway");
+            expectF (99, 0.0f, "fade out ends silent");
+            const auto whole = fl;
+            render (f, 100, 7);
+            std::printf ("%-44s %s\n", "fades don't care about block size", fl == whole ? "ok" : "FAILED");
+            failures += fl == whole ? 0 : 1;
+
+            // Fades longer than the clip fit inside it, the fade in first.
+            f.clips[0].fadeIn = 80;
+            f.clips[0].fadeOut = 80;
+            render (f, 100, 100);
+            expectF (40, 0.5f, "an 80-sample fade in on a 100-sample clip");
+            expectF (89, 10.0f / 20.0f, "...leaves the fade out 20 samples");
+
+            // A crossfade: a later clip of 2.0 over the 1.0 one from 40, fading in for 20.
+            taw::TrackPlay x;
+            x.clips.push_back ({ ones (100), 0, 0, 100 });
+            taw::ClipPlay over { twos (60), 40, 0, 60 };
+            over.fadeIn = 20;
+            x.clips.push_back (over);
+            render (x, 100, 100);
+            const float mid = std::sin (juce::MathConstants<float>::halfPi * 0.5f);
+            expectF (39, 1.0f, "before the crossfade: the earlier clip");
+            expectF (40, 1.0f, "crossfade starts on the earlier clip");
+            expectF (50, 1.0f * mid + 2.0f * mid, "equal power: both at -3 dB halfway");
+            expectF (60, 2.0f, "after the crossfade: the later clip");
+
+            // Each shape runs 0 to 1, and backwards under the other clip.
+            for (int s = 0; s < 4; ++s)
+            {
+                const auto shape = (taw::FadeShape) s;
+                const bool ok = std::abs (taw::fadeCurve (shape, 0.0f)) < 1e-6f && std::abs (taw::fadeCurve (shape, 1.0f) - 1.0f) < 1e-6f
+                                && taw::fadeShapeFromName (taw::fadeShapeName (shape)) == shape;
+                std::printf ("%-44s %s\n", (juce::String ("shape ") + taw::fadeShapeName (shape) + " runs 0 to 1, named").toRawUTF8(), ok ? "ok" : "FAILED");
+                failures += ok ? 0 : 1;
+            }
+        }
+
         // Hits: a 10-sample sample (1.000, 1.001, ...) at 0 (vel 1) and 5 (vel 0.5) overlap and sum.
         {
             taw::TrackPlay sp;

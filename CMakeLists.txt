@@ -141,11 +141,22 @@ if (WIN32)
 
     # Delay-loaded: taw starts (and loads ~130 MB less) until a video is opened, and without the
     # DLLs it still runs, just without video. They're copied next to taw.exe, with FFmpeg's licence.
-    set(TAW_FFMPEG_LIBS avformat avcodec avutil swscale)
+    # The build's own .lib files are MinGW import libraries, which MSVC links but can't delay-load
+    # (LNK4199, and taw.exe wouldn't start without the DLLs): import libraries made here from its
+    # .def files instead.
     set(TAW_FFMPEG_DLLS avformat-63 avcodec-63 avutil-61 swscale-10)
+    set(TAW_FFMPEG_IMPLIB_DIR ${CMAKE_BINARY_DIR}/ffmpeg-implib)
+    file(MAKE_DIRECTORY ${TAW_FFMPEG_IMPLIB_DIR})
     target_include_directories(taw PRIVATE ${ffmpeg_SOURCE_DIR}/include)
-    foreach(lib ${TAW_FFMPEG_LIBS})
-        target_link_libraries(taw PRIVATE ${ffmpeg_SOURCE_DIR}/lib/${lib}.lib)
+    foreach(dll ${TAW_FFMPEG_DLLS})
+        execute_process(
+            COMMAND ${CMAKE_AR} /nologo /machine:x64 /def:${ffmpeg_SOURCE_DIR}/lib/${dll}.def
+                    /name:${dll}.dll /out:${TAW_FFMPEG_IMPLIB_DIR}/${dll}.lib
+            RESULT_VARIABLE implib_result OUTPUT_QUIET)
+        if (NOT implib_result EQUAL 0)
+            message(FATAL_ERROR "couldn't make an import library for ${dll}.dll")
+        endif()
+        target_link_libraries(taw PRIVATE ${TAW_FFMPEG_IMPLIB_DIR}/${dll}.lib)
     endforeach()
     target_link_libraries(taw PRIVATE delayimp)
     foreach(dll ${TAW_FFMPEG_DLLS})

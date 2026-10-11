@@ -148,7 +148,8 @@ struct MidiEditor::Roll final : juce::Component, private juce::Timer, private ju
         stopSounding();
         track.removeListener (this);
         clip = c;
-        track = c.getParent();
+        holder = c.getParent();
+        track = Session::trackOf (holder); // a clip on a playlist: still its track's instrument
         track.addListener (this);
         selected.clear();
 
@@ -177,11 +178,13 @@ struct MidiEditor::Roll final : juce::Component, private juce::Timer, private ju
 
         const auto spb = app.session->samplesPerBeat();
         const auto from = std::llround ((double) clip[ids::beat] * spb), to = std::llround (Session::clipEnd (clip) * spb);
-        return juce::String (trackIndex() + 1) + " " + track[ids::name].toString() + L" \x00b7 clip " + app.formatBars (from) + L" \x2192 "
-               + app.formatBars (to);
+        return juce::String (trackIndex() + 1) + " " + track[ids::name].toString()
+               + (holder != track ? L" \x00b7 playlist " + holder[ids::name].toString() : juce::String()) + L" \x00b7 clip " + app.formatBars (from)
+               + L" \x2192 " + app.formatBars (to);
     }
 
     juce::ValueTree clip, track;
+    juce::ValueTree holder; // what the clip is in: the track, or one of its playlists
 
 private:
     App& app;
@@ -276,7 +279,7 @@ private:
     int trackIndex() const
     {
         for (int i = 0; app.session != nullptr && i < app.session->numTracks(); ++i)
-            if (app.session->track (i) == track)
+            if (app.session->track (i) == track) // the track's, for a clip on one of its playlists too
                 return i;
 
         return -1;
@@ -358,7 +361,7 @@ private:
     // A note on another clip on the track under a point (double-click opens that clip).
     juce::ValueTree otherClipAt (juce::Point<float> p) const
     {
-        for (const auto& c : Session::midiClips (track))
+        for (const auto& c : Session::midiClips (holder))
             if (c != clip)
                 for (const auto& n : notesOf (c))
                     if (n.inWindow && rectOf (n).contains (p))
@@ -649,7 +652,7 @@ private:
         g.setColour (colours.panel);
         g.fillRect (0, 0, getWidth(), toolbarH);
         g.setColour (colours.dim);
-        g.drawText (L"double-click: new note \x00b7 drag: move (alt: off the grid) \x00b7 edge: length \x00b7 right-click: delete \x00b7 ctrl+wheel: zoom",
+        g.drawText (L"double-click: new note \x00b7 drag: move (alt: off the grid) \x00b7 edge: length \x00b7 right-click: delete \x00b7 r t / ctrl+wheel: zoom",
                     laneBox.getRight() + 12, 0, getWidth() - laneBox.getRight() - 18, toolbarH, juce::Justification::centredLeft, true);
 
         const auto roll = rollArea();
@@ -704,7 +707,7 @@ private:
             }
 
             // Other clips' notes on the track: outlines, to play against (double-click opens one).
-            for (const auto& c : Session::midiClips (track))
+            for (const auto& c : Session::midiClips (holder))
                 if (c != clip)
                     for (const auto& n : notesOf (c))
                         if (n.inWindow)
@@ -832,7 +835,7 @@ private:
             // Every clip on the track as a strip; this one bright, with handles on its edges.
             const auto stripY = (float) toolbarH + 18.0f, stripH = 12.0f;
 
-            for (const auto& c : Session::midiClips (track))
+            for (const auto& c : Session::midiClips (holder))
             {
                 const auto r = juce::Rectangle<float> (xOf (c[ids::beat]), stripY, xOf (Session::clipEnd (c)) - xOf (c[ids::beat]), stripH);
                 g.setColour (c == clip ? colours.note : colours.faint);
@@ -1363,9 +1366,11 @@ private:
             duplicateSelected();
         else if (letterOf (kp) == 'Q' && ! mods.isAnyModifierKeyDown() && ! ctrlHeld (kp))
             quantize();
-        else if ((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! ctrlOrCmd (mods))
+        // + and - (and r t, as on taw's timeline) zoom this window; the session's zoom stays.
+        else if (((kp.getTextCharacter() == '+' || kp.getTextCharacter() == '=') && ! ctrlOrCmd (mods))
+                 || (kp.getTextCharacter() == 't' && ! ctrlOrCmd (mods) && ! mods.isAltDown()))
             zoomBy (1.5);
-        else if (kp.getTextCharacter() == '-' && ! ctrlOrCmd (mods))
+        else if ((kp.getTextCharacter() == '-' && ! ctrlOrCmd (mods)) || (kp.getTextCharacter() == 'r' && ! ctrlOrCmd (mods) && ! mods.isAltDown()))
             zoomBy (1.0 / 1.5);
         else if (code == juce::KeyPress::escapeKey)
         {
@@ -1389,11 +1394,14 @@ private:
         return true;
     }
 
+    // Around taw's cursor when it's in view, else the middle.
     void zoomBy (double factor)
     {
-        const auto middle = beatAt ((float) (keysW + getWidth()) * 0.5f);
+        const auto cursorX = xOf ((double) app.cursor / spb());
+        const auto x = cursorX >= (float) keysW && cursorX <= (float) getWidth() ? cursorX : (float) (keysW + getWidth()) * 0.5f;
+        const auto at = beatAt (x);
         pxPerBeat = juce::jlimit (2.0, 800.0, pxPerBeat * factor);
-        viewBeat = middle - visibleBeats() * 0.5;
+        viewBeat = at - (x - keysW) / pxPerBeat;
     }
 
     //==============================================================================
@@ -1463,8 +1471,12 @@ void MidiEditor::poll()
     if (window == nullptr)
         return;
 
-    // Closed with its button, or its clip gone (undone, deleted, the track removed).
-    if (window->closeRequested || ! window->content->clip.getParent().isValid() || ! window->content->clip.getParent().getParent().isValid())
+    // Closed with its button, or its clip gone (undone, deleted, the track removed) or moved to
+    // another playlist.
+    const auto& roll = *window->content;
+    const auto parent = roll.clip.getParent();
+
+    if (window->closeRequested || ! parent.isValid() || parent != roll.holder || ! Session::trackOf (parent).getParent().isValid())
         close();
 }
 } // namespace taw

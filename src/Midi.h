@@ -30,6 +30,7 @@ struct TimedMidi
 {
     juce::int64 pos = 0;
     MidiMsg msg;
+    int wraps = 0; // times the loop had wrapped since play started: which pass it was played in
 };
 
 using MidiQueue = SpscQueue<MidiMsg, 1024>;

@@ -550,6 +550,50 @@ juce::ValueTree Session::makeClip (const juce::String& file, juce::int64 start, 
     return c;
 }
 
+std::vector<juce::ValueTree> Session::playlists (const juce::ValueTree& track)
+{
+    std::vector<juce::ValueTree> out;
+
+    for (const auto& c : track)
+        if (c.hasType (ids::PLAYLIST))
+            out.push_back (c);
+
+    return out;
+}
+
+juce::String Session::mainPlaylistName (const juce::ValueTree& track)
+{
+    return track.hasProperty (ids::playlist) ? track[ids::playlist].toString() : track[ids::name].toString();
+}
+
+juce::String Session::nextPlaylistName (const juce::ValueTree& track)
+{
+    const auto base = track[ids::name].toString();
+    juce::StringArray names { mainPlaylistName (track) };
+
+    for (const auto& p : playlists (track))
+        names.add (p[ids::name].toString());
+
+    int top = 0;
+
+    for (const auto& n : names)
+        if (n.startsWith (base + ".") && n.substring (base.length() + 1).containsOnly ("0123456789") && n.length() > base.length() + 1)
+            top = juce::jmax (top, n.substring (base.length() + 1).getIntValue());
+
+    for (int k = top + 1;; ++k)
+        if (const auto name = base + "." + juce::String (k).paddedLeft ('0', 2); ! names.contains (name))
+            return name;
+}
+
+juce::ValueTree Session::soloedPlaylist (const juce::ValueTree& track)
+{
+    for (const auto& p : playlists (track))
+        if ((bool) p[ids::solo])
+            return p;
+
+    return {};
+}
+
 juce::ValueTree Session::makeHit (double beat, float vel)
 {
     juce::ValueTree h (ids::HIT);

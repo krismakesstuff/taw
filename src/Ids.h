@@ -22,6 +22,7 @@ TAW_ID (SEND) // a track's send to a bus: one of five slots, a to e
 TAW_ID (INSERT) // an effect plugin in one of a track's five insert slots, a to e
 TAW_ID (AUTO)   // an automation lane, on a TRACK (or on the SESSION: the mix's volume); its POINTs
 TAW_ID (POINT)  // in an AUTO: a value (val) at a beat on the timeline
+TAW_ID (PLAYLIST) // on a TRACK: another version of its clips (name, solo); the track's own clips are the main playlist
 
 TAW_ID (version)
 TAW_ID (name)
@@ -86,6 +87,8 @@ TAW_ID (channels) // TRACK: 1 (mono) or 2 (stereo); absent = from what it plays 
 TAW_ID (param) // AUTO: what it controls (AutomationTarget: "vol", "pan", "mute", "send a", "inst/<id>", "fx a/<id>")
 TAW_ID (lanes)      // TRACK: its automation lanes are open under it
 TAW_ID (laneParams) // TRACK: what its lanes show, in order (params, one per line); absent = its AUTO lanes
+TAW_ID (playlist)   // TRACK: the main playlist's name; absent = the track's name
+TAW_ID (playlists)  // TRACK: its playlists are open under it as lanes (never with its automation lanes)
 
 TAW_ID (file)
 TAW_ID (start)  // CLIP: timeline position, samples

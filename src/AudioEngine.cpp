@@ -175,6 +175,7 @@ void AudioEngine::play (juce::int64 from, juce::int64 countIn)
 {
     resetBlockLoad(); // counted per pass
     playPos.store (juce::jmax<juce::int64> (0, from));
+    loopWraps.store (0);
     seekTo.store (-1);
     countInLeft.store (juce::jmax<juce::int64> (0, countIn));
     rolling.store (true);
@@ -394,7 +395,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
             n = (int) juce::jmin<juce::int64> (n, counting);
 
         const auto pos = playPos.load();
-        const bool looping = current != nullptr && current->loop && ! current->recording && rolling.load()
+        const bool looping = current != nullptr && current->loop && rolling.load() // recording too: each pass a take
                              && current->loopEnd > current->loopStart && pos < current->loopEnd;
 
         if (looping && pos + n > current->loopEnd)
@@ -413,7 +414,10 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
         offset += n;
 
         if (looping && playPos.load() >= current->loopEnd)
+        {
             playPos.store (current->loopStart);
+            loopWraps.fetch_add (1);
+        }
     }
 
     renderPreview (out, numOut, numSamples);
@@ -622,7 +626,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
             liveMidi[(size_t) numLive++] = m;
 
             if (isRolling && current->recording)
-                recordedMidi.push ({ pos, m });
+                recordedMidi.push ({ pos, m, loopWraps.load() });
         }
     };
 

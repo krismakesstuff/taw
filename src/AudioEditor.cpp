@@ -61,8 +61,8 @@ struct AudioEditor::Wave final : juce::Component, private juce::Timer, private j
         track.addListener (this);
         focusClip = clip;
 
-        if (const auto t = trackIndex(); t >= 0)
-            app.focusTrack (t); // taw's selection and keys act on this track
+        if (const auto t = trackIndex(); t >= 0 && track.hasType (ids::TRACK))
+            app.focusTrack (t); // taw's selection and keys act on this track (on a playlist lane, already on it)
 
         // Height to the track's loudest peak, so a quiet take isn't a flat line (alt+wheel changes it).
         float peak = 0.0f;
@@ -121,7 +121,7 @@ private:
     int trackIndex() const
     {
         for (int i = 0; app.session != nullptr && i < app.session->numTracks(); ++i)
-            if (app.session->track (i) == track)
+            if (app.session->track (i) == Session::trackOf (track))
                 return i;
 
         return -1;
@@ -618,7 +618,8 @@ private:
         if (drag == Drag::move && dragged.isValid() && (juce::int64) dragged[ids::start] != origStart && app.session != nullptr)
         {
             const auto spb = app.session->samplesPerBeat();
-            app.moveAutomation (track, (double) origStart / spb, (double) origLength / spb, (double) (juce::int64) dragged[ids::start] / spb);
+            if (track.hasType (ids::TRACK)) // a playlist's clip: the automation is the track's, and stays
+                app.moveAutomation (track, (double) origStart / spb, (double) origLength / spb, (double) (juce::int64) dragged[ids::start] / spb);
         }
 
         drag = Drag::none;
@@ -675,13 +676,15 @@ private:
         const auto ch = kp.getTextCharacter();
         const auto mods = kp.getModifiers();
 
-        // + and - zoom around taw's cursor when it's in view, else the middle.
+        // + and - (and r t, as on taw's timeline) zoom this window around taw's cursor when it's
+        // in view, else the middle. The session's zoom stays as it is.
         const auto cursorX = xOf ((double) app.cursor);
         const auto around = cursorX >= 0.0f && cursorX <= (float) getWidth() ? cursorX : (float) getWidth() * 0.5f;
+        const bool plain = ! ctrlOrCmd (mods) && ! mods.isAltDown();
 
-        if ((ch == '+' || ch == '=') && ! ctrlOrCmd (mods))
+        if (((ch == '+' || ch == '=') && ! ctrlOrCmd (mods)) || (ch == 't' && plain))
             zoomAround (around, 1.0 / 1.5);
-        else if (ch == '-' && ! ctrlOrCmd (mods))
+        else if ((ch == '-' && ! ctrlOrCmd (mods)) || (ch == 'r' && plain))
             zoomAround (around, 1.5);
         else if (kp.getKeyCode() == juce::KeyPress::escapeKey)
             app.console.focusTerminal(); // the keyboard back to taw
@@ -768,7 +771,7 @@ void AudioEditor::poll()
     // Closed with its button, or its track gone (undone, removed) or no longer audio.
     const auto t = window->content->track;
 
-    if (window->closeRequested || ! t.getParent().isValid() || ! Session::isAudioTrack (t))
+    if (window->closeRequested || ! t.getParent().isValid() || ! Session::trackOf (t).getParent().isValid() || ! Session::isAudioTrack (Session::trackOf (t)))
         close();
 }
 } // namespace taw

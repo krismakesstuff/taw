@@ -3135,6 +3135,7 @@ Result App::setMixVolume (double db)
 {
     db = juce::jlimit (-96.0, 12.0, db);
     session->tree().setProperty (ids::mixDb, db, um());
+    flashValue (session->tree(), "vol");
     return Result::good ("mix " + formatDb (db) + " dB");
 }
 
@@ -3152,6 +3153,7 @@ Result App::nudgeVolume (double deltaDb)
     {
         auto track = session->track (t);
         track.setProperty (ids::gainDb, juce::jlimit (-96.0, 12.0, (double) track[ids::gainDb] + deltaDb), um());
+        flashValue (track, "vol");
     }
 
     const auto first = session->track (targets.front());

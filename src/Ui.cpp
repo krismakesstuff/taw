@@ -1737,7 +1737,9 @@ void Ui::drawTimeline (App& app)
             if (rowsPerTrack > 1)
                 for (int k = 0; k < Session::numSends; ++k)
                 {
-                    const int x = ioX + ioSlots + k * ioSlotW, cbg = cellBg (App::ioFirstSend + k);
+                    // Its level just nudged by a key: the cell lit (name and level).
+                    const bool flash = app.valueFlashing (t, "send " + Session::slotName (k).toLowerCase());
+                    const int x = ioX + ioSlots + k * ioSlotW, cbg = flash ? colour::accent : cellBg (App::ioFirstSend + k);
                     const auto send = Session::send (t, k);
                     canvas.fill (x - 1, y + 1, ioSlotW, L' ', -1, cbg);
 
@@ -1750,7 +1752,7 @@ void Ui::drawTimeline (App& app)
                     const int dest = s.findBus (send[ids::to]);
                     const bool off = send[ids::mute];
                     canvas.text (x, y + 1, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(),
-                                 dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, false, ioSlotW - 1);
+                                 flash ? 16 : dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, flash, ioSlotW - 1);
 
                     // The level under the name; pre-fader sends in the accent colour.
                     if (rowsPerTrack > 2)
@@ -1760,8 +1762,8 @@ void Ui::drawTimeline (App& app)
                         const auto level = db <= -95.9 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
                         canvas.fill (x - 1, y + 2, ioSlotW, L' ', -1, cbg);
                         canvas.text (x, y + 2, level,
-                                     off ? colour::faint : app.isAutomated (t, sendParam) ? colour::note : (bool) send[ids::pre] ? colour::accent : colour::dim,
-                                     cbg, false, ioSlotW - 1);
+                                     flash ? 16 : off ? colour::faint : app.isAutomated (t, sendParam) ? colour::note : (bool) send[ids::pre] ? colour::accent : colour::dim,
+                                     cbg, flash, ioSlotW - 1);
                     }
                 }
 
@@ -1775,15 +1777,17 @@ void Ui::drawTimeline (App& app)
         // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
         // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
-        drawVolume (meterX, y, app.currentValue (t, "vol"), bg, app.isAutomated (t, "vol"));
+        drawVolume (meterX, y, app.currentValue (t, "vol"), bg, app.isAutomated (t, "vol"), app.valueFlashing (t, "vol"));
         drawDb (meterX + 12, y, m.hold, m.clipped, bg);
 
         // Pan under the volume (centre dim, like unity); "st" marks a stereo track.
         if (rowsPerTrack > 1)
         {
             const double pan = app.currentValue (t, "pan");
+            const bool flash = app.valueFlashing (t, "pan");
             canvas.text (meterX, y + 1, App::panText (pan).paddedLeft (' ', 5),
-                         app.isAutomated (t, "pan") ? colour::note : std::abs (pan) < 0.005 ? colour::dim : colour::text, bg);
+                         flash ? 16 : app.isAutomated (t, "pan") ? colour::note : std::abs (pan) < 0.005 ? colour::dim : colour::text,
+                         flash ? colour::accent : bg, flash);
 
             if (app.trackIsStereo (t))
                 canvas.text (meterX + 12, y + 1, "   st", colour::faint, bg);
@@ -1991,7 +1995,7 @@ void Ui::drawTimeline (App& app)
                 canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
             canvas.text (4, y, "Mix", colour::text, bg, true);
-            drawVolume (meterX, y, app.currentValue (s.tree(), "vol"), bg, app.isAutomated (s.tree(), "vol"));
+            drawVolume (meterX, y, app.currentValue (s.tree(), "vol"), bg, app.isAutomated (s.tree(), "vol"), app.valueFlashing (s.tree(), "vol"));
         }
 
         canvas.text (leftW - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
@@ -2113,11 +2117,16 @@ void Ui::drawTyping (App& app)
         canvas.text (chipX, cmdY, chip, 16, colour::accent, true);
 }
 
-void Ui::drawVolume (int x, int y, double db, int bg, bool automated)
+void Ui::drawVolume (int x, int y, double db, int bg, bool automated, bool flash)
 {
-    // Unity is dim so a changed fader stands out; automation (or a knob) moving it, its colour.
+    // Unity is dim so a changed fader stands out; automation (or a knob) moving it, its colour;
+    // just nudged by a key, lit.
     const auto text = formatDb (db).paddedLeft (' ', 5);
-    canvas.text (x, y, text, automated ? colour::note : std::abs (db) < 0.05 ? colour::dim : colour::text, bg, automated || std::abs (db) >= 0.05);
+
+    if (flash)
+        canvas.text (x, y, text, 16, colour::accent, true);
+    else
+        canvas.text (x, y, text, automated ? colour::note : std::abs (db) < 0.05 ? colour::dim : colour::text, bg, automated || std::abs (db) >= 0.05);
 }
 
 void Ui::drawBottom (App& app)

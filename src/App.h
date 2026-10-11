@@ -446,6 +446,23 @@ public:
     bool isIndexing() const { return indexThread.joinable(); }
 
     // A track whose sample the browser just swapped: its header flashes for a moment.
+    // A value a shortcut changes ([ ] volume, { } the mix, alt+[ ] pan, a send's level) flashes
+    // where it's shown, on every press, so your fingers get a glance's confirmation. owner: the
+    // track (the session tree for the mix); what: "vol", "pan", "send a".
+    void flashValue (const juce::ValueTree& owner, const juce::String& what)
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        valueFlashes.erase (std::remove_if (valueFlashes.begin(), valueFlashes.end(), [&] (const auto& f) { return f.until < now || (f.owner == owner && f.what == what); }),
+                            valueFlashes.end());
+        valueFlashes.push_back ({ owner, what, now + 220.0 });
+    }
+    bool valueFlashing (const juce::ValueTree& owner, const juce::String& what) const
+    {
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        return std::any_of (valueFlashes.begin(), valueFlashes.end(), [&] (const auto& f) { return f.owner == owner && f.what == what && now < f.until; });
+    }
+    struct ValueFlash { juce::ValueTree owner; juce::String what; double until; };
+    std::vector<ValueFlash> valueFlashes;
     void flashTrack (const juce::ValueTree& t) { flashedTrack = t; flashUntil = juce::Time::getMillisecondCounterHiRes() + 1200.0; }
     bool trackFlashing (const juce::ValueTree& t) const { return t == flashedTrack && juce::Time::getMillisecondCounterHiRes() < flashUntil; }
     juce::ValueTree flashedTrack;

@@ -364,6 +364,7 @@ Result App::nudgePan (const std::vector<int>& tracks, double delta)
     {
         auto track = session->track (t);
         track.setProperty (ids::pan, juce::jlimit (-1.0, 1.0, std::round (((double) track[ids::pan] + delta) * 100.0) / 100.0), um());
+        flashValue (track, "pan");
     }
 
     return Result::good (trackList (tracks) + " pan " + panText (session->track (tracks.front())[ids::pan]));
@@ -558,6 +559,7 @@ Result App::nudgeSend (int track, int slot, double deltaDb)
 
     const auto db = (double) send[ids::db];
     send.setProperty (ids::db, juce::jlimit (-96.0, 12.0, db <= -96.0 && deltaDb > 0 ? -60.0 : std::round (db + deltaDb)), um());
+    flashValue (session->track (track), "send " + Session::slotName (slot).toLowerCase());
     return Result::good (describeIoCell (track, ioFirstSend + slot));
 }
 

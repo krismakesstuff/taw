@@ -154,7 +154,7 @@ private:
     void drawProgress (App&, const juce::String& title, const juce::String& doing, size_t done, size_t total);
     void drawMeter (int x, int y, int width, float level, int bg = -1);
     void drawDb (int x, int y, float hold, bool clipped, int bg = -1);
-    void drawVolume (int x, int y, double db, int bg = -1, bool automated = false);
+    void drawVolume (int x, int y, double db, int bg = -1, bool automated = false, bool flash = false);
 
     Canvas canvas;
     std::vector<std::wstring> previous;

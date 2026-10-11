@@ -1455,7 +1455,7 @@ int main (int argc, char** argv)
                         for (int i = 0; i < block; ++i)
                         {
                             const auto want = (float) ((sample - block + i) % 65536);
-                            exact = exact && out.getSample (0, i) == want && out.getSample (1, i) == -want;
+                            exact = exact && juce::exactlyEqual (out.getSample (0, i), want) && juce::exactlyEqual (out.getSample (1, i), -want);
                             silent = silent && out.getSample (0, i) == 0.0f;
                         }
 

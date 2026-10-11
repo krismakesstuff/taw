@@ -167,8 +167,11 @@ Next up, roughly in order:
 
 ## Contributing
 
-Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md). What's changed in
-each release is in [CHANGELOG.md](CHANGELOG.md).
+Issues and pull requests are welcome: see [CONTRIBUTING.md](CONTRIBUTING.md) first. Features
+start as an issue, contributors sign the [Contributor License Agreement](CLA.md) (taw may have
+a commercial edition one day), and everyone follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+Security problems: [SECURITY.md](SECURITY.md). What's changed in each release is in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

@@ -27,12 +27,13 @@ being worked out.
 - **ASIO** via the Steinberg ASIO SDK 2.3.4, used under its GPLv3 option. WASAPI and
   DirectSound are also available.
 - **License: AGPLv3** (required by JUCE's open-source licence; compatible with the ASIO
-  SDK's GPLv3).
+  SDK's GPLv3). Contributions come in under a contributor licence agreement (`CLA.md`), so a
+  commercial edition stays possible.
 - **Target terminal: Windows `cmd` (conhost)** first. Rendering uses VT sequences and only
   glyphs that Consolas has (block elements, box drawing). Input uses the Win32 console API,
   which reports modifiers reliably (Shift/Ctrl+arrows).
-- **Cross-platform is planned** for future updates: macOS and Linux after Windows. JUCE
-  already covers audio devices (Core Audio, ALSA/JACK) and file formats, and the
+- **Cross-platform:** Windows first, macOS in progress (Apple Silicon builds and ships), Linux
+  next. JUCE already covers audio devices (Core Audio, ALSA/JACK) and file formats, and the
   Windows-only parts are kept behind small seams so each can get a POSIX counterpart:
   - `Console`: Win32 console input → a termios backend that parses VT key sequences (with an
     extended keyboard protocol where the terminal has one, so modifiers stay reliable).
@@ -891,7 +892,10 @@ own, it shows the frame for where the playhead is, so it can't drift.
 
 - **Decoding:** FFmpeg's libraries (libavformat, libavcodec, libswscale), linked from Gyan's
   pinned 9.0.2 shared build, which CMake downloads. The DLLs are delay-loaded, so taw starts
-  without loading them, and still runs without video if they're missing. FFmpeg rather than
+  without loading them, and still runs without video if they're missing. The build's own
+  `.lib` files are MinGW import libraries, which MSVC links but can't delay-load (taw.exe then
+  wouldn't start without the DLLs), so CMake makes MSVC import libraries from its `.def` files
+  at configure time (`lib /def`). FFmpeg rather than
   Media Foundation because editors deliver ProRes and DNx, which Windows can't decode. On
   macOS, Homebrew's FFmpeg (`brew install ffmpeg`, 8.x works) is found at build time and
   weak-linked: without it taw still starts, and `videoAvailable` asks the loader whether the
@@ -1163,6 +1167,34 @@ threads at low priority so it doesn't crowd the audio.
 - **Plugins** run in process for now: one that crashes takes taw down (the session is saved
   first). Scanning is already out of process: a plugin that crashes or hangs there is just
   skipped. Playing them out of process is planned.
+
+## Building, checking and releasing
+
+- **Build:** CMake, with JUCE, the ASIO SDK and (on Windows) FFmpeg downloaded by FetchContent.
+  Visual Studio 2022 on Windows, the Xcode command line tools on macOS (`./taw build`).
+- **Warnings:** taw's own files (not JUCE's, the SDKs' or FFmpeg's, whose headers are system
+  includes) build warning-free with clang's strict set wherever clang compiles them, and with
+  MSVC's `/W4`. The clang set is JUCE's recommended list, spelled out in CMake because JUCE
+  gives clang-cl only `/W4`, less `-Wswitch-enum`: key handlers switch on the key with a
+  `default` for the many they ignore (`-Wswitch` still catches a switch without one that
+  misses a case). Floats compared exactly on purpose say so with `juce::exactlyEqual`.
+  `TAW_WARNINGS_AS_ERRORS` makes any warning an error, on taw's files only; CI turns it on,
+  local builds leave it off so a stray warning doesn't stop work in progress.
+- **Tests:** the self-tests that need no audio device (`--keycasttest`, `--counttest`,
+  `--livetest`, `--cliptest`, `--paralleltest`, `--bouncetest`, and `--keytest` on macOS),
+  each exiting non-zero on a failure. The others need a device, plugins or files.
+- **CI** (`.github/workflows/ci.yml`, every pull request and push to `main`): Windows with
+  MSVC (build and self-tests), Windows with clang-cl (taw's files only, so the Windows-only
+  code meets clang's rules too), macOS on Apple Silicon (build and self-tests), all with
+  warnings as errors.
+- **Releases** come only from pushing the `publish` branch (`.github/workflows/release.yml`,
+  steps in `docs/releasing.md`): it builds and tests both platforms, then drafts a GitHub
+  release for the version in `CMakeLists.txt` with that version's `CHANGELOG.md` notes, the
+  zips (Windows x64 with FFmpeg's DLLs; macOS arm64, 13 and later, with the hub app and driver),
+  FFmpeg's source and `SHA256SUMS.txt`. Publishing the draft tags the commit. A version that
+  already has a tag stops the run before anything builds. Downloads aren't signed yet: the
+  README covers SmartScreen and macOS's quarantine. `v0.1.0` tags the first playable
+  milestone; 0.2.0 is the first public release.
 
 ## Screen
 

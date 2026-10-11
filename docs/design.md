@@ -114,6 +114,13 @@ engine at the session's rate and converting to the device's, so any device works
 
 ### Navigation keys (idle and rolling)
 
+Where the keys go is framed, as on the session screen, so it reads at a glance with your
+hands and mind on the music: the focused track gets a heavy frame (a row above and below it,
+its automation and playlist lanes inside) with its number and name in the top edge, the Mix
+the same, and the markers, bar or video row heavy sides. The frame turns record-red while
+the focused track is armed, and says "armed" or "● recording" after its name. Clicking a
+track's frame is clicking the track.
+
 | Key | Grid on | Grid off |
 |---|---|---|
 | `←` / `→` | to the next grid line shown, so it follows the zoom (a bar, a beat, an 8th...) | 1 second |

@@ -118,6 +118,19 @@ private:
     void drawTransport (App&);
     void drawTimeline (App&);
     void drawBottom (App&);
+
+    // The focus frame: drawn last, over the separator row too. The timeline says where: round
+    // the focused track (its lanes and playlists inside), or the Mix; a one-row top lane gets
+    // only its sides (y0 == y1). Record-red when the track is armed.
+    struct FocusFrame
+    {
+        int x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+        juce::String title;
+        int colour = 0;
+        bool valid = false;
+    };
+    FocusFrame focusFrame;
+    void drawFocusFrame();
     void drawHelp (App&);
     void drawSettings (App&);
     void drawPluginPicker (App&);

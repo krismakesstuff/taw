@@ -314,6 +314,7 @@ void Ui::drawMain (App& app)
     // The docked browser: about a third of the screen, under the mix row.
     dockCols = layout::browserDock (canvas.width() + 1, app.browserVisible); // the screen being drawn (a snapshot has no console)
     app.browserGeometry.valid = false;
+    focusFrame.valid = false;
 
     drawTitle (app);
     drawInterface (app);
@@ -326,6 +327,7 @@ void Ui::drawMain (App& app)
         drawBrowser (app);
 
     drawBottom (app);
+    drawFocusFrame();
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
@@ -782,9 +784,13 @@ void Ui::drawTimeline (App& app)
         borders (y);
 
         if (focusedLane)
+        {
             for (int c = 0; c < laneW; ++c)
                 canvas.put (laneX + c, y, L' ', -1,
                             inTimeSelection (origin + c * spc, origin + (c + 1) * spc) ? colour::selBg : colour::laneFocusBg);
+
+            focusFrame = { 0, y, w - 1, y, {}, colour::accent, true };
+        }
     };
 
     const auto zoomText = s.gridOn() ? (app.zoomLevel == 0 ? juce::String ("1 beat") : juce::String (std::pow (2.0, app.zoomLevel), 2) + " beats")
@@ -924,7 +930,10 @@ void Ui::drawTimeline (App& app)
         canvas.fill (0, videoY, leftW, L' ', -1, bg);
 
         if (focusedLane)
+        {
             canvas.put (0, videoY, L'\x25b8', colour::accent, bg);
+            focusFrame = { 0, videoY, w - 1, videoY, {}, colour::accent, true };
+        }
 
         canvas.text (1, videoY, "video", focusedLane ? colour::dim : colour::faint, bg);
         const auto tc = app.videoTimecode (rolling ? playhead : app.cursor);
@@ -1025,11 +1034,16 @@ void Ui::drawTimeline (App& app)
     auto mixLanes = fill ? std::vector<juce::String>() : app.lanesShown (-1);
     mixLanes.resize (std::min (mixLanes.size(), (size_t) std::max (0, (h - 6 - tracksTop - 4) / laneRows)));
     const int masterY = h - 6 - (int) mixLanes.size() * laneRows, tracksBottom = masterY - 1; // exclusive
-    const int rowsPerTrack = fill ? std::max (1, tracksBottom - tracksTop) : s.trackHeight(); // "height", per session
+    // The focused track is framed: a row above it and one below (its lanes and playlists inside).
+    const int framedTrack = ! app.onTopLane() && ! app.mixFocused() && n > 0 ? std::min (app.focused, n - 1) : -1;
+    const int rowsPerTrack = fill ? std::max (1, tracksBottom - tracksTop - 2) : s.trackHeight(); // "height", per session
     auto lanesOf = [&] (int track) { return fill ? std::vector<juce::String>() : app.lanesShown (track); };
     // Open playlists go under their track instead, each as tall as the track.
     auto playlistsOf = [&] (int track) { return fill ? std::vector<juce::ValueTree>() : app.playlistsShown (track); };
-    auto blockRows = [&] (int track) { return rowsPerTrack + (int) lanesOf (track).size() * laneRows + (int) playlistsOf (track).size() * rowsPerTrack; };
+    auto blockRows = [&] (int track)
+    {
+        return rowsPerTrack + (int) lanesOf (track).size() * laneRows + (int) playlistsOf (track).size() * rowsPerTrack + (track == framedTrack ? 2 : 0);
+    };
 
     // How many tracks fit from scroll on (at least one, cut short if it must be).
     auto fitFrom = [&] (int scroll)
@@ -1059,15 +1073,16 @@ void Ui::drawTimeline (App& app)
         ++app.trackScroll;
 
     const int visible = fill ? 1 : fitFrom (app.trackScroll); // tracks that fit
-    std::vector<int> trackY; // where each visible track starts
+    std::vector<int> trackY; // where each visible track's own rows start (inside its frame)
+    int tracksEnd = tracksTop;
 
     for (int row = 0, y = tracksTop; row < visible && app.trackScroll + row < n; ++row)
     {
-        trackY.push_back (y);
-        y += blockRows (app.trackScroll + row);
+        const int track = app.trackScroll + row;
+        trackY.push_back (y + (track == framedTrack ? 1 : 0));
+        y += blockRows (track);
+        tracksEnd = y;
     }
-
-    const int tracksEnd = trackY.empty() ? tracksTop : trackY.back() + blockRows (app.trackScroll + (int) trackY.size() - 1);
 
     // Where things were drawn, for the mouse: which track (and lane) each row is.
     laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, app.trackScroll, std::min (visible, n - app.trackScroll), videoY, {}, origin, spc, true };
@@ -1075,6 +1090,9 @@ void Ui::drawTimeline (App& app)
     for (size_t row = 0; row < trackY.size(); ++row)
     {
         const int track = app.trackScroll + (int) row;
+
+        if (track == framedTrack) // a click on its frame is a click on the track
+            laneMap.rows.push_back ({ track, -1 });
 
         for (int r = 0; r < rowsPerTrack; ++r)
             laneMap.rows.push_back ({ track, -1 });
@@ -1086,6 +1104,9 @@ void Ui::drawTimeline (App& app)
         for (int lane = 0; lane < (int) playlistsOf (track).size(); ++lane)
             for (int r = 0; r < rowsPerTrack; ++r)
                 laneMap.rows.push_back ({ track, lane });
+
+        if (track == framedTrack)
+            laneMap.rows.push_back ({ track, -1 });
     }
 
     // Loudness as shade density; these four blocks exist in every console font.
@@ -1935,6 +1956,18 @@ void Ui::drawTimeline (App& app)
 
         if (const auto lanes = lanesOf (i); ! lanes.empty())
             drawLanes (i, s.track (i), lanes, trackY[row] + rowsPerTrack, std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end());
+
+        // The focused track's frame, its name in the top edge: record-red while it's armed, so
+        // a glance says you're on the track that records.
+        if (i == framedTrack)
+        {
+            const auto t = s.track (i);
+            const bool armed = (bool) t[ids::armed];
+            const auto state = ! armed ? juce::String() : app.recording ? juce::String (L" \x00b7 \x25cf recording") : juce::String (L" \x00b7 armed");
+            const int top = trackY[row] - 1;
+            focusFrame = { 0, top, w - 1, top + blockRows (i) - 1, juce::String (i + 1) + " " + t[ids::name].toString() + state,
+                           armed ? colour::rec : colour::accent, true };
+        }
     }
 
     // The cursor's handle sits under the last track, clear of the ruler's numbers.
@@ -2003,6 +2036,48 @@ void Ui::drawTimeline (App& app)
     }
 
     drawLanes (-1, s.tree(), mixLanes, masterY + 2, false);
+
+    // The Mix's frame: the free row above it, and the separator row under its lanes.
+    if (mixFocused)
+        focusFrame = { 0, masterY - 1, w - 1, masterY + 2 + (int) mixLanes.size() * laneRows, "Mix", colour::accent, true };
+}
+
+void Ui::drawFocusFrame()
+{
+    const auto& f = focusFrame;
+
+    if (! f.valid || f.y0 < 0 || f.y1 >= canvas.height() || f.x1 >= canvas.width())
+        return;
+
+    auto side = [&] (int x, int y) { canvas.put (x, y, L'\x2503', f.colour, canvas.at (x, y).bg, true); };
+
+    // A top lane is one row with neighbours above and below: its sides only.
+    if (f.y0 == f.y1)
+    {
+        side (f.x0, f.y0);
+        side (f.x1, f.y0);
+        return;
+    }
+
+    for (int x = f.x0 + 1; x < f.x1; ++x)
+    {
+        canvas.put (x, f.y0, L'\x2501', f.colour);
+        canvas.put (x, f.y1, L'\x2501', f.colour);
+    }
+
+    for (int y = f.y0 + 1; y < f.y1; ++y)
+    {
+        side (f.x0, y);
+        side (f.x1, y);
+    }
+
+    canvas.put (f.x0, f.y0, L'\x250f', f.colour);
+    canvas.put (f.x1, f.y0, L'\x2513', f.colour);
+    canvas.put (f.x0, f.y1, L'\x2517', f.colour);
+    canvas.put (f.x1, f.y1, L'\x251b', f.colour);
+
+    if (f.title.isNotEmpty())
+        canvas.text (f.x0 + 2, f.y0, " " + f.title + " ", f.colour, -1, true, f.x1 - f.x0 - 3);
 }
 
 void Ui::drawVolume (int x, int y, double db, int bg, bool automated)

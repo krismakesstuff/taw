@@ -866,7 +866,7 @@ Result App::execute (const juce::String& line)
     // browse vol -6: the audition's own level.
     if (v == "browse" && (p.args[0].equalsIgnoreCase ("vol") || p.args[0].equalsIgnoreCase ("v")))
         return p.args[1].isEmpty() ? Result::fail ("browse vol -6 sets the audition level") : setAuditionDb (p.args[1].getDoubleValue());
-    if (v == "browse")             return showBrowser (p.args[0].isEmpty() ? ! browserVisible : ! p.args[0].equalsIgnoreCase ("hide"));
+    if (v == "browse")             return showBrowser (p.args[0].isEmpty() ? ! browserOpen() : ! p.args[0].equalsIgnoreCase ("hide"));
     if (v == "index")              return startIndexing (splitPaths (p.rest));
     if (v == "library")            return describeLibrary();
 

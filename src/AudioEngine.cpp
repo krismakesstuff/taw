@@ -108,19 +108,21 @@ void AudioEngine::triggerPad (int trackIndex, float velocity)
     padPresses.push ({ trackIndex, velocity }); // a full queue drops the press
 }
 
-void AudioEngine::preview (std::shared_ptr<const juce::AudioBuffer<float>> audio, float gain, int startSample)
+void AudioEngine::preview (std::shared_ptr<const juce::AudioBuffer<float>> audio, float gain, int startSample, juce::int64 at)
 {
     for (PreviewSound* p = nullptr; previewRetired.pop (p);)
         delete p;
 
-    auto* p = new PreviewSound { std::move (audio), gain, juce::jmax (0, startSample) };
+    auto* p = new PreviewSound { std::move (audio), gain, juce::jmax (0, startSample), at };
 
     if (! previewPending.push (p))
         delete p; // the audio thread is behind; this one's skipped
 }
 
-// Added to the outputs after the mix (not metered, not bounced).
-void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
+// Added to the outputs after the mix (not metered, not bounced). pos: the playhead at the block's
+// start while rolling, else -1. A sound waiting for a playhead position starts on its sample (the
+// whole wait is silent; one that would wait over 4 s, or with the transport stopped, plays now).
+void AudioEngine::renderPreview (float* const* out, int numOut, int n, juce::int64 pos) noexcept
 {
     for (PreviewSound* p = nullptr; previewPending.pop (p);)
     {
@@ -129,6 +131,7 @@ void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
 
         previewNow = p;
         previewPos = p->start;
+        previewWaited = 0;
     }
 
     if (previewNow == nullptr || previewNow->audio == nullptr || previewPos >= previewNow->audio->getNumSamples())
@@ -137,12 +140,31 @@ void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
         return;
     }
 
+    int into = 0; // where in the block it starts
+
+    if (previewNow->at >= 0 && pos >= 0 && previewWaited < (juce::int64) (4.0 * deviceRate))
+    {
+        const auto at = previewNow->at;
+
+        // Not this block (still ahead, or behind and waiting for the loop to come round).
+        if (at >= pos + n || at < pos)
+        {
+            previewWaited += n;
+            previewAt.store (previewPos);
+            return;
+        }
+
+        into = (int) (at - pos);
+    }
+
+    previewNow->at = -1; // started
+
     const auto& a = *previewNow->audio;
-    const int count = juce::jmin (n, a.getNumSamples() - previewPos);
+    const int count = juce::jmin (n - into, a.getNumSamples() - previewPos);
 
     for (int ch = 0; ch < juce::jmin (numOut, 2) && count > 0; ++ch)
         if (out[ch] != nullptr)
-            juce::FloatVectorOperations::addWithMultiply (out[ch], a.getReadPointer (juce::jmin (ch, a.getNumChannels() - 1), previewPos), previewNow->gain, count);
+            juce::FloatVectorOperations::addWithMultiply (out[ch] + into, a.getReadPointer (juce::jmin (ch, a.getNumChannels() - 1), previewPos), previewNow->gain, count);
 
     previewPos += juce::jmax (0, count);
     previewAt.store (previewPos);
@@ -430,6 +452,9 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
     if (const auto s = seekTo.exchange (-1); s >= 0)
         playPos.store (s);
 
+    const auto blockStart = playPos.load();
+    const bool blockRolling = rolling.load() && countInLeft.load() <= 0;
+
     // Split the block where it has to be: hosts may hand us more than announced (split rather
     // than allocate), and a loop wraps at an exact sample.
     for (int offset = 0; offset < numSamples;)
@@ -466,7 +491,7 @@ void AudioEngine::audioDeviceIOCallbackWithContext (const float* const* in, int 
         }
     }
 
-    renderPreview (out, numOut, numSamples);
+    renderPreview (out, numOut, numSamples, blockRolling ? blockStart : -1);
 }
 
 // One track's own sound for this block, into its buffers: its input (monitoring) or its clips

@@ -36,12 +36,6 @@ inline int laneWidth (int consoleWidth, bool io, bool twoRows)
     return std::max (10, consoleWidth - 1 - laneStart (io, twoRows) - 1 - meterPanel);
 }
 
-// The docked sample browser: a column on the right of the timeline (and its meters), from the
-// transport row down to the input line. Narrow consoles don't have room for it.
-inline int browserDock (int consoleWidth, bool visible)
-{
-    return visible && consoleWidth >= 120 ? std::clamp (consoleWidth * 3 / 10, 44, 72) : 0;
-}
 } // namespace layout
 
 struct Cell
@@ -141,8 +135,6 @@ private:
     void drawMidiPanel (App&);
     void drawHubPage (App&);
     void drawHubInterfacePicker (App&);
-    void drawBrowser (App&);
-    int dockCols = 0; // columns the docked browser takes on the right
     void drawDevicePicker (App&);
     void drawTemplatePicker (App&);
     void drawOpening (App&);

@@ -1477,9 +1477,22 @@ int main (int argc, char** argv)
                 continue;
             }
 
-            if (args[i].startsWith (":key "))
+            // ":browser shot.png" draws the browser's window into a picture (1180x720).
+            if (args[i].startsWith (":browser "))
             {
-                auto name = args[i].substring (5);
+                const juce::File png (args[i].substring (9).trim().unquoted());
+                png.deleteFile();
+                juce::FileOutputStream out (png);
+                juce::PNGImageFormat().writeImageToStream (taw::BrowserWindow::snapshot (app, 1180, 720), out);
+                std::printf ("browser drawn to %s\n", png.getFullPathName().toRawUTF8());
+                continue;
+            }
+
+            // ":bkey right" presses a key in the browser's window, as ":key" does in taw.
+            if (args[i].startsWith (":key ") || args[i].startsWith (":bkey "))
+            {
+                const bool browserKey = args[i].startsWith (":bkey ");
+                auto name = args[i].fromFirstOccurrenceOf (" ", false, false);
                 taw::Key k;
 
                 // ":key ctrl+right", ":key shift+up": modifiers first.
@@ -1502,8 +1515,21 @@ int main (int argc, char** argv)
                     if (name.equalsIgnoreCase (n))
                         k.code = code;
 
-                app.pressKey (k);
-                std::printf ("key  %-24s %s\n", name.toRawUTF8(), app.message.toRawUTF8());
+                if (browserKey)
+                {
+                    if (! app.handleBrowserKey (k))
+                        app.pressKey (k);
+
+                    while (app.hasBackgroundWork())
+                    {
+                        juce::Thread::sleep (10);
+                        app.pumpBackgroundWork();
+                    }
+                }
+                else
+                    app.pressKey (k);
+
+                std::printf ("%s  %-24s %s\n", browserKey ? "bkey" : "key ", name.toRawUTF8(), app.message.toRawUTF8());
                 continue;
             }
 

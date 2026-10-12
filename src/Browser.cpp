@@ -1,9 +1,9 @@
-// The sample browser: docked right of the timeline (ctrl+B takes the keys into it, showing it;
-// ctrl+B again hides it; Esc gives the keys back and leaves it showing). Selectors at the top choose the map's axes (the sound-alike
-// map, or two measurements) and what its colours group by; badges pick a kind; the map shows that
-// kind's samples, the list the same samples one by one, in the same colours; typing filters both
-// by name. Every move auditions, at the browser's own level. Enter gives the focused sample track
-// that sample (keeping its hits) or makes a new sample track.
+﻿// The sample browser's state and keys; BrowserWindow.cpp draws it and has the mouse. ctrl+B
+// opens the window with the keys (ctrl+B in it closes it; esc gives the keys back). Tabs pick a
+// kind; the map shows that kind's samples where alike sit together (or on two measurements); the
+// list the same samples one by one; typing filters both. Every move auditions, at the browser's
+// own level, in time with the loop while playing. Enter puts the sample on the kit's chosen pad,
+// or gives the focused sample track that sample (keeping its hits), or makes a new sample track.
 
 #include "App.h"
 
@@ -160,10 +160,11 @@ const App::AxisCache& App::axes() const
     const auto& all = library->samples();
 
     if (c.library == library.get() && c.count == all.size() && c.kind == browserKind && c.x == browserAxisX && c.y == browserAxisY
-        && c.filter == browserFilter)
+        && c.filter == browserFilter && c.like == browserLike)
         return c;
 
     c.filter = browserFilter;
+    c.like = browserLike;
 
     c.library = library.get();
     c.count = all.size();
@@ -235,27 +236,37 @@ void App::loadLibrary()
     }
 }
 
+// The window: ctrl+B opens it in front with the keys (and from inside it closes it); browse
+// opens or closes it. It needs the screen, so --exec has no browser (agents use --library).
 Result App::showBrowser (bool show)
 {
-    browserVisible = show;
-    browserActive = show;
-    saveSettings();
-
     if (! show)
     {
         engine.preview (nullptr);
-        return Result::good();
+
+        if (browserWindow != nullptr)
+            browserWindow->close();
+
+        return Result::good (L"browser closed \x00b7 ctrl+B opens it");
     }
 
     return focusBrowser();
 }
 
+bool App::browserOpen() const { return browserWindow != nullptr && browserWindow->isOpen(); }
+
 Result App::focusBrowser()
 {
+    if (! console.isOpen())
+        return Result::fail (L"the browser is a window \x2014 headless, taw --library finds samples");
+
     loadLibrary();
-    browserVisible = browserActive = true;
+
+    if (browserWindow == nullptr)
+        browserWindow = std::make_unique<BrowserWindow> (*this);
+
+    browserWindow->open (true);
     browserFocus = BrowserFocus::map; // the map (and typing to filter) first
-    saveSettings();
 
     if (library->samples().empty())
         return isIndexing() ? Result::good (L"indexing\x2026")
@@ -270,7 +281,11 @@ Result App::focusBrowser()
     if (std::find (shown.begin(), shown.end(), browserSample) == shown.end())
         browserSample = shown.empty() ? -1 : shown.front();
 
-    return Result::good (juce::String ((int) library->samples().size()) + L" samples \x00b7 \x2190\x2192 kinds \x00b7 tab map / list \x00b7 type to filter \x00b7 esc back to the tracks");
+    if (const auto kit = kitHere(); kit >= 0)
+        return Result::good ("browsing for " + session->track (kit)[ids::name].toString() + " " + padName (browserPadNote)
+                             + L" \x00b7 what you audition goes on it \x00b7 click a pad to pick another \x00b7 esc: back to taw");
+
+    return Result::good (juce::String ((int) library->samples().size()) + L" samples \x00b7 tab: tabs, map, list \x00b7 type to filter \x00b7 esc: back to taw");
 }
 
 std::vector<juce::String> App::browserKinds() const
@@ -302,9 +317,21 @@ std::vector<int> App::browserShown() const
     if (library == nullptr)
         return out;
 
+    const auto& all = library->samples();
+
+    // Like this: the sample itself, then the ones nearest it, nearest first.
+    if (browserLike >= 0 && browserLike < (int) all.size())
+    {
+        out.push_back (browserLike);
+
+        for (auto i : library->nearest (browserLike, 40))
+            out.push_back (i);
+
+        return out;
+    }
+
     const auto kinds = browserKinds();
     const auto kind = kinds[(size_t) juce::jlimit (0, (int) kinds.size() - 1, browserKind)];
-    const auto& all = library->samples();
     const auto terms = filterTerms (browserFilter);
 
     for (int i = 0; i < (int) all.size(); ++i)
@@ -325,7 +352,7 @@ std::vector<int> App::browserShown() const
             out.push_back (i);
     }
 
-    // Kind by kind (in the badges' order), then by name.
+    // Kind by kind (in the tabs' order), then by name.
     auto rank = [] (const juce::String& k)
     {
         for (int r = 0; r < (int) std::size (kindOrder); ++r)
@@ -360,7 +387,7 @@ std::pair<float, float> App::browserPosition (int sample) const
         return { c.rankX[(size_t) sample], 1.0f - c.rankY[(size_t) sample] }; // up is more
     }
 
-    return browserKind == 0 ? std::pair { s.mapX, s.mapY } : std::pair { s.kindX, s.kindY };
+    return browserKind == 0 || browserLike >= 0 ? std::pair { s.mapX, s.mapY } : std::pair { s.kindX, s.kindY };
 }
 
 Result App::setAuditionDb (double db)
@@ -370,8 +397,9 @@ Result App::setAuditionDb (double db)
     return Result::good ("audition " + formatDb (auditionDb) + " dB");
 }
 
-// Selects a sample and plays it from the top, resampled to the device's rate.
-void App::browserPick (int sample)
+// Selects a sample: plays it (audition), and on a kit with "audition -> pad" on, it goes onto the
+// chosen pad at once (toPad), so what you hear is what the pad plays.
+void App::browserPick (int sample, bool audition, bool toPad)
 {
     browserSample = sample;
 
@@ -379,10 +407,29 @@ void App::browserPick (int sample)
         return;
 
     const auto& s = library->samples()[(size_t) sample];
-    const juce::File file (s.path);
-    message = file.getFileName() + L" \x00b7 " + kindOf (s) + (s.nameKind.isEmpty() ? " (by its sound)" : "");
+    message = juce::File (s.path).getFileName() + L" \x00b7 " + kindOf (s) + (s.nameKind.isEmpty() ? " (by its sound)" : "");
     messageIsError = false;
 
+    if (audition)
+        browserAudition (sample);
+
+    if (toPad && browserToPad && session != nullptr && ! recording)
+        if (const auto kit = kitHere(); kit >= 0)
+        {
+            // Already on it: nothing to load.
+            const auto member = kitMemberOnNote (kit, browserPadNote);
+
+            if (member < 0 || librarySampleFor (session->track (member)) != sample)
+                say (loadPad (kit, browserPadNote, s.path));
+        }
+}
+
+// Plays it from the top, resampled to the device's rate. While taw plays (and "in time" is on)
+// it waits for the next grid step of what you're hearing, so you hear it in the groove.
+void App::browserAudition (int sample)
+{
+    const auto& s = library->samples()[(size_t) sample];
+    const juce::File file (s.path);
     std::unique_ptr<juce::AudioFormatReader> reader (engine.formats().createReaderFor (file));
 
     if (reader == nullptr)
@@ -416,88 +463,141 @@ void App::browserPick (int sample)
         }
     }
 
-    engine.preview (std::move (out), juce::Decibels::decibelsToGain ((float) auditionDb));
-}
+    juce::int64 at = -1;
 
-bool App::handleBrowserKey (const Key& k)
-{
-    if (! browserVisible)
-        return false;
-
-    const auto& g = browserGeometry;
-
-    // A click in the pane takes the keys into it; elsewhere gives them back to the tracks.
-    if (k.code == Key::Mouse)
+    if (browserInTime && session != nullptr && engine.isRolling() && engine.countInRemaining() == 0)
     {
-        if (! g.valid || k.x < g.left || k.y < g.top || k.y >= g.top + g.rows)
-        {
-            browserActive = false;
-            return false;
-        }
+        // The playhead is ahead of what you hear by the mix's delay compensation: the next step
+        // of what you hear, played that much later on the playhead's clock. Past the loop's end
+        // it's the loop's start.
+        const auto step = session->fineStepBeats() * session->samplesPerBeat();
+        const auto heard = (double) (engine.playhead() - mixLatency);
+        auto next = std::ceil (heard / step - 1.0e-6) * step;
 
-        loadLibrary();
-        browserActive = true;
-        const auto shown = browserShown();
+        if (loopActive() && next >= (double) (juce::int64) session->tree()[ids::loopEnd])
+            next = (double) (juce::int64) session->tree()[ids::loopStart];
 
-        // A selector row: the click steps it (‹ on the left half back, else on).
-        for (int r = 0; r < 2; ++r)
-            if (k.y == g.axisRow[r])
-            {
-                browserFocus = r == 0 ? BrowserFocus::xAxis : BrowserFocus::yAxis;
-                setBrowserAxis (r == 1, k.x < g.left + 14 ? -1 : 1);
-                return true;
-            }
-
-        if (std::any_of (g.badges.begin(), g.badges.end(), [&] (const auto& b) { return b.y == k.y; }))
-        {
-            for (size_t b = 0; b < g.badges.size(); ++b)
-                if (k.y == g.badges[b].y && k.x >= g.badges[b].x && k.x < g.badges[b].x + g.badges[b].w)
-                {
-                    browserKind = (int) b;
-                    browserFocus = BrowserFocus::kinds;
-                }
-
-            const auto now = browserShown();
-
-            if (std::find (now.begin(), now.end(), browserSample) == now.end())
-                browserSample = now.empty() ? -1 : now.front();
-        }
-        else if (k.x >= g.listX && k.x < g.listX + g.listW && k.y >= g.listY && k.y < g.listY + g.listRows)
-        {
-            const int i = g.listFirst + k.y - g.listY;
-            browserFocus = BrowserFocus::list;
-
-            if (i < (int) shown.size())
-                browserPick (shown[(size_t) i]);
-        }
-        else if (k.x >= g.mapX && k.x < g.mapX + g.mapW && k.y >= g.mapY && k.y < g.mapY + g.mapH && ! shown.empty())
-        {
-            // The sample nearest the clicked cell's centre.
-            browserFocus = BrowserFocus::map;
-            const float cx = ((float) (k.x - g.mapX) + 0.5f) / (float) g.mapW, cy = ((float) (k.y - g.mapY) + 0.5f) / (float) g.mapH;
-            int best = -1;
-            float bestD = 1.0e9f;
-
-            for (auto i : shown)
-            {
-                const auto [x, y] = browserPosition (i);
-                const float dx = (x - cx) * (float) g.mapW, dy = (y - cy) * (float) g.mapH * 2.0f;
-
-                if (const float d = dx * dx + dy * dy; d < bestD)
-                    bestD = d, best = i;
-            }
-
-            browserPick (best);
-        }
-
-        return true;
+        at = (juce::int64) std::llround (next) + mixLatency;
     }
 
-    if (! browserActive)
-        return false;
+    engine.preview (std::move (out), juce::Decibels::decibelsToGain ((float) auditionDb), 0, at);
+}
 
-    // Ctrl shortcuts (ctrl+q, ctrl+b, ctrl+z, ctrl+space ...) and shift+space (the transport)
-    // go on to taw.
+// Enter: on a kit, onto its chosen pad; on a sample track, its new sample (it keeps its hits);
+// else (or shift+enter) a new sample track.
+Result App::browserLoad (bool newTrack)
+{
+    if (session == nullptr)
+        return Result::fail ("open a session first, then enter puts the sample on a track");
+
+    if (library == nullptr || browserSample < 0 || browserSample >= (int) library->samples().size())
+        return Result::fail ("pick a sample first");
+
+    const auto& path = library->samples()[(size_t) browserSample].path;
+
+    if (! newTrack)
+        if (const auto kit = kitHere(); kit >= 0)
+            return loadPad (kit, browserPadNote, path);
+
+    const int target = ! newTrack && ! onTopLane() && ! mixFocused() && focused >= 0 && focused < session->numTracks()
+                               && Session::isSampleTrack (session->track (focused))
+                           ? focused : -1;
+    return startImport ({ path }, target, ImportAs::sample);
+}
+
+int App::librarySampleFor (const juce::ValueTree& track) const
+{
+    if (library == nullptr || ! track.isValid())
+        return -1;
+
+    const auto from = track[ids::sampleFrom].toString();
+    const auto& all = library->samples();
+
+    if (from.isNotEmpty())
+        for (int i = 0; i < (int) all.size(); ++i)
+            if (all[(size_t) i].path == from)
+                return i;
+
+    return -1;
+}
+
+// Like this: the samples that sound most like the chosen pad's sound (or, off a kit or on an
+// empty pad, the chosen sample). Again: everything.
+Result App::browserLikeThis()
+{
+    loadLibrary();
+
+    if (browserLike >= 0)
+    {
+        browserLike = -1;
+        return Result::good ("all samples again");
+    }
+
+    int from = browserSample;
+
+    if (const auto kit = kitHere(); kit >= 0)
+        if (const auto member = kitMemberOnNote (kit, browserPadNote); member >= 0)
+            if (const auto i = librarySampleFor (session->track (member)); i >= 0)
+                from = i;
+
+    if (from < 0 || from >= (int) library->samples().size())
+        return Result::fail ("pick a sample first, then like this shows the ones that sound like it");
+
+    browserLike = from;
+    browserSample = from;
+    return Result::good (L"like " + juce::File (library->samples()[(size_t) from].path).getFileNameWithoutExtension()
+                         + L", nearest first \x00b7 like this again: all");
+}
+
+void App::browserPlayPad (int note)
+{
+    browserPadNote = note;
+    const auto kit = kitHere();
+
+    if (kit < 0)
+        return;
+
+    if (const auto member = kitMemberOnNote (kit, note); member >= 0)
+    {
+        engine.triggerPad (member, 0.8f);
+        message = padName (note) + " " + session->track (member)[ids::name].toString() + L" \x00b7 what you audition now goes on it";
+    }
+    else
+        message = padName (note) + L" (empty) \x00b7 what you audition goes on it";
+
+    messageIsError = false;
+}
+
+void App::setBrowserAxisTo (bool y, int axis)
+{
+    const int n = (int) std::size (axisTable);
+    axis = juce::jlimit (0, n - 1, axis);
+
+    if (axis == 0)
+        browserAxisX = browserAxisY = 0;
+    else if (y)
+    {
+        browserAxisY = axis;
+
+        if (browserAxisX == 0 || browserAxisX == axis)
+            browserAxisX = axis == 1 ? 3 : 1;
+    }
+    else
+    {
+        browserAxisX = axis;
+
+        if (browserAxisY == 0 || browserAxisY == axis)
+            browserAxisY = axis == 3 ? 1 : 3;
+    }
+
+    saveSettings();
+}
+
+// The window's keys. Tab goes round the tabs, the map, the list and (on a kit) the pads; arrows
+// move inside each; typing filters; enter loads; esc clears the filter, then hands the keys back
+// to taw. Ctrl and alt+letter keys, and shift+space, are taw's (false).
+bool App::handleBrowserKey (const Key& k)
+{
     if ((k.code == Key::Char && (k.ctrl || k.alt)) || (k.code == Key::Char && k.ch == ' ' && k.shift))
         return false;
 
@@ -505,6 +605,7 @@ bool App::handleBrowserKey (const Key& k)
     const auto kinds = browserKinds();
     auto shown = browserShown();
     const int at = (int) (std::find (shown.begin(), shown.end(), browserSample) - shown.begin());
+    const bool onKit = kitHere() >= 0;
 
     auto keepSelection = [&]
     {
@@ -529,7 +630,7 @@ bool App::handleBrowserKey (const Key& k)
         }
 
         const auto [x0, y0] = browserPosition (browserSample);
-        const float sx = (float) std::max (1, g.mapW), sy = (float) std::max (1, g.mapH) * 2.0f; // in pixels (half cells), about square
+        const float sx = 800.0f, sy = 500.0f; // about the window's map, in pixels
         int best = -1;
         float bestScore = 1.0e9f;
 
@@ -545,7 +646,7 @@ bool App::handleBrowserKey (const Key& k)
             if (along <= 0.0f || across > along * 1.7f)
                 continue;
 
-            const float jump = far ? 0.2f * (std::abs (ux) > 0.0f ? sx : sy) : 0.0f; // in pixels
+            const float jump = far ? 0.2f * (std::abs (ux) > 0.0f ? sx : sy) : 0.0f;
             const float score = far ? std::sqrt ((along - jump) * (along - jump) + across * across) + across
                                     : std::sqrt (along * along + across * across) + across;
 
@@ -567,6 +668,35 @@ bool App::handleBrowserKey (const Key& k)
         return true;
     }
 
+    // The pads: arrows move round the 4x4 (pad 1 bottom left), space plays the lit one.
+    if (browserFocus == BrowserFocus::pads && onKit)
+    {
+        const int pad = juce::jlimit (0, 15, browserPadNote - firstPadNote);
+        int col = pad % 4, row = pad / 4;
+
+        switch (k.code)
+        {
+            case Key::Left:  col = std::max (0, col - 1); break;
+            case Key::Right: col = std::min (3, col + 1); break;
+            case Key::Up:    row = std::min (3, row + 1); break;
+            case Key::Down:  row = std::max (0, row - 1); break;
+            case Key::Char:
+                if (k.ch == ' ')
+                {
+                    browserPlayPad (browserPadNote);
+                    return true;
+                }
+                break;
+            default: break;
+        }
+
+        if (k.code == Key::Left || k.code == Key::Right || k.code == Key::Up || k.code == Key::Down)
+        {
+            browserPlayPad (firstPadNote + row * 4 + col);
+            return true;
+        }
+    }
+
     switch (k.code)
     {
         case Key::Escape:
@@ -575,28 +705,37 @@ bool App::handleBrowserKey (const Key& k)
                 browserFilter.clear();
                 keepSelection();
             }
+            else if (browserLike >= 0)
+            {
+                browserLike = -1;
+                keepSelection();
+            }
             else
             {
-                browserActive = false;
                 engine.preview (nullptr);
-                message = L"back to the tracks \x00b7 ctrl+B the browser again (and again hides it)";
+                console.focusTerminal();
+                message = L"back to the tracks \x00b7 ctrl+B the browser again (and again closes it)";
                 messageIsError = false;
             }
             return true;
 
         case Key::Tab:
-            return true; // (there's no list to go to)
+        {
+            // Round the areas: tabs, map, list, and the pads on a kit.
+            const int count = onKit ? 4 : 3;
+            browserFocus = (BrowserFocus) (((int) browserFocus + (k.shift ? count - 1 : 1)) % count);
+            return true;
+        }
 
         case Key::Left:
         case Key::Right:
         {
             const int step = k.code == Key::Left ? -1 : 1;
 
-            if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis)
-                setBrowserAxis (browserFocus == BrowserFocus::yAxis, step);
-            else if (browserFocus == BrowserFocus::kinds)
+            if (browserFocus == BrowserFocus::kinds)
             {
                 browserKind = juce::jlimit (0, (int) kinds.size() - 1, browserKind + step);
+                browserLike = -1;
                 keepSelection();
             }
             else if (browserFocus == BrowserFocus::map)
@@ -618,29 +757,20 @@ bool App::handleBrowserKey (const Key& k)
                 return true;
             }
 
-            // Under the map, top to bottom: x, y, the badges.
-            if (browserFocus == BrowserFocus::xAxis || browserFocus == BrowserFocus::yAxis
-                || browserFocus == BrowserFocus::kinds)
+            if (browserFocus == BrowserFocus::kinds)
             {
-                // y is skipped while the map is the sound-alike one (it has no y of its own).
-                auto next = (int) browserFocus + step;
-
-                if (next == (int) BrowserFocus::yAxis && browserAxisX == 0)
-                    next += step;
-
-                browserFocus = (BrowserFocus) juce::jlimit ((int) BrowserFocus::map, (int) BrowserFocus::kinds, next);
+                if (step > 0)
+                    browserFocus = BrowserFocus::map;
             }
             else if (browserFocus == BrowserFocus::map)
             {
-                // Down past the bottom of the map goes to the settings under it.
-                if (! moveOnMap (0.0f, (float) step, k.ctrl) && step > 0)
-                    browserFocus = BrowserFocus::xAxis;
+                // Up past the top of the map goes to the tabs.
+                if (! moveOnMap (0.0f, (float) step, k.ctrl) && step < 0)
+                    browserFocus = BrowserFocus::kinds;
             }
-            else if (at + step < 0)
-                browserFocus = BrowserFocus::kinds;
             else if (k.ctrl && ! shown.empty()) // ten at a time
                 browserPick (shown[(size_t) juce::jlimit (0, (int) shown.size() - 1, at + step * 10)]);
-            else if (at + step < (int) shown.size())
+            else if (at + step >= 0 && at + step < (int) shown.size())
                 browserPick (shown[(size_t) (at + step)]);
 
             return true;
@@ -655,30 +785,13 @@ bool App::handleBrowserKey (const Key& k)
                 const int page = 10;
                 const int to = k.code == Key::Home ? 0 : k.code == Key::End ? (int) shown.size() - 1
                              : at + (k.code == Key::PageUp ? -page : page);
-                browserFocus = BrowserFocus::map;
                 browserPick (shown[(size_t) juce::jlimit (0, (int) shown.size() - 1, to)]);
             }
             return true;
 
         case Key::Enter:
-        {
-            if (session == nullptr)
-            {
-                say (Result::fail ("open a session first, then enter puts the sample on a track"));
-                return true;
-            }
-
-            if (browserSample < 0)
-                return true;
-
-            // Enter: the focused sample track gets this sample (keeping its hits), else a new
-            // sample track. shift+Enter: always a new one.
-            const int target = ! k.shift && ! onTopLane() && ! mixFocused() && focused >= 0 && focused < session->numTracks()
-                                       && Session::isSampleTrack (session->track (focused))
-                                   ? focused : -1;
-            say (startImport ({ library->samples()[(size_t) browserSample].path }, target, ImportAs::sample));
+            say (browserLoad (k.shift));
             return true;
-        }
 
         case Key::Backspace:
             browserFilter = browserFilter.dropLastCharacters (1);
@@ -687,7 +800,10 @@ bool App::handleBrowserKey (const Key& k)
 
         case Key::Char:
             if (k.ch == ' ' && browserFilter.isEmpty())
-                browserPick (browserSample); // again
+            {
+                if (browserSample >= 0)
+                    browserAudition (browserSample); // again
+            }
             else if (k.ch == ' ')
             {
                 if (! browserFilter.endsWithChar (' '))
@@ -696,6 +812,7 @@ bool App::handleBrowserKey (const Key& k)
             else if (k.ch >= 32)
             {
                 browserFilter += juce::String::charToString ((juce::juce_wchar) k.ch);
+                browserLike = -1;
                 keepSelection();
             }
             return true;
@@ -875,10 +992,6 @@ Result App::describeLibrary()
 
 void App::pollIndexing()
 {
-    // Docked from the start (it's remembered): the index loads with the first frame.
-    if (browserVisible && library == nullptr)
-        loadLibrary();
-
     if (! isIndexing())
         return;
 

@@ -267,7 +267,27 @@ void App::pollPlugins()
     if (audioEditor != nullptr)
         audioEditor->poll();
 
-    console.reclaimKeyboard (windows, editorWindow());
+    if (browserWindow != nullptr)
+        browserWindow->poll();
+
+    // The browser and an editor both keep the keyboard while in front: the one in front does;
+    // the other stays over the terminal like a plugin window.
+    auto* keeper = editorWindow();
+
+    if (browserWindow != nullptr && browserWindow->isOpen())
+    {
+        if (browserWindow->isActive() || keeper == nullptr)
+        {
+            if (keeper != nullptr)
+                windows.push_back (keeper);
+
+            keeper = browserWindow->nativeHandle();
+        }
+        else
+            windows.push_back (browserWindow->nativeHandle());
+    }
+
+    console.reclaimKeyboard (windows, keeper);
 
     for (auto& in : hosted)
         if (in.slot != nullptr)

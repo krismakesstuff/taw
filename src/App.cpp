@@ -100,6 +100,7 @@ App::~App()
         indexThread.join(); // an index half written would be measured again anyway
 
     midiInputs.reset(); // its callbacks feed the engine's queues
+    browserWindow.reset(); // while the console it hands the keys back to is still here
     stopBounce();
     backgroundBounces.clear(); // quitting anyway: an unfinished last-saved is dropped (the old one stays)
     releaseSession();
@@ -2231,28 +2232,8 @@ void App::pollImport()
 
         if (asSample)
         {
-            // A new sample track starts with no hits; giving an existing track a new sample
-            // keeps its hits, so a pattern can swap its sound. That says so, and the track's
-            // header flashes; a track still named after its old sample takes the new one's name.
-            if (Session::isSampleTrack (track) && track[ids::sample].toString().isNotEmpty())
-            {
-                const auto oldName = juce::File (track[ids::sample].toString()).getFileNameWithoutExtension();
-                const auto newName = item.source.getFileNameWithoutExtension();
-                // An imported sample's copy can carry a number after the original's name.
-                const bool namedAfterIt = oldName.startsWithIgnoreCase (track[ids::name].toString()) || track[ids::name].toString().startsWithIgnoreCase (oldName);
-
-                if (namedAfterIt)
-                    track.setProperty (ids::name, newName.substring (0, 24), um());
-
-                replaced.add ("track " + juce::String (session->tree().indexOf (track) + 1) + " " + track[ids::name].toString() + " now plays "
-                              + newName + " (was " + juce::File (track[ids::sample].toString()).getFileName() + ")");
-                flashTrack (track);
-            }
-
-            track.setProperty (ids::kind, "sample", um())
-                .setProperty (ids::sample, file, um())
-                .setProperty (ids::sampleOffset, 0, um())
-                .setProperty (ids::sampleLength, 0, um());
+            if (const auto note = giveSample (track, file, item.source); note.isNotEmpty())
+                replaced.add (note);
         }
         else
         {
@@ -2282,6 +2263,47 @@ void App::pollImport()
         say (Result::good ("imported " + placed.joinIntoString (", ") + " at " + formatBars (importAt)));
 
     import.reset();
+
+    // A pad pick that came while this one was copying goes on now.
+    if (const auto queued = std::exchange (queuedPad, {}); queued.kitBus > 0)
+        say (loadPad (session->findBus (queued.kitBus), queued.note, queued.path));
+}
+
+// A track's sample (file: its copy in the session, source: where it came from). A new sample
+// track starts with no hits; giving an existing one a new sample keeps its hits, so a pattern can
+// swap its sound. That says so (returned), and the track's header flashes; a track still named
+// after its old sample takes the new one's name.
+juce::String App::giveSample (juce::ValueTree track, const juce::String& file, const juce::File& source)
+{
+    juce::String note;
+
+    if (Session::isSampleTrack (track) && track[ids::sample].toString().isNotEmpty())
+    {
+        // Named after the file it came from, or (older sessions) its copy, imp-<name><n>.
+        auto oldName = track[ids::sampleFrom].toString().isNotEmpty() ? juce::File (track[ids::sampleFrom].toString()).getFileNameWithoutExtension()
+                                                                     : juce::File (track[ids::sample].toString()).getFileNameWithoutExtension().fromFirstOccurrenceOf ("imp-", false, false);
+        if (oldName.isEmpty())
+            oldName = juce::File (track[ids::sample].toString()).getFileNameWithoutExtension();
+
+        const auto newName = source.getFileNameWithoutExtension();
+        const auto name = track[ids::name].toString();
+        const bool namedAfterIt = name.isNotEmpty() && (oldName.startsWithIgnoreCase (name) || name.startsWithIgnoreCase (oldName));
+
+        if (namedAfterIt)
+            track.setProperty (ids::name, newName.substring (0, 24), um());
+
+        note = "track " + juce::String (session->tree().indexOf (track) + 1) + " " + track[ids::name].toString() + " now plays "
+               + newName + " (was " + oldName + ")";
+        flashTrack (track);
+    }
+
+    copies[session->folder().getFullPathName() + "|" + source.getFullPathName()] = file;
+    track.setProperty (ids::kind, "sample", um())
+        .setProperty (ids::sample, file, um())
+        .setProperty (ids::sampleFrom, source.getFullPathName(), um())
+        .setProperty (ids::sampleOffset, 0, um())
+        .setProperty (ids::sampleLength, 0, um());
+    return note;
 }
 
 // Files dropped on the console arrive as text: one or more (quoted) absolute paths. If that's
@@ -3246,7 +3268,8 @@ void App::loadSettings()
     if (json.hasProperty ("io"))
         ioVisible = (bool) json["io"];
 
-    browserVisible = (bool) json.getProperty ("browser", false);
+    browserHover = (bool) json.getProperty ("browserHover", false);
+    browserInTime = (bool) json.getProperty ("browserInTime", true);
     browserAxisX = std::max (0, browserAxisNames().indexOf (json["browserX"].toString()));
     browserAxisY = std::max (0, browserAxisNames().indexOf (json["browserY"].toString()));
 
@@ -3289,7 +3312,8 @@ void App::saveSettings() const
     o->setProperty ("dateNames", dateSessionNames);
     o->setProperty ("sessionsFolder", sessionsFolder != juce::File() ? sessionsFolder.getFullPathName() : juce::String()); // empty: where taw starts
     o->setProperty ("newRate", newRate);
-    o->setProperty ("browser", browserVisible);
+    o->setProperty ("browserHover", browserHover);
+    o->setProperty ("browserInTime", browserInTime);
     o->setProperty ("browserX", browserAxisNames()[browserAxisX]);
     o->setProperty ("browserY", browserAxisNames()[browserAxisY]);
 
@@ -3591,7 +3615,7 @@ void App::dispatchKey (const Key& k)
             return;
         }
 
-        if (mode == Mode::Main && ! handleBrowserKey (k)) // the docked browser has its own clicks
+        if (mode == Mode::Main)
             handleMouse (k);
 
         return;
@@ -3973,7 +3997,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleHelpKey (k) || handleBrowserKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k)
+    if (handleHelpKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k)
         || handleSettingsKey (k) || handleIoKey (k))
         return;
 
@@ -4174,8 +4198,8 @@ void App::handleMainKey (const Key& k)
             say (execute ("ed close")); // every plugin window, from anywhere
         else if (k.ch == 'k')
             say (toggleLiveKeys());
-        else if (k.ch == 'b') // into the sample browser (showing it); from inside it, hides it
-            say (browserVisible && browserActive ? showBrowser (false) : focusBrowser());
+        else if (k.ch == 'b') // the sample browser's window, in front with the keys; from inside it, closes it
+            say (browserWindow != nullptr && browserWindow->isActive() ? showBrowser (false) : focusBrowser());
         else if (k.ch == 'z')
             say (undoEdit());
         else if (k.ch == 'y')

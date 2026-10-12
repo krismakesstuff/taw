@@ -256,6 +256,36 @@ Result App::loadPad (int kit, int note, const juce::String& path)
         return Result::fail ("pads are 1 to 16 (or note 0-127)");
 
     const auto member = kitMemberOnNote (kit, note);
+    const auto source = Import::resolve (path.unquoted(), juce::File::getCurrentWorkingDirectory());
+
+    // A sample the session already has a copy of (auditioning back and forth over a few) is
+    // put on at once, from that copy.
+    if (const auto copy = copyOf (source); copy.isNotEmpty())
+    {
+        {
+            if (member >= 0 && session->track (member)[ids::sample].toString() == copy)
+                return Result::good (padName (note) + " already plays " + source.getFileNameWithoutExtension());
+
+            beginEdit ("load pad", "pad " + juce::String (note));
+            importKitBus = session->track (kit)[ids::busId];
+            importNote = note;
+            auto track = member >= 0 ? session->track (member) : newKitMember (source.getFileNameWithoutExtension().substring (0, 24));
+            importKitBus = 0;
+            importNote = -1;
+            giveSample (track, copy, source);
+            const auto index = session->tree().indexOf (track);
+            focusTrack (index);
+            return Result::good (padName (note) + " " + track[ids::name].toString() + " (track " + juce::String (index + 1) + L") \x00b7 ctrl+z undoes");
+        }
+    }
+
+    // Picks quicker than the copies: the latest waits for the one being copied, then goes on.
+    if (import != nullptr && importKitBus > 0)
+    {
+        queuedPad = { (int) session->track (kit)[ids::busId], note, path };
+        return Result::good (padName (note) + L" next: " + source.getFileNameWithoutExtension());
+    }
+
     auto r = startImport ({ path }, member, ImportAs::sample);
 
     if (r.ok)
@@ -265,6 +295,25 @@ Result App::loadPad (int kit, int note, const juce::String& path)
     }
 
     return r;
+}
+
+// The session's copy of a file (relative to the session), made by an import this run or kept by
+// a sample track; empty when there's none (or it's gone).
+juce::String App::copyOf (const juce::File& source) const
+{
+    if (session == nullptr || ! source.existsAsFile())
+        return {};
+
+    auto exists = [this] (const juce::String& rel) { return rel.isNotEmpty() && session->folder().getChildFile (rel).existsAsFile(); };
+
+    if (const auto it = copies.find (session->folder().getFullPathName() + "|" + source.getFullPathName()); it != copies.end() && exists (it->second))
+        return it->second;
+
+    for (int t = 0; t < session->numTracks(); ++t)
+        if (const auto other = session->track (t); Session::isSampleTrack (other) && juce::File (other[ids::sampleFrom].toString()) == source && exists (other[ids::sample]))
+            return other[ids::sample];
+
+    return {};
 }
 
 // Called by pollImport for a pad load with no member on the note yet: a new sample track playing

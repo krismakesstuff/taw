@@ -3,6 +3,7 @@
 #include "AudioEngine.h"
 #include "Bounce.h"
 #include "AudioEditor.h"
+#include "BrowserWindow.h"
 #include "Import.h"
 #include "Library.h"
 #include "LiveKeys.h"
@@ -194,8 +195,7 @@ public:
     // than what the engine is rendering. For drawing it and for markers dropped while playing.
     int laneColumns() const
     {
-        const int width = console.width() - layout::browserDock (console.width(), browserVisible);
-        return layout::laneWidth (width, ioVisible, session != nullptr && session->trackHeight() > 1);
+        return layout::laneWidth (console.width(), ioVisible, session != nullptr && session->trackHeight() > 1);
     }
 
     juce::int64 heardPlayhead() const
@@ -401,22 +401,14 @@ public:
     Result hubReplace (const juce::Array<juce::var>& remove, const std::vector<std::array<int, 2>>& add,
                        const juce::String& from, const juce::String& to, double db);
 
-    // The sample browser (ctrl+B, browse): the library's kinds as badges, a map of the chosen
-    // kind where samples that sound alike sit together, and a list; typing filters by name, and
-    // every move auditions. Enter gives the focused sample track that sample (it keeps its hits)
-    // or makes a new one. index <folder> adds folders to the library. See Browser.cpp.
-    enum class BrowserFocus { map, xAxis, yAxis, kinds, list }; // top to bottom (no list now)
-    // Where the Ui drew the browser, for the mouse and for moving on the map.
-    struct BrowserGeometry
-    {
-        int left = 0, top = 0, rows = 0;               // the column
-        int listX = 0, listY = 0, listW = 0, listRows = 0, listFirst = 0;
-        int mapX = 0, mapY = 0, mapW = 0, mapH = 0;    // cells (two pixels each, top and bottom)
-        int axisRow[2] = { -1, -1 };                   // the x and y selector rows
-        struct Badge { int x, y, w; };
-        std::vector<Badge> badges;                     // they wrap onto as many rows as they need
-        bool valid = false;
-    } browserGeometry;
+    // The sample browser (ctrl+B, browse): a window of its own (BrowserWindow.h), mouse-forward
+    // like a plugin's and still keyboard-led: the library's kinds as tabs, a map of the chosen
+    // kind where samples that sound alike sit together, a list, and a kit's 4x4 pads. Every move
+    // auditions; typing filters. Enter gives the focused sample track that sample (it keeps its
+    // hits), or puts it on the chosen pad of the kit here, or makes a new sample track. index
+    // <folder> adds folders to the library. See Browser.cpp.
+    enum class BrowserFocus { kinds, map, list, pads }; // tab goes round them
+    std::unique_ptr<BrowserWindow> browserWindow;
 
     // What the map's axes show (0, "similar": the sound-alike map on both). Kept in settings.json;
     // alt+arrows step them.
@@ -425,23 +417,33 @@ public:
     juce::String browserAxisRange (bool y) const; // "51 Hz → 12 kHz" over the kind shown
     std::pair<juce::String, juce::String> browserAxisEnds (bool y) const; // low, high
     void setBrowserAxis (bool y, int step);
-    bool browserActive = false; // the keys go to the browser (else it's just showing)
-    Result focusBrowser();      // ctrl+B from the tracks
-    Result showBrowser (bool show); // browse, and ctrl+B from inside it: docked or hidden
-    bool handleBrowserKey (const Key&);
+    void setBrowserAxisTo (bool y, int axis); // the window's menus
+    Result focusBrowser();          // ctrl+B: the window, in front with the keys
+    Result showBrowser (bool show); // browse, and ctrl+B from inside it: open or closed
+    bool browserOpen() const;
+    bool handleBrowserKey (const Key&); // the window's keys (false: taw's)
     std::vector<juce::String> browserKinds() const;     // "all", then the kinds the library has
-    std::vector<int> browserShown() const;              // the samples the badge and filter leave, list order
+    std::vector<int> browserShown() const;              // the samples the tab and filter leave (or like this), list order
     std::pair<float, float> browserPosition (int sample) const; // on the map now showing, 0..1
     Result startIndexing (const juce::StringArray& folders);    // index <folder>...; index remove <folder>...
     Result removeFromLibrary (const juce::StringArray& folders); // index remove
     Result describeLibrary();                                    // library: its folders and how many samples each
     void pollIndexing();
-    bool browserVisible = false;
-    BrowserFocus browserFocus = BrowserFocus::kinds;
+    BrowserFocus browserFocus = BrowserFocus::map;
     int browserKind = 0, browserSample = -1;
     juce::String browserFilter;
+    int browserLike = -1;      // showing the samples most like this one ("like this"), nearest first; -1 off
+    bool browserHover = false; // the map auditions under the pointer without a click (settings.json)
+    bool browserInTime = true; // while playing, an audition waits for the next grid step (settings.json)
+    bool browserToPad = true;  // on a kit, what you audition goes onto the chosen pad at once
     double auditionDb = -6.0; // the browser's audition voice, its own level (settings.json)
     Result setAuditionDb (double db);
+    void browserPick (int sample, bool audition = true, bool toPad = true); // select (and audition, and onto the pad)
+    void browserAudition (int sample);  // play it, in time with the loop when rolling
+    Result browserLoad (bool newTrack); // enter: onto the pad, the focused sample track, or a new one
+    Result browserLikeThis();           // the samples most like the chosen pad's sound (or the chosen one)
+    int librarySampleFor (const juce::ValueTree& track) const; // the library's entry a sample track came from, or -1
+    void browserPlayPad (int note);     // a pad pressed in the window
     std::unique_ptr<Library> library;
     std::atomic<int> indexDone { 0 }, indexTotal { 0 };
     bool isIndexing() const { return indexThread.joinable(); }
@@ -1113,10 +1115,13 @@ private:
     ImportAs importAs = ImportAs::audio;
     int importKitBus = 0, importNote = -1; // a pad load (loadPad): the kit and note it goes on
     juce::ValueTree newKitMember (const juce::String& name);
+    juce::String giveSample (juce::ValueTree track, const juce::String& file, const juce::File& source);
+    juce::String copyOf (const juce::File& source) const;
+    struct QueuedPad { int kitBus = 0, note = -1; juce::String path; } queuedPad; // a pad load waiting for the copy before it
+    std::map<juce::String, juce::String> copies; // "session folder|source": its copy, from this run's imports
     juce::String pendingTemplate;
     bool treeDirty = false, quitRequested = false;
 
-    void browserPick (int sample); // select and audition
 
     // Each sample's rank on the chosen axes, within the kind shown (rebuilt when either changes).
     struct AxisCache
@@ -1127,6 +1132,7 @@ private:
         std::vector<float> rankX, rankY; // by sample index, 0..1
         juce::String lowX, highX, lowY, highY; // the values at the ends, written out
         juce::String filter;
+        int like = -1;
     };
     mutable AxisCache axisCache;
     const AxisCache& axes() const;

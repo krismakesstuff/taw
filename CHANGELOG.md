@@ -13,7 +13,11 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
 - Clip fades and crossfades (`Ctrl+F` from the selection, `xfade`, `clip fade`), with a short
   declick on every clip edge.
 - Automation lanes, written by hand or recorded from MIDI controllers.
-- A sample library and browser, with a sound-alike map.
+- A sample library and browser, with a sound-alike map, in a window of its own: kind tabs, drag
+  over the map to audition, auditions in time with the loop, "like this".
+- Kits: sample tracks grouped on a bus, each on a pad; played from a pad controller or the
+  keyboard's 4x4 (MPC layout), recorded as hits, with choke groups; built in the browser, where
+  what you audition goes onto the lit pad.
 - Video for scoring to picture, and bouncing with picture (`bv`).
 - Bouncing to WAV and MP3.
 - Importing Ableton Live sets.

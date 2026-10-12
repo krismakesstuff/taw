@@ -332,8 +332,7 @@ selection. Built on JUCE's `UndoManager` over the state tree; undo is refused wh
 
 ## Sample tracks
 
-One sample per track; each track reads as its own step-sequencer row. Grouping tracks into a
-sample group (a kit) comes later, on top of normal tracks.
+One sample per track; each track reads as its own step-sequencer row. A kit groups them (below).
 
 ```
 TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
@@ -350,8 +349,9 @@ TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
 - Version 3 sessions kept hits on the track; on load they go into one clip from the bar of the
   first hit to the end of the bar of the last.
 
-- Each hit plays the whole sample once at its velocity; overlapping hits ring out (no choke
-  yet). Rendering depends only on position, like clips, so loops, seeks and bounces agree.
+- Each hit plays the whole sample once at its velocity; overlapping hits ring out, unless a
+  kit's choke group cuts them (below). Rendering depends only on position, like clips, so loops,
+  seeks and bounces agree.
 - `sample <file|folder>` / `add sample <file>`: new sample track(s). `3 sample <file>` gives
   track 3 a new sample and keeps its hits (swap the sound, keep the groove).
 - `3 sample` converts an audio track: its latest clip (as trimmed) becomes the sample and every
@@ -369,6 +369,50 @@ TRACK { type: "sample", sample, sampleOffset, sampleLength, … }
 - The lane shows each step: a hit's velocity as a shade, an empty step as a faint dot. A clip's
   steps are shaded (neighbouring clips alternate) and outlined top and bottom.
 - Sample tracks can't be recorded onto.
+
+### Kits
+
+A kit groups sample tracks for finger drumming and quick kit building (`Kits.cpp`). Still one
+sample per track: each member keeps its own hits, mute, sends and inserts.
+
+```
+TRACK { kind: "bus", kit: true, folded?, … }      # the kit: a bus its members play into
+TRACK { kind: "sample", out: <kit's busId>, note, choke?, sampleFrom, … }   # a member, a pad
+```
+
+| Command | Does |
+|---|---|
+| `kit` / `add kit [name]` | a new kit ("Kit 1"), focused; `kit` on a kit (or a member) lists its pads |
+| `pad 3 <file>` | a sample onto pad 3 of the kit here (1-16; pad 1 is note 36, what drum pads send): the member on it gets the new sound and keeps its hits, or a new member is made under the kit. `pad 3` alone lights pad 3 for the browser |
+| `3 kit drums` / `3 kit off` | sample track 3 into kit Drums (on the next free pad unless it has a note) / out of it, to the mix |
+| `3 note 38` / `3 note d2` | which note plays member 3 (names with middle C as C4); the member already there swaps |
+| `3 choke 1` / `3 choke off` | its choke group, 1-16 |
+| `shift+F` / `kit fold` | fold the kit's members away under it (or open it) |
+
+- **Playing:** a kit armed (`shift+R` on it: it shows `R` like a track) plays from the MIDI
+  controller: each note-on plays the members on that note at its velocity, on the audio thread
+  (`TrackPlay::padNote`, set only while the kit is armed), so a pad controller is as quick as the
+  pad key. Several kits armed layer, as instruments do; an armed instrument hears the same notes.
+- **Keys mode on a kit** (`ctrl+k` while on a kit or a member, which arms the kit; or with a kit
+  armed and no instrument): the keyboard is a 4×4 pad grid laid out like an MPC's, pad 1 bottom
+  left: `z x c v` pads 1-4, `a s d f` 5-8, `q w e r` 9-12, `1 2 3 4` 13-16. Shift is the accent
+  (full velocity). Held, a key is one hit. Its notes go in as a controller's would
+  (`LiveKeys::setPads`).
+- **Recording:** `ctrl+space` with a kit armed records what you play: each note-on writes a hit
+  onto the member it played, where you heard it (`recordKitHit`, from the recorded MIDI, input
+  quantize as for the pad key), one clip per member per pass, so loop recording splits passes as
+  for pad hits. `.` still plays every armed sample track.
+- **Choke:** a hit on a member cuts off the ringing hits of other members in its group (the
+  closed hat stops the open one) with a 5 ms fade. On the timeline it's decided when the graph is
+  built (`chokeHits`: each hit's `cut` is the next hit on another track of its group; one at the
+  same moment doesn't cut), so it depends only on positions and bounces agree; live, a pad press
+  fades out the group's other voices. Groups are numbered per kit, so two kits never choke each
+  other. Not yet: a live pad choking the timeline's hits, or the other way round.
+- **Screen:** the kit row has `kit` as its label and `▾`/`▸` before its name; members show `│`
+  there and their pad (`pad1`, or `n60` past 16) as their label. Folded members take no rows;
+  ↑↓ pass them, and anything that focuses one (a pad load) opens the kit.
+- `taw --livetest` checks a note playing its pad and choking another; `--cliptest` the timeline's
+  choke.
 
 **Positions between samples.** At tempos like 99 bpm a beat is 26727.27 samples, so grid lines
 fall between samples. Snapping, pattern ranges and the position readout treat anything within
@@ -786,18 +830,32 @@ own thread; `taw --index <folder> ...` from a shell prints a report) adds folder
 `library` lists the indexed folders with how many samples each holds. The folders are kept in
 the index; one inside an indexed folder isn't listed twice.
 
-**The browser** docks in a column right of the timeline and its meters (about three tenths of
-the width, 44 to 72 columns, so the window can stay small; not under 120), from the transport row down to the input
-line, which stays full width; the session stays in view while you look. In the column the map
-fills the top; everything you set is at the bottom, like taw's own input line: the chosen sample
-(file, kind, folder; its numbers), the axes, the badges (wrapping), the qualities the filter can
-use, the hints, and the filter's input line last. `↓` past the bottom of the map goes to the
-axes, then the badges; `↑` back. There's no file list: the map is where you look, and the
-filter is how you get to fewer samples. `ctrl+B` takes the keys into it (showing it), on the map (typing filters from anywhere), `Esc` gives them back and leaves it showing (clearing the
-filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too; remembered). Inside:
+**The browser** is a window of its own (`BrowserWindow.cpp`), over the terminal like the editors:
+mouse-forward like a plugin's, and as usable from the keyboard. `ctrl+B` opens it in front with
+the keys (on the map; typing filters from anywhere), `Esc` gives them back to taw (clearing the
+filter, or "like this", first) and leaves it open, and `ctrl+B` while it has the keys closes it
+(`browse` opens or closes it; `browse hide`). Keys it doesn't use (ctrl ones, `shift+Space`) go to
+taw. It needs the screen: headless, `taw --library` is the way in. The state and keys are App's
+(`Browser.cpp`); the window only draws it and has the mouse. `taw --exec` can draw it into a
+picture (`:browser shot.png`) and press its keys (`:bkey right`). The docked column it replaced is
+gone. In the window:
 
-- **Selectors** under the map show what its axes are; `alt+←→` steps x and `alt+↑↓`
-  steps y from anywhere in the browser (or `↓` down to a row and `←→`, or a click):
+- **Kind tabs** across the top, each with its count, in the kind's colour; a click (or `←→` with
+  the tabs focused) shows only that kind. `Tab` goes round the tabs, the map, the list and (on a
+  kit) the pads; `↑` from the top of the map reaches the tabs.
+- **The map** fills the middle, the **list** sits on its right (the same samples one by one, the
+  kind as a strip, the folder dim), and the **status line** under them shows the chosen sample's
+  numbers. **Drag over the map** to audition whatever is under the pointer (XO-style); with
+  **hover plays** on (settings.json) moving over it is enough. A click in the list auditions; a
+  double-click (off a kit) loads it.
+- **Audition in time** (on by default, settings.json): while taw plays, an audition waits for the
+  next grid step of what you're hearing (the playhead less delay compensation, wrapping at the
+  loop's end), so each candidate is heard in the groove. The engine holds it in its preview voice
+  until the playhead gets there (`PreviewSound::at`), giving up after 4 s.
+- **Like this:** the toolbar's button shows the 40 samples that sound most like the chosen pad's
+  sound (or the chosen sample), nearest first; again (or esc, or a tab) shows everything.
+- **Selectors** in the toolbar show what the map's axes are; `alt+←→` steps x and `alt+↑↓`
+  steps y from anywhere in the browser (or the menus):
   - `similar` (the default) is the sound-alike map below, both axes at once, where only nearness
     means anything. Otherwise two measurements: brightness, attack, decay, tail, length, pitch
     (unpitched at the bottom), loudness (RMS), punch (crest), noise (flatness), low end (energy
@@ -808,31 +866,37 @@ filter first), and `ctrl+B` from inside hides it (`browse` shows or hides it too
     the rule under it: low end, name, high end. The two are never the same; `y` is skipped on
     the sound-alike map. Kept in settings.json.
   - Colours are always by kind, like the badges.
-- **Badges**, one per kind with its count, in the kind's colour: `←→` picks one,
-  and the map shows only that kind.
 - **The map**: each kind's samples on a map of their own (so 187 kicks spread over the whole
-  area, not their corner of the full one), drawn in half blocks, two near-square pixels a cell,
-  each in the colour most of its samples have. The arrows go to the nearest sample within 60° of
-  that direction; `ctrl+arrow` jumps a fifth of the map that way (to the sample nearest that
-  spot), to cross it quickly and then home in with the plain arrows. A click picks the nearest
-  one. The chosen one is a ring with its name.
-- **Typing** filters, on the input line at the bottom: words match file and folder names, and measurement terms the sounds,
+  area, not their corner of the full one), a dot each in its kind's colour. The arrows go to the
+  nearest sample within 60° of that direction; `ctrl+arrow` jumps a fifth of the map that way (to
+  the sample nearest that spot), to cross it quickly and then home in with the plain arrows. A
+  click picks the nearest one. The chosen one is a ring with its name.
+- **Typing** filters, in the toolbar's input box: words match file and folder names, and measurement terms the sounds,
   `decay<200 bright>1k pitch>60 len<0.5s` (the `--library` names or short ones: bright, att, dec,
   len, loud, low; numbers take k and s). `Space` between terms (with the filter empty it plays
   the sample again). The idea: filter to the qualities you want, then move on a smaller map.
-  Above the input line every quality is listed as you'd type it (bright, att, dec, tail, len,
-  pitch, loud, punch, noise, low, hits) with its range over what's shown ("dec 0ms…148ms"), the
-  ones in the filter lit. Page keys and Home/End step through what's shown in order. The last row shows the chosen sample's
-  numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS, folder.
+  Page keys and Home/End step through what's shown in order. The status line shows the chosen
+  sample's numbers: kind, length, attack, decay, pitch (when it's clear), brightness, RMS.
 - **Every move auditions**: the file, resampled to the device rate, straight to the outputs,
   stopped or rolling (not metered, never bounced), at the browser's own level (`shift+↑↓`, `browse
   vol -6`, saved). `Space` plays it again (while the filter is empty); `shift+Space` is the transport.
-- **Enter** puts it on a track: on a focused sample track it replaces the sample and keeps the
-  hits, so with the loop playing you hear each candidate in the pattern; anywhere else it makes a
-  new sample track. **shift+Enter** always makes a new sample track. A replacement shows: the
-  track's header flashes, the message says "track 5 Kick now plays bd6 (was …) · ctrl+z undoes",
-  and a track still named after its old sample takes the new one's name (a name you gave it
-  stays). The browser stays open for the next.
+- **Enter** puts it on a track: on a kit (or one of its members), onto the lit pad (below); on a
+  focused sample track it replaces the sample and keeps the hits, so with the loop playing you hear
+  each candidate in the pattern; anywhere else it makes a new sample track. **shift+Enter** always
+  makes a new sample track. A replacement shows: the track's header flashes, the message says
+  "track 5 Kick now plays bd6 (was …) · ctrl+z undoes", and a track still named after its old
+  sample (`sampleFrom`, the file it was copied from) takes the new one's name (a name you gave
+  it stays). The browser stays open for the next.
+- **The pads** (when you're on a kit): its 4×4 under the list, pad 1 bottom left, each with its
+  member's name in its sound's kind colour. A click (or `Tab` to them and the arrows) lights a
+  pad and plays it; `Space` plays it again. With **audition → pad** on (the default), every
+  sample you pick goes onto the lit pad at once, as in Battery or XO: the member keeps its hits,
+  so with the loop running you hear each candidate in the beat, and a run of picks is one undo
+  step (`ctrl+z` puts the old sound back). Hovering only auditions; a drag over the map loads
+  where it's let go. **Drag a sample** from the list or the map onto any pad to put it there.
+  An empty pad gets a new member, under the kit. A sample the session already has a copy of
+  (this run's imports, or a track's `sampleFrom`) goes on from that copy, so going back and
+  forth doesn't fill `audio/`; each new one is copied in as any import is.
 
 - **The index** is `library.json` in taw's config folder. Nothing is written beside the samples.
   A file is measured again only when its size or date changes; `._` files (Mac resource forks

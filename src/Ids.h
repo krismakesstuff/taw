@@ -67,6 +67,7 @@ TAW_ID (pluginState)  // ...and the file its state is kept in, relative to the s
 TAW_ID (sample)       // sample track: the file it plays
 TAW_ID (sampleOffset) // ...from here in the file
 TAW_ID (sampleLength) // ...for this long (0 = to the end)
+TAW_ID (sampleFrom)   // ...the file it was copied from (the browser finds it in the library by this)
 TAW_ID (beat)         // MIDICLIP, HITCLIP: position in beats from the session start (follows tempo); NOTE, CC, HIT: in their clip's content
 TAW_ID (vel)          // HIT: velocity 0..1; NOTE: velocity 1..127
 TAW_ID (len)          // NOTE, MIDICLIP, HITCLIP: length in beats

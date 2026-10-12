@@ -38,6 +38,7 @@ target_sources(taw PRIVATE
     src/AudioEngine.cpp
     src/Bounce.cpp
     src/Browser.cpp
+    src/BrowserWindow.cpp
     src/Import.cpp
     src/Library.cpp
     src/LiveKeys.cpp

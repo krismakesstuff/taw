@@ -1043,6 +1043,9 @@ void Ui::drawTimeline (App& app)
     auto playlistsOf = [&] (int track) { return fill ? std::vector<juce::ValueTree>() : app.playlistsShown (track); };
     auto blockRows = [&] (int track)
     {
+        if (app.trackHidden (track) && track != app.focused) // a folded kit's members
+            return 0;
+
         return rowsPerTrack + (int) lanesOf (track).size() * laneRows + (int) playlistsOf (track).size() * rowsPerTrack + (track == framedTrack ? 2 : 0);
     };
 
@@ -1091,6 +1094,9 @@ void Ui::drawTimeline (App& app)
     for (size_t row = 0; row < trackY.size(); ++row)
     {
         const int track = app.trackScroll + (int) row;
+
+        if (blockRows (track) == 0)
+            continue;
 
         if (track == framedTrack) // a click on its frame is a click on the track
             laneMap.rows.push_back ({ track, -1 });
@@ -1405,6 +1411,10 @@ void Ui::drawTimeline (App& app)
     for (int row = 0; row < visible && app.trackScroll + row < n; ++row)
     {
         const int i = app.trackScroll + row, y = trackY[(size_t) row];
+
+        if (blockRows (i) == 0)
+            continue;
+
         const auto t = s.track (i);
         const bool focusedRow = i == app.focused && ! app.onTopLane();
         const bool selectedRow = std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end();
@@ -1457,6 +1467,8 @@ void Ui::drawTimeline (App& app)
             flag (flagX, t[ids::armed], L'R', colour::rec);
             flag (flagX + 1, t[ids::monitor], L'I', colour::wave);
         }
+        else if (Session::isKit (t)) // a kit arms for its pads
+            flag (flagX, t[ids::armed], L'R', colour::rec);
 
         flag (flagX + 2, t[ids::solo], L'S', colour::play);
         flag (flagX + 3, app.currentValue (t, "mute") >= 0.5, L'M', app.isAutomated (t, "mute") ? colour::note : colour::meterYellow);
@@ -1466,8 +1478,22 @@ void Ui::drawTimeline (App& app)
         const bool busTrack = Session::isBusTrack (t);
         const int input = t[ids::input];
 
-        if (busTrack)
+        // A kit: its fold left of the name; its members a line down from it and their pad.
+        if (Session::isKit (t))
+            canvas.put (3, y, (bool) t[ids::folded] ? L'\x25b8' : L'\x25be', colour::hit, bg, true);
+        else if (const auto kit = app.kitOf (t); kit >= 0)
+            for (int r = 0; r < rowsPerTrack; ++r)
+                canvas.put (3, y + r, L'\x2502', colour::faint, bg);
+
+        if (Session::isKit (t))
+            chip ("kit", colour::hit);
+        else if (busTrack)
             chip ("bus", typeColour);
+        else if (sampleTrack && app.kitOf (t) >= 0 && t.hasProperty (ids::note))
+        {
+            const int note = t[ids::note];
+            chip (note >= App::firstPadNote && note < App::firstPadNote + 16 ? "pad" + juce::String (note - App::firstPadNote + 1) : "n" + juce::String (note), typeColour);
+        }
         else if (sampleTrack)
             chip ("smp", typeColour);
         else if (instrumentTrack)
@@ -1972,6 +1998,9 @@ void Ui::drawTimeline (App& app)
     {
         const int i = app.trackScroll + (int) row;
 
+        if (blockRows (i) == 0)
+            continue;
+
         if (const auto lanes = lanesOf (i); ! lanes.empty())
             drawLanes (i, s.track (i), lanes, trackY[row] + rowsPerTrack, std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end());
 
@@ -2267,7 +2296,9 @@ void Ui::drawBottom (App& app)
 
     juce::String hints;
 
-    if (app.liveKeys.on())
+    if (app.liveKeys.on() && app.keysPlayKit())
+        hints = L"PADS  z x c v 1-4 \x00b7 a s d f 5-8 \x00b7 q w e r 9-12 \x00b7 1 2 3 4 13-16 \x00b7 shift accent \x00b7 space play \x00b7 ctrl+space record \x00b7 esc or ctrl+k leaves";
+    else if (app.liveKeys.on())
         hints = L"KEYS  a w s e d f t g y h u j k o l p ; ' play " + app.liveKeys.range() + L" \x00b7 z x octave \x00b7 c v velocity "
                 + juce::String (app.liveKeys.velocity()) + L" \x00b7 space play \x00b7 ctrl+space record \x00b7 esc or ctrl+k leaves";
     else if (app.recording)

@@ -148,7 +148,8 @@ void AudioEngine::renderPreview (float* const* out, int numOut, int n) noexcept
     previewAt.store (previewPos);
 }
 
-// Live pad voices for one track, added into its bus. Like hits, they ring out over each other.
+// Live pad voices for one track, added into its bus. Like hits, they ring out over each other,
+// unless one on another track of the choke group cut them off.
 void AudioEngine::renderPads (const TrackPlay& tp, int trackIndex, float* left, float* right, int n)
 {
     for (auto& v : padVoices)
@@ -156,19 +157,64 @@ void AudioEngine::renderPads (const TrackPlay& tp, int trackIndex, float* left, 
         if (v.track != trackIndex)
             continue;
 
-        if (tp.sample == nullptr || v.played >= tp.sampleLength)
+        if (tp.sample == nullptr || v.played >= tp.sampleLength || v.fadeLeft == 0)
         {
             v.track = -1;
             continue;
         }
 
-        const auto count = (int) juce::jmin<juce::int64> (n, tp.sampleLength - v.played);
+        auto count = (int) juce::jmin<juce::int64> (n, tp.sampleLength - v.played);
         const auto src = (int) (tp.sampleOffset + v.played);
         const auto lastChannel = tp.sample->getNumChannels() - 1;
-        juce::FloatVectorOperations::addWithMultiply (left, tp.sample->getReadPointer (0, src), v.velocity, count);
-        juce::FloatVectorOperations::addWithMultiply (right, tp.sample->getReadPointer (juce::jmin (1, lastChannel), src), v.velocity, count);
+        const auto* srcL = tp.sample->getReadPointer (0, src);
+        const auto* srcR = tp.sample->getReadPointer (juce::jmin (1, lastChannel), src);
+
+        if (v.fadeLeft < 0)
+        {
+            juce::FloatVectorOperations::addWithMultiply (left, srcL, v.velocity, count);
+            juce::FloatVectorOperations::addWithMultiply (right, srcR, v.velocity, count);
+        }
+        else
+        {
+            const auto fade = (float) juce::jmax (1, tp.chokeFade);
+            count = juce::jmin (count, v.fadeLeft);
+
+            for (int i = 0; i < count; ++i)
+            {
+                const auto g = v.velocity * (float) (v.fadeLeft - i) / fade;
+                left[i] += srcL[i] * g;
+                right[i] += srcR[i] * g;
+            }
+
+            v.fadeLeft -= count;
+        }
+
         v.played += count;
     }
+}
+
+// A pad press: a free voice (or the oldest-started one when all are ringing). Voices of other
+// tracks in its choke group start fading out.
+void AudioEngine::startPad (int track, float velocity) noexcept
+{
+    if (current == nullptr || track < 0 || track >= (int) current->tracks.size())
+        return;
+
+    if (const auto group = current->tracks[(size_t) track].chokeGroup; group > 0)
+        for (auto& v : padVoices)
+            if (v.track >= 0 && v.track != track && v.track < (int) current->tracks.size() && v.fadeLeft < 0
+                && current->tracks[(size_t) v.track].chokeGroup == group)
+                v.fadeLeft = juce::jmax (1, current->tracks[(size_t) v.track].chokeFade);
+
+    auto* voice = &padVoices[0];
+
+    for (auto& v : padVoices)
+    {
+        if (v.track < 0) { voice = &v; break; }
+        if (v.played > voice->played) voice = &v;
+    }
+
+    *voice = { track, 0, velocity, -1 };
 }
 
 void AudioEngine::play (juce::int64 from, juce::int64 countIn)
@@ -603,17 +649,7 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
 
     // New pad presses take a free voice (or the oldest-started one when all 32 are ringing).
     for (PadPress press; padPresses.pop (press);)
-    {
-        auto* voice = &padVoices[0];
-
-        for (auto& v : padVoices)
-        {
-            if (v.track < 0) { voice = &v; break; }
-            if (v.played > voice->played) voice = &v;
-        }
-
-        *voice = { press.track, 0, press.velocity };
-    }
+        startPad (press.track, press.velocity);
 
     // The controller's messages for this block. They go to armed instrument tracks and, while
     // recording, back to the message thread to be written down.
@@ -634,6 +670,15 @@ void AudioEngine::process (const float* const* in, int numIn, float* const* out,
         takeLive (q);
 
     takeLive (typedMidi); // keys mode plays like a controller
+
+    // Armed kits: a note plays the members it's the pad note of, here on the audio thread so
+    // a pad controller is as quick as the pad key. (Recording them is the message thread's,
+    // from recordedMidi, like an instrument's notes.)
+    for (int i = 0; i < numLive; ++i)
+        if (const auto& m = liveMidi[(size_t) i]; m.isNoteOn())
+            for (int t = 0; t < (int) current->tracks.size(); ++t)
+                if (current->tracks[(size_t) t].padNote == m.d1)
+                    startPad (t, (float) m.d2 / 127.0f);
 
     // Notes the MIDI editor auditions, for whichever track they're for.
     int numAuditions = 0;

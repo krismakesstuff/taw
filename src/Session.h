@@ -90,6 +90,8 @@ public:
     // Bus tracks play what other tracks send them (their output or a send), through their own
     // fader. They have no clips and no input.
     static bool isBusTrack (const juce::ValueTree& track) { return track[ids::kind].toString() == "bus"; }
+    // A kit is a bus whose members are the sample tracks playing into it, each on a note.
+    static bool isKit (const juce::ValueTree& track) { return isBusTrack (track) && (bool) track[ids::kit]; }
     int findBus (int busId) const; // the bus track's index, or -1
     int nextBusId() const;
     static constexpr int numSends = 5; // slots a to e

@@ -446,6 +446,31 @@ public:
     std::atomic<int> indexDone { 0 }, indexTotal { 0 };
     bool isIndexing() const { return indexThread.joinable(); }
 
+    // Kits (Kits.cpp): a kit is a bus (kit set) whose members are the sample tracks playing into
+    // it, each on a MIDI note (pad 1 is 36, C1, what drum pads send) and maybe in a choke group.
+    // Armed, the controller's notes (and keys mode's 4x4 pads) play its members; recording writes
+    // the hits onto each member, as the pad key does.
+    static constexpr int firstPadNote = 36;
+    int kitOf (const juce::ValueTree& track) const; // the kit a sample track plays into, or -1
+    int kitOf (int track) const { return session != nullptr && track >= 0 && track < session->numTracks() ? kitOf (session->track (track)) : -1; }
+    int kitHere() const;                               // the focused kit, or the kit of the focused member; -1
+    std::vector<int> kitMembers (int kit) const;       // its members, by note
+    int kitMemberOnNote (int kit, int note) const;     // the member playing that note, or -1
+    bool trackHidden (int track) const;                // a member of a folded kit
+    int nextShownTrack (int from, int direction) const; // up or down past folded members
+    bool keysPlayKit() const;                          // keys mode plays the 4x4 pads (LiveKeys::setPads)
+    Result addKit (const juce::String& name);          // kit / add kit [name]
+    Result joinKit (const std::vector<int>& tracks, const juce::String& kitQuery); // 3 kit drums: into a kit; 3 kit off: out
+    Result setPadNote (const std::vector<int>& tracks, const juce::String& arg);   // 3 note 38 / 3 note d1
+    Result setChoke (const std::vector<int>& tracks, const juce::String& arg);     // 3 choke 1 / 3 choke off
+    Result loadPad (int kit, int note, const juce::String& path);                   // pad 3 <file>: onto a pad (new member or a new sound)
+    Result toggleFold (int kit);                                                    // shift+F on a kit
+    Result describeKit (int kit) const;
+    juce::String padName (int note) const;              // "pad 3 D1"
+    void recordKitHit (int note, float velocity, double beat);
+    // The browser's pad: where a sample loaded from the browser goes (a note on the kit here).
+    int browserPadNote = firstPadNote;
+
     // A track whose sample the browser just swapped: its header flashes for a moment.
     // A value a shortcut changes ([ ] volume, { } the mix, alt+[ ] pan, a send's level) flashes
     // where it's shown, on every press, so your fingers get a glance's confirmation. owner: the
@@ -1086,6 +1111,8 @@ private:
     juce::int64 importAt = 0;
     int importTarget = -1;
     ImportAs importAs = ImportAs::audio;
+    int importKitBus = 0, importNote = -1; // a pad load (loadPad): the kit and note it goes on
+    juce::ValueTree newKitMember (const juce::String& name);
     juce::String pendingTemplate;
     bool treeDirty = false, quitRequested = false;
 

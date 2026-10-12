@@ -34,12 +34,57 @@ void LiveKeys::setOn (bool on)
     active = on;
 }
 
+int LiveKeys::padOf (wchar_t ch)
+{
+    static const wchar_t rows[] = L"zxcvasdfqwer1234"; // bottom row first: pad 1 is z
+
+    for (int i = 0; i < 16; ++i)
+        if (rows[i] == ch)
+            return i;
+
+    return -1;
+}
+
 bool LiveKeys::handle (const Key& k, double nowMs)
 {
     if (! active || k.code != Key::Char || k.ctrl || k.alt || k.ch == ' ')
         return false;
 
     const auto ch = (wchar_t) juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch);
+
+    // Pads: shift (an upper case letter; ! @ # $ on the number row) is the accent.
+    if (pads)
+    {
+        static const wchar_t shiftedDigits[] = L"!@#$";
+        auto key = ch;
+        bool accent = juce::CharacterFunctions::isUpperCase ((juce::juce_wchar) k.ch);
+
+        for (int i = 0; i < 4; ++i)
+            if (ch == shiftedDigits[i])
+                key = (wchar_t) ('1' + i), accent = true;
+
+        if (const auto pad = padOf (key); pad >= 0)
+        {
+            const auto it = held.find (key);
+
+            if (it != held.end() && k.repeat)
+            {
+                it->second.lastSeen = nowMs; // held down: one hit, the samples are one-shots
+                it->second.repeated = true;
+                return true;
+            }
+
+            if (it != held.end())
+                noteOff (key);
+
+            const auto keep = vel;
+            vel = accent ? 127 : keep;
+            noteOn (key, padBase + pad, nowMs);
+            vel = keep;
+        }
+
+        return true; // anything else typed is swallowed, as for notes
+    }
 
     if (const auto offset = offsetOf (ch); offset >= 0)
     {

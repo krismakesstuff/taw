@@ -101,5 +101,10 @@ TAW_ID (fadeInShape)  // ...its curve: "eqp" (equal power, default) | "lin" | "s
 TAW_ID (fadeOutShape)
 TAW_ID (declickMs)    // SESSION: the fade every audio clip edge gets when it has none (absent = 2, 0 = off)
 
+TAW_ID (kit)    // bus TRACK: a kit, its members the sample tracks playing into it (out = its busId)
+TAW_ID (folded) // kit: its members are hidden under it
+TAW_ID (note)   // kit member (sample TRACK): the MIDI note that plays it, 0-127 (36, C1, is pad 1)
+TAW_ID (choke)  // kit member: its choke group, 1-16 (absent or 0 = none): a hit cuts the others in the group
+
 #undef TAW_ID
 } // namespace taw::ids

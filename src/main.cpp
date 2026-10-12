@@ -1958,6 +1958,48 @@ int main (int argc, char** argv)
             engine.setGraph (std::make_unique<taw::Graph>());
         }
 
+        // Kits: a controller note plays the member on it, stopped; the next pad in its choke
+        // group cuts it off (a 4-sample fade), so only the new one is left.
+        {
+            auto engineOwned = std::make_unique<taw::AudioEngine>();
+            auto& engine = *engineOwned;
+            engine.runWithoutDevice (rate, block, 0);
+            auto ones = std::make_shared<juce::AudioBuffer<float>> (1, 4000);
+            juce::FloatVectorOperations::fill (ones->getWritePointer (0), 1.0f, 4000);
+
+            auto g = std::make_unique<taw::Graph>();
+
+            for (int note : { 36, 37 })
+            {
+                taw::TrackPlay tp;
+                tp.sample = ones;
+                tp.sampleLength = 4000;
+                tp.padNote = note;
+                tp.chokeGroup = 1;
+                tp.chokeFade = 4;
+                g->tracks.push_back (tp);
+            }
+
+            engine.setGraph (std::move (g));
+            std::vector<float> l (block), r (block);
+            float* outs[] = { l.data(), r.data() };
+            auto blockPeak = [&]
+            {
+                engine.renderWithoutDevice (outs, 2, block);
+                return l[(size_t) block - 1];
+            };
+
+            blockPeak(); // the graph goes live
+            engine.playTyped (taw::MidiMsg::noteOn (0, 36, 127));
+            const auto one = blockPeak();
+            engine.playTyped (taw::MidiMsg::noteOn (0, 37, 127));
+            const auto choked = blockPeak();
+            const bool ok = std::abs (one - 1.0f) < 1e-4f && std::abs (choked - 1.0f) < 1e-4f;
+            std::printf ("%s kit: note 36 plays its pad (%.3f), 37 chokes it (%.3f, want 1)\n", ok ? "ok  " : "FAIL", one, choked);
+            failures += ok ? 0 : 1;
+            engine.setGraph (std::make_unique<taw::Graph>());
+        }
+
         return failures;
     }
 
@@ -2096,6 +2138,44 @@ int main (int argc, char** argv)
             failures += expectHit (9, 1.009f + 0.5f * 1.004f, "both, across a block boundary");
             failures += expectHit (10, 0.5f * 1.005f, "first ended, second rings on");
             failures += expectHit (15, 0.0f, "both ended");
+        }
+
+        // Choke: an open hat (track 0, a 40-sample 1.0) cut by a closed hat (track 1) at 10, with
+        // a 4-sample fade; a hit on its own track doesn't cut it, nor does one at the same spot.
+        {
+            auto ones = [] (int len) { auto b = std::make_shared<juce::AudioBuffer<float>> (1, len); for (int i = 0; i < len; ++i) b->setSample (0, i, 1.0f); return b; };
+            std::vector<taw::TrackPlay> kit (2);
+
+            for (auto& t : kit)
+            {
+                t.sample = ones (40);
+                t.sampleLength = 40;
+                t.chokeGroup = 1;
+                t.chokeFade = 4;
+            }
+
+            kit[0].hits = { { 0, 1.0f }, { 5, 1.0f } };
+            kit[1].hits = { { 0, 1.0f }, { 10, 1.0f } };
+            taw::chokeHits (kit);
+            const bool cutRight = kit[0].hits[0].cut == 10 && kit[0].hits[1].cut == 10 && kit[1].hits[0].cut == 5 && kit[1].hits[1].cut == taw::TrackPlay::never;
+            std::printf ("%-44s %s\n", "choke: cut by the next hit of another track", cutRight ? "ok" : "FAILED");
+            failures += cutRight ? 0 : 1;
+
+            std::vector<float> cl (60, 0.0f), cr (60, 0.0f);
+
+            for (int pos = 0; pos < 60; pos += 7)
+                taw::renderHits (kit[0], pos, std::min (7, 60 - pos), cl.data() + pos, cr.data() + pos);
+
+            auto expectC = [&] (int i, float v, const char* what)
+            {
+                const bool ok = std::abs (cl[(size_t) i] - v) < 1e-5f;
+                std::printf ("%-44s sample %3d = %.4f (want %.4f) %s\n", what, i, cl[(size_t) i], v, ok ? "ok" : "FAILED");
+                failures += ok ? 0 : 1;
+            };
+
+            expectC (9, 2.0f, "choke: both hits whole before the cut");
+            expectC (12, 2.0f * 0.5f, "...halfway down the fade");
+            expectC (14, 0.0f, "...silent after it");
         }
 
         // Monitoring: auto input (armed: input when stopped or recording, clips on playback);

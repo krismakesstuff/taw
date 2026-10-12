@@ -8,6 +8,8 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <map>
+
 namespace taw
 {
 class PluginSlot;
@@ -192,16 +194,26 @@ struct TrackPlay
     std::vector<ClipPlay> clips;
 
     // Sample tracks: the sample plays once per hit, sorted by position. Hits ring out over each
-    // other (no choke).
+    // other, unless a hit on another track in the same choke group cuts one off (at cut, fading
+    // out over chokeFade samples).
+    static constexpr juce::int64 never = std::numeric_limits<juce::int64>::max() / 2;
+
     struct Hit
     {
         juce::int64 pos;
         float vel;
+        juce::int64 cut = never;
     };
 
     std::shared_ptr<const juce::AudioBuffer<float>> sample;
     juce::int64 sampleOffset = 0, sampleLength = 0;
     std::vector<Hit> hits;
+
+    // Kit members: the controller note that plays it while its kit is armed (-1: none), and its
+    // choke group (0: none; numbered across the session, so two kits' groups never meet).
+    int padNote = -1;
+    int chokeGroup = 0;
+    int chokeFade = 256;
 
     // Instrument tracks: a plugin playing the track's notes, plus the MIDI controller while
     // the track is armed (midiLive).
@@ -499,17 +511,75 @@ inline void renderHits (const TrackPlay& tp, juce::int64 pos, int n, float* left
                                 [] (juce::int64 p, const TrackPlay::Hit& h) { return p < h.pos; });
     const auto lastChannel = tp.sample->getNumChannels() - 1;
 
+    const auto* srcL = tp.sample->getReadPointer (0);
+    const auto* srcR = tp.sample->getReadPointer (juce::jmin (1, lastChannel));
+    const auto fade = (juce::int64) juce::jmax (1, tp.chokeFade);
+
     for (; it != tp.hits.end() && it->pos < pos + n; ++it)
     {
         const auto from = juce::jmax (pos, it->pos);
-        const auto to = juce::jmin (pos + n, it->pos + tp.sampleLength);
+        // Choked: it stops a fade after the hit that cuts it.
+        const auto end = juce::jmin (it->pos + tp.sampleLength, it->cut + fade);
+        const auto to = juce::jmin (pos + n, end);
 
         if (to <= from)
             continue;
 
-        const auto src = (int) (tp.sampleOffset + (from - it->pos)), count = (int) (to - from);
-        juce::FloatVectorOperations::addWithMultiply (left + (from - pos), tp.sample->getReadPointer (0, src), it->vel, count);
-        juce::FloatVectorOperations::addWithMultiply (right + (from - pos), tp.sample->getReadPointer (juce::jmin (1, lastChannel), src), it->vel, count);
+        // Whole up to the cut, then fading.
+        const auto whole = juce::jmin (to, it->cut);
+
+        if (whole > from)
+        {
+            const auto src = tp.sampleOffset + (from - it->pos);
+            const auto count = (int) (whole - from);
+            juce::FloatVectorOperations::addWithMultiply (left + (from - pos), srcL + src, it->vel, count);
+            juce::FloatVectorOperations::addWithMultiply (right + (from - pos), srcR + src, it->vel, count);
+        }
+
+        for (auto x = juce::jmax (from, it->cut); x < to; ++x)
+        {
+            const auto g = it->vel * (1.0f - (float) (x - it->cut) / (float) fade);
+            const auto src = tp.sampleOffset + (x - it->pos);
+            left[x - pos] += srcL[src] * g;
+            right[x - pos] += srcR[src] * g;
+        }
+    }
+}
+
+// Choke groups on the timeline: each hit is cut by the next hit on another track of its group
+// (the closed hat stops the open one). Depends only on positions, as the hits do. Tracks with
+// hits sorted; called when the graph is built.
+inline void chokeHits (std::vector<TrackPlay>& tracks)
+{
+    std::map<int, std::vector<std::pair<juce::int64, int>>> groups; // group: (position, track)
+
+    for (int t = 0; t < (int) tracks.size(); ++t)
+        if (tracks[(size_t) t].chokeGroup > 0)
+            for (const auto& h : tracks[(size_t) t].hits)
+                groups[tracks[(size_t) t].chokeGroup].push_back ({ h.pos, t });
+
+    for (auto& [group, starts] : groups)
+    {
+        std::sort (starts.begin(), starts.end());
+
+        for (int t = 0; t < (int) tracks.size(); ++t)
+        {
+            auto& tp = tracks[(size_t) t];
+
+            if (tp.chokeGroup != group)
+                continue;
+
+            for (auto& h : tp.hits)
+            {
+                // The first hit after this one's start on another track of the group.
+                auto it = std::upper_bound (starts.begin(), starts.end(), std::pair { h.pos, std::numeric_limits<int>::max() });
+
+                while (it != starts.end() && it->second == t)
+                    ++it;
+
+                h.cut = it != starts.end() ? it->first : TrackPlay::never;
+            }
+        }
     }
 }
 
@@ -649,7 +719,10 @@ private:
         int track = -1; // -1: free
         juce::int64 played = 0;
         float velocity = 0.0f;
+        int fadeLeft = -1; // choked: samples left of its fade (-1: not choked)
     };
+
+    void startPad (int track, float velocity) noexcept; // audio thread: a free voice, choking its group
 
     SpscQueue<PadPress, 256> padPresses;
 

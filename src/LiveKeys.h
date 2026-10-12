@@ -27,6 +27,16 @@ public:
     bool on() const { return active; }
     void setOn (bool); // off lets go of every note
 
+    // On a kit the keys are a 4x4 pad grid, laid out like an MPC's (pad 1 bottom left):
+    //   1 2 3 4   pads 13-16
+    //   q w e r   pads  9-12
+    //   a s d f   pads  5-8
+    //   z x c v   pads  1-4
+    // sending notes from firstPad up; shift is the accent (full velocity).
+    void setPads (bool on, int firstPad = 36) { pads = on; padBase = firstPad; }
+    bool padsOn() const { return pads; }
+    static int padOf (wchar_t); // 0-15, or -1
+
     // A key while on: true if keys mode used it (a note, the octave or the velocity, or a
     // character it swallows so it can't type commands). Space, arrows, esc and ctrl/alt keys
     // are left to taw.
@@ -51,6 +61,8 @@ private:
     Send send;
     IsDown isDown;
     bool active = false;
+    bool pads = false;
+    int padBase = 36;
     int base = 60; // A's note
     int vel = 100;
     bool polling = false; // keyDown has said a key is down: it can be trusted to say it's up

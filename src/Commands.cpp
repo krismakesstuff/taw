@@ -60,7 +60,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
                               "inst", "ed", "edit", "scan", "midi", "stats", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
-                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl", "clip", "xfade", "declick" };
+                              "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl", "clip", "xfade", "declick", "kit", "note", "choke", "pad" };
 
 // Splits "i2" into verb "i" + argument "2". The longest known verb wins ("mon" over "m").
 // Letters directly after a verb only count as an argument for names, click modes and bounce
@@ -921,6 +921,60 @@ Result App::execute (const juce::String& line)
         return addBus (v == "bus" ? p.rest : p.rest.fromFirstOccurrenceOf (" ", false, false));
     }
 
+    // Kits: kit [name] makes one (on a kit: says what's on its pads; kit fold folds it); 3 kit
+    // drums puts sample track 3 in it (3 kit off takes it out); note 38 and choke 1 on a member;
+    // pad 3 <file> loads a sample onto pad 3 of the kit here (pad 3 alone: the browser's pad).
+    if ((v == "add" || v == "new") && p.args[0].equalsIgnoreCase ("kit"))
+        return addKit (p.rest.fromFirstOccurrenceOf (" ", false, false));
+
+    if (v == "kit")
+    {
+        if (p.args[0].equalsIgnoreCase ("fold"))
+            return toggleFold (p.hasSelector && ! p.tracks.empty() ? p.tracks.front() : kitHere());
+
+        if (p.hasSelector && p.tracks.size() == 1 && Session::isKit (session->track (p.tracks.front())))
+            return describeKit (p.tracks.front());
+
+        if (p.hasSelector)
+            return joinKit (p.tracks, p.rest);
+
+        if (p.rest.isEmpty() && kitHere() >= 0)
+            return describeKit (kitHere());
+
+        return addKit (p.rest);
+    }
+
+    if (v == "note")  return setPadNote (p.hasSelector ? p.tracks : defaultTargets(), p.args[0]);
+    if (v == "choke") return setChoke (p.hasSelector ? p.tracks : defaultTargets(), p.args[0]);
+
+    if (v == "pad")
+    {
+        int kit = kitHere();
+
+        if (p.hasSelector && ! p.tracks.empty())
+            kit = Session::isKit (session->track (p.tracks.front())) ? p.tracks.front() : kitOf (p.tracks.front());
+
+        const int pad = p.args[0].getIntValue();
+
+        if (kit < 0)
+            return Result::fail (L"pad loads onto a kit \x2014 kit makes one, \x2191\x2193 to it");
+
+        if (pad < 1 || pad > 16 || ! p.args[0].containsOnly ("0123456789"))
+            return Result::fail (L"pad 3 <file> loads a sample onto pad 3 (1-16) \x00b7 pad 3 alone picks it for the browser");
+
+        const auto path = p.rest.fromFirstOccurrenceOf (" ", false, false).trim();
+
+        if (path.isEmpty())
+        {
+            browserPadNote = firstPadNote + pad - 1;
+            const auto member = kitMemberOnNote (kit, browserPadNote);
+            return Result::good ("pad " + juce::String (pad) + (member >= 0 ? " (" + session->track (member)[ids::name].toString() + ")" : juce::String (" (empty)"))
+                                 + L" \x00b7 ctrl+B: what you audition goes on it");
+        }
+
+        return loadPad (kit, firstPadNote + pad - 1, splitPaths (path)[0]);
+    }
+
     if (v == "io")
     {
         ioVisible = ! ioVisible;
@@ -1162,13 +1216,16 @@ Result App::execute (const juce::String& line)
     if (v == "r" || v == "a" || v == "arm")
     {
         for (auto t : targets)
-            if (Session::isBusTrack (session->track (t)))
+            if (Session::isBusTrack (session->track (t)) && ! Session::isKit (session->track (t)))
                 return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 it plays what's sent to it, nothing to record");
 
         const auto r = toggle (ids::armed, "armed");
 
         if (! (bool) session->track (targets.front())[ids::armed])
             return r;
+
+        if (Session::isKit (session->track (targets.front())))
+            return Result::good (r.message + L" \x00b7 your pads play it (ctrl+k: the keyboard's 4x4) \x00b7 ctrl+space records what you play");
 
         if (Session::isInstrumentTrack (session->track (targets.front())))
             return Result::good (r.message + L" \x00b7 your MIDI controller plays it \x00b7 ctrl+space records what you play");

@@ -1832,6 +1832,21 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
                 std::sort (tp.hits.begin(), tp.hits.end(), [] (const auto& a, const auto& b) { return a.pos < b.pos; });
             }
 
+            // In a kit: its note plays it while the kit is armed; its choke group (numbered per
+            // kit, so two kits' groups never meet) cuts the others in it.
+            if (const auto kit = kitOf (t); kit >= 0)
+            {
+                const auto k = session->track (kit);
+
+                if ((bool) k[ids::armed] && ! offline && t.hasProperty (ids::note))
+                    tp.padNote = juce::jlimit (0, 127, (int) t[ids::note]);
+
+                if (const int choke = t[ids::choke]; choke > 0)
+                    tp.chokeGroup = (int) k[ids::busId] * 32 + choke;
+
+                tp.chokeFade = juce::roundToInt (0.005 * sampleRate()); // 5 ms
+            }
+
             for (const auto& l : live)
                 if (! l.finishing && l.recorder->trackIndex == i)
                     tp.recorder = l.recorder;
@@ -1883,6 +1898,8 @@ std::unique_ptr<Graph> App::buildGraph (bool offline)
 
         g->tracks.push_back (std::move (tp));
     }
+
+    chokeHits (g->tracks);
 
     for (int i = 0; i < n; ++i)
         addInserts (g->tracks[(size_t) i], session->track (i), offline);
@@ -2159,6 +2176,8 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
     importAt = cursor;
     importTarget = targetTrack;
     importAs = as;
+    importKitBus = 0; // loadPad sets these after
+    importNote = -1;
     import = std::make_unique<Import> (std::move (files), session->audioFolder(), sampleRate());
     import->start();
 
@@ -2179,7 +2198,11 @@ void App::pollImport()
     }
 
     juce::StringArray placed, failed, replaced;
-    beginEdit ("import"); // the whole import is one undo step
+    // The whole import is one undo step; pad loads in a row (auditioning onto a pad) merge.
+    if (importKitBus > 0)
+        beginEdit ("load pad", "pad " + juce::String (importNote));
+    else
+        beginEdit ("import");
 
     for (const auto& item : import->results())
     {
@@ -2196,6 +2219,10 @@ void App::pollImport()
                               || (importAs == ImportAs::autoByLength && (double) item.length < 2.0 * sampleRate());
 
         auto track = importTarget >= 0 ? session->track (importTarget) : juce::ValueTree();
+
+        // A pad load with no member on its note yet: a new one, under the kit.
+        if (! track.isValid() && importKitBus > 0)
+            track = newKitMember (item.source.getFileNameWithoutExtension().substring (0, 24));
 
         if (! track.isValid())
             track = session->addTrack (item.source.getFileNameWithoutExtension().substring (0, 24), 0, um());
@@ -2233,7 +2260,11 @@ void App::pollImport()
         }
 
         const auto index = session->tree().indexOf (track); // tracks come first in the tree
-        placed.add (juce::String (index + 1) + " " + track[ids::name].toString() + (asSample ? " (sample)" : "")
+
+        if (importKitBus > 0)
+            placed.add (padName (importNote) + " " + track[ids::name].toString() + " (track " + juce::String (index + 1) + ")");
+        else
+            placed.add (juce::String (index + 1) + " " + track[ids::name].toString() + (asSample ? " (sample)" : "")
                     + (item.channels > 1 ? " (stereo)" : ""));
         focusTrack (index);
     }
@@ -2243,6 +2274,8 @@ void App::pollImport()
     else if (! failed.isEmpty())
         say (Result::fail ((placed.isEmpty() ? juce::String() : "imported " + placed.joinIntoString (", ") + L" \x00b7 ")
                            + failed.joinIntoString (juce::String (L" \x00b7 "))));
+    else if (importKitBus > 0)
+        say (Result::good (placed.joinIntoString (", ") + L" \x00b7 ctrl+z undoes"));
     else if (! replaced.isEmpty() && replaced.size() == placed.size())
         say (Result::good (replaced.joinIntoString (juce::String (L" \x00b7 ")) + L" \x00b7 ctrl+z undoes"));
     else
@@ -2831,6 +2864,21 @@ void App::focusTrack (int index, bool extendSelection)
     selectedMarker = {};
     focused = juce::jlimit (0, n, index); // n = the mix row
     focusedLane = -1;
+
+    // A member of a folded kit: the kit opens, so you can see where you are.
+    if (trackHidden (focused))
+        session->track (kitOf (focused)).setProperty (ids::folded, false, nullptr);
+}
+
+// The track above or below, past the members of folded kits (-1 / numTracks when there's none).
+int App::nextShownTrack (int from, int direction) const
+{
+    auto t = from + direction;
+
+    while (session != nullptr && t >= 0 && t < session->numTracks() && trackHidden (t))
+        t += direction;
+
+    return t;
 }
 
 bool App::handleHelpKey (const Key& k)
@@ -2871,10 +2919,12 @@ void App::focusUp (bool extendSelection)
         return;
     }
 
-    if (topLane == TopLane::none && focused > 0 && ! extendSelection && lanesUnder (focused - 1) > 0)
+    const auto above = nextShownTrack (focused, -1);
+
+    if (topLane == TopLane::none && above >= 0 && ! extendSelection && lanesUnder (above) > 0)
     {
-        const auto lanes = lanesUnder (focused - 1);
-        focusTrack (focused - 1);
+        const auto lanes = lanesUnder (above);
+        focusTrack (above);
         focusedLane = lanes - 1;
         return;
     }
@@ -2883,10 +2933,10 @@ void App::focusUp (bool extendSelection)
         topLane = TopLane::markers;
     else if (topLane == TopLane::video)
         topLane = TopLane::ruler;
-    else if (topLane == TopLane::none && focused == 0 && ! extendSelection)
+    else if (topLane == TopLane::none && above < 0 && ! extendSelection)
         topLane = videoLane() ? TopLane::video : TopLane::ruler, trackAnchor = -1;
     else if (topLane == TopLane::none)
-        focusTrack (focused - 1, extendSelection);
+        focusTrack (std::max (0, above), extendSelection);
 }
 
 void App::focusDown (bool extendSelection)
@@ -2908,7 +2958,7 @@ void App::focusDown (bool extendSelection)
     else if (topLane == TopLane::ruler || topLane == TopLane::video)
         topLane = TopLane::none, focused = 0;
     else
-        focusTrack (focused + 1, extendSelection);
+        focusTrack (nextShownTrack (focused, 1), extendSelection);
 }
 
 bool App::tappingTempo() const
@@ -3809,6 +3859,22 @@ Result App::toggleLiveKeys()
         return Result::fail ("open a session first, then ctrl+k plays the armed instrument from the keyboard");
 
     liveKeys.setOn (true);
+
+    // On a kit: the 4x4 pads, and the kit armed so you hear them.
+    if (const auto kit = kitHere(); kit >= 0)
+    {
+        liveKeys.setPads (true, firstPadNote);
+
+        if (! (bool) session->track (kit)[ids::armed])
+        {
+            beginEdit ("arm");
+            session->track (kit).setProperty (ids::armed, true, um());
+        }
+
+        return Result::good (juce::String (L"keys mode: z x c v pads 1-4, a s d f 5-8, q w e r 9-12, 1 2 3 4 13-16 play ") + session->track (kit)[ids::name].toString()
+                             + L" \x00b7 shift: accent \x00b7 ctrl+space records");
+    }
+
     bool armed = false;
 
     for (int i = 0; i < session->numTracks(); ++i)
@@ -3816,6 +3882,30 @@ Result App::toggleLiveKeys()
 
     return Result::good (L"keys mode: the keyboard plays " + liveKeys.range()
                          + (armed ? juce::String() : juce::String (L" \x00b7 arm an instrument track (shift+R) to hear it")));
+}
+
+// Keys mode plays pads while you're on a kit, or when a kit is armed and no instrument is.
+bool App::keysPlayKit() const
+{
+    if (session == nullptr)
+        return false;
+
+    if (kitHere() >= 0)
+        return true;
+
+    bool kitArmed = false;
+
+    for (int i = 0; i < session->numTracks(); ++i)
+    {
+        const auto t = session->track (i);
+
+        if (Session::isInstrumentTrack (t) && (bool) t[ids::armed])
+            return false;
+
+        kitArmed = kitArmed || (Session::isKit (t) && (bool) t[ids::armed]);
+    }
+
+    return kitArmed;
 }
 
 void App::handleMainKey (const Key& k)
@@ -3832,6 +3922,8 @@ void App::handleMainKey (const Key& k)
             say (toggleLiveKeys());
             return;
         }
+
+        liveKeys.setPads (keysPlayKit(), firstPadNote);
 
         if (liveKeys.handle (k, juce::Time::getMillisecondCounterHiRes()))
             return;
@@ -4229,6 +4321,9 @@ void App::handleMainKey (const Key& k)
             // f: the focused track fills the track area (a piano roll on instrument tracks).
             else if (lineEmpty && k.ch == 'f' && session != nullptr)
                 say (execute ("fill"));
+            // shift+F on a kit (or one of its members): fold its members away under it, or open it.
+            else if (lineEmpty && k.ch == 'F' && session != nullptr)
+                say (toggleFold (kitHere()));
             // shift+T: the track menu (rename, input, output, effects, width, delete...).
             else if (lineEmpty && k.ch == 'T' && session != nullptr)
                 say (openTrackMenu());

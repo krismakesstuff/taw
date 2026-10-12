@@ -776,7 +776,21 @@ void App::drainRecordedMidi()
 {
     for (TimedMidi m; engine.popRecordedMidi (m);)
     {
-        if (session == nullptr || midiRecordTracks.empty())
+        if (session == nullptr)
+            continue;
+
+        // An armed kit's pads: a hit on the member the note plays (input quantize as the pad key).
+        if (m.msg.isNoteOn())
+        {
+            auto beat = recordedBeat (m.pos, m.wraps);
+
+            if ((bool) session->tree()[ids::inputQuantize])
+                beat = std::round (beat / session->fineStepBeats()) * session->fineStepBeats();
+
+            recordKitHit (m.msg.d1, (float) m.msg.d2 / 127.0f, beat);
+        }
+
+        if (midiRecordTracks.empty())
             continue;
 
         const auto played = recordedBeat (m.pos, m.wraps);

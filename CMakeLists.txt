@@ -45,6 +45,7 @@ target_sources(taw PRIVATE
     src/Safety.cpp
     src/Editing.cpp
     src/Fades.cpp
+    src/Kits.cpp
     src/Playlists.cpp
     src/Instruments.cpp
     src/KeyCast.cpp

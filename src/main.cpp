@@ -1477,13 +1477,24 @@ int main (int argc, char** argv)
                 continue;
             }
 
-            // ":browser shot.png" draws the browser's window into a picture (1180x720).
+            // ":browser shot.png [900x580]" draws the browser's window into a picture (at its
+            // opening size unless one's given).
             if (args[i].startsWith (":browser "))
             {
-                const juce::File png (args[i].substring (9).trim().unquoted());
+                auto what = args[i].substring (9).trim();
+                int w = 900, h = 580;
+
+                if (const auto size = what.fromLastOccurrenceOf (" ", false, false); size.containsChar ('x') && size.upToFirstOccurrenceOf ("x", false, false).containsOnly ("0123456789"))
+                {
+                    w = std::max (200, size.upToFirstOccurrenceOf ("x", false, false).getIntValue());
+                    h = std::max (200, size.fromFirstOccurrenceOf ("x", false, false).getIntValue());
+                    what = what.upToLastOccurrenceOf (" ", false, false).trim();
+                }
+
+                const juce::File png (what.unquoted());
                 png.deleteFile();
                 juce::FileOutputStream out (png);
-                juce::PNGImageFormat().writeImageToStream (taw::BrowserWindow::snapshot (app, 1180, 720), out);
+                juce::PNGImageFormat().writeImageToStream (taw::BrowserWindow::snapshot (app, w, h), out);
                 std::printf ("browser drawn to %s\n", png.getFullPathName().toRawUTF8());
                 continue;
             }

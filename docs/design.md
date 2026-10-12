@@ -846,7 +846,7 @@ filter, or "like this", first) and leaves it open, and `ctrl+B` while it has the
 (`browse` opens or closes it; `browse hide`). Keys it doesn't use (ctrl ones, `shift+Space`) go to
 taw. It needs the screen: headless, `taw --library` is the way in. The state and keys are App's
 (`Browser.cpp`); the window only draws it and has the mouse. `taw --exec` can draw it into a
-picture (`:browser shot.png`) and press its keys (`:bkey right`). The docked column it replaced is
+picture (`:browser shot.png`, or `:browser shot.png 600x500` at another size) and press its keys (`:bkey right`). The docked column it replaced is
 gone. In the window:
 
 - **Kind tabs** across the top, each with its count, in the kind's colour; a click (or `←→` with

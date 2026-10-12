@@ -108,6 +108,10 @@ private:
     mutable std::vector<int> shownCache;
     mutable juce::String shownKey;
 
+    juce::Rectangle<int> filterBox;
+    int barRows = 1, tabsTall = tabsH;
+    bool laidOutPad = false;
+
     int listFirst = 0, hoverSample = -1;
     juce::String lastState;
 
@@ -139,9 +143,23 @@ private:
 
     // Areas, from the top: the tabs, the toolbar, then the map with the list (and the pads) on its
     // right, and the status line at the bottom.
-    juce::Rectangle<int> tabsArea() const { return { 0, 0, getWidth(), tabsH }; }
-    juce::Rectangle<int> barArea() const { return { 0, tabsH, getWidth(), barH }; }
-    juce::Rectangle<int> bodyArea() const { return { 0, tabsH + barH, getWidth(), getHeight() - tabsH - barH - statusH }; }
+    // Both the tabs and the toolbar wrap onto more rows when the window is narrow.
+    // (Measured in resized: the kinds come from a pass over the whole library.)
+    int measureTabs() const
+    {
+        const auto tabs = tabRects();
+        return tabs.empty() ? tabsH : (int) tabs.back().first.getBottom() + 2;
+    }
+
+    int tabsHeight() const { return tabsTall; }
+
+    juce::Rectangle<int> tabsArea() const { return { 0, 0, getWidth(), tabsHeight() }; }
+    juce::Rectangle<int> barArea() const { return { 0, tabsHeight(), getWidth(), barRows * barH }; }
+    juce::Rectangle<int> bodyArea() const
+    {
+        const auto top = tabsHeight() + barRows * barH;
+        return { 0, top, getWidth(), std::max (0, getHeight() - top - statusH) };
+    }
     juce::Rectangle<int> statusArea() const { return { 0, getHeight() - statusH, getWidth(), statusH }; }
     juce::Rectangle<int> sideArea() const { return bodyArea().removeFromRight (listW); }
     juce::Rectangle<int> mapArea() const { return bodyArea().withTrimmedRight (listW).reduced (8); }
@@ -223,20 +241,33 @@ private:
 
     void resized() override
     {
-        auto bar = barArea().reduced (8, 5);
-        bar.removeFromLeft (std::min (300, bar.getWidth() / 3)); // the filter, drawn
-        bar.removeFromLeft (8);
-        xBox.setBounds (bar.removeFromLeft (130));
-        bar.removeFromLeft (4);
-        yBox.setBounds (bar.removeFromLeft (130));
-        bar.removeFromLeft (10);
-        likeButton.setBounds (bar.removeFromLeft (76));
-        bar.removeFromLeft (10);
-        level.setBounds (bar.removeFromLeft (170));
-        bar.removeFromLeft (8);
-        hoverButton.setBounds (bar.removeFromLeft (110));
-        timeButton.setBounds (bar.removeFromLeft (90));
-        padButton.setBounds (bar.removeFromLeft (140));
+        // The filter (drawn) then the widgets, left to right, onto a new row when one's full.
+        tabsTall = measureTabs();
+        const int top = tabsTall, right = getWidth() - 8;
+        int x = 8, row = 0;
+
+        const auto place = [&] (int w, int gap) {
+            if (x > 8 && x + w > right)
+                x = 8, ++row;
+
+            const juce::Rectangle<int> r (x, top + row * barH + 5, std::min (w, right - x), barH - 10);
+            x += w + gap;
+            return r;
+        };
+
+        filterBox = place (std::min (300, std::max (200, getWidth() / 3)), 8).reduced (0, 1);
+        xBox.setBounds (place (130, 4));
+        yBox.setBounds (place (130, 10));
+        likeButton.setBounds (place (76, 10));
+        level.setBounds (place (170, 8));
+        hoverButton.setBounds (place (110, 0));
+        timeButton.setBounds (place (90, 0));
+
+        if (padButton.isVisible())
+            padButton.setBounds (place (140, 0));
+
+        barRows = row + 1;
+        laidOutPad = padButton.isVisible();
     }
 
     //==============================================================================
@@ -250,7 +281,7 @@ private:
 
         // The filter, as an input line: typing anywhere goes into it.
         {
-            const auto box = barArea().reduced (8, 6).withWidth (std::min (300, barArea().getWidth() / 3));
+            const auto box = filterBox;
             g.setColour (c.panel);
             g.fillRoundedRectangle (box.toFloat(), 4.0f);
             g.setColour (app.browserFilter.isNotEmpty() ? c.accent : c.faint);
@@ -297,12 +328,17 @@ private:
     {
         std::vector<std::pair<juce::Rectangle<float>, int>> out;
         const auto kinds = app.browserKinds();
-        auto x = 8.0f;
+        const auto right = (float) getWidth() - 8.0f;
+        auto x = 8.0f, y = 6.0f;
 
         for (int i = 0; i < (int) kinds.size(); ++i)
         {
             const auto w = 26.0f + (float) (kinds[(size_t) i].length() + 5) * 7.5f;
-            out.push_back ({ { x, 6.0f, w, (float) tabsH - 8.0f }, i });
+
+            if (x > 8.0f && x + w > right)
+                x = 8.0f, y += (float) tabsH - 4.0f;
+
+            out.push_back ({ { x, y, w, (float) tabsH - 8.0f }, i });
             x += w + 4.0f;
         }
 
@@ -752,6 +788,11 @@ private:
         {
             lastState = state;
             sync();
+
+            // More kinds (the library grew) or the pad toggle coming and going moves the rows.
+            if (measureTabs() != tabsTall || padButton.isVisible() != laidOutPad)
+                resized();
+
             repaint();
         }
     }
@@ -760,7 +801,7 @@ private:
 //==============================================================================
 struct BrowserWindow::Window final : EditorWindow<Panel>
 {
-    explicit Window (App& owner) : EditorWindow<Panel> ("samples", new Panel (owner), 1180, 720) {}
+    explicit Window (App& owner) : EditorWindow<Panel> ("samples", new Panel (owner), 900, 580) {}
 };
 
 BrowserWindow::BrowserWindow (App& a) : app (a) {}

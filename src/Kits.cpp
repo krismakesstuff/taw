@@ -1,4 +1,4 @@
-// Kits: a bus with kit set, its members the sample tracks playing into it, each on a MIDI note
+﻿// Kits: a bus with kit set, its members the sample tracks playing into it, each on a MIDI note
 // (pad 1 is note 36, what drum pads send) and maybe in a choke group. Each member keeps its own
 // hits, so editing, mute, sends and inserts stay per sound. Armed, the controller's notes and
 // keys mode's 4x4 pads play the members (on the audio thread: AudioEngine::process) and
@@ -96,6 +96,57 @@ bool App::trackHidden (int track) const
     return k >= 0 && (bool) session->track (k)[ids::folded];
 }
 
+TrackNumbering App::numbering() const
+{
+    TrackNumbering n;
+
+    if (session == nullptr)
+        return n;
+
+    const auto count = session->numTracks();
+    n.labels.resize ((size_t) count);
+    std::map<int, int> kitNumber; // kit index: its number
+
+    for (int t = 0; t < count; ++t)
+        if (kitOf (t) < 0)
+        {
+            n.byNumber.push_back (t);
+            n.labels[(size_t) t] = juce::String ((int) n.byNumber.size());
+
+            if (Session::isKit (session->track (t)))
+                kitNumber[t] = (int) n.byNumber.size();
+        }
+
+    for (int t = 0; t < count; ++t)
+        if (const auto kit = kitOf (t); kit >= 0)
+        {
+            const int note = session->track (t).getProperty (ids::note, -1);
+            const int pad = note >= firstPadNote && note < firstPadNote + 16 ? note - firstPadNote + 1 : 0;
+            const auto k = kitNumber[kit];
+            n.labels[(size_t) t] = juce::String (k) + "." + (pad > 0 ? juce::String (pad) : "n" + juce::String (note));
+
+            if (pad > 0)
+                n.pads[k][pad] = t;
+        }
+
+    return n;
+}
+
+juce::String App::trackList (const std::vector<int>& tracks) const
+{
+    const auto n = numbering();
+    juce::StringArray s;
+    bool allPads = ! tracks.empty();
+
+    for (auto t : tracks)
+    {
+        s.add (n.label (t));
+        allPads = allPads && kitOf (t) >= 0;
+    }
+
+    return (allPads ? (tracks.size() == 1 ? "pad " : "pads ") : (tracks.size() == 1 ? "track " : "tracks ")) + s.joinIntoString (",");
+}
+
 juce::String App::padName (int note) const
 {
     return note >= firstPadNote && note < firstPadNote + 16 ? "pad " + juce::String (note - firstPadNote + 1) : "note " + juce::String (note);
@@ -153,7 +204,11 @@ Result App::joinKit (const std::vector<int>& tracks, const juce::String& queryIn
     int kit = -1;
 
     if (query.containsOnly ("0123456789") && query.isNotEmpty())
-        kit = query.getIntValue() - 1;
+    {
+        const auto numbers = numbering();
+        const auto n = query.getIntValue();
+        kit = n >= 1 && n <= (int) numbers.byNumber.size() ? numbers.byNumber[(size_t) n - 1] : -1;
+    }
     else if (query.isNotEmpty())
     {
         for (int t = 0; t < session->numTracks() && kit < 0; ++t)
@@ -177,7 +232,7 @@ Result App::joinKit (const std::vector<int>& tracks, const juce::String& queryIn
         auto track = session->track (t);
 
         if (! Session::isSampleTrack (track))
-            return Result::fail ("track " + juce::String (t + 1) + L" isn't a sample track \x2014 kits are made of them (3 sample converts one)");
+            return Result::fail ("track " + trackLabel (t) + L" isn't a sample track \x2014 kits are made of them (3 sample converts one)");
 
         track.setProperty (ids::out, session->track (kit)[ids::busId], um());
 
@@ -191,7 +246,7 @@ Result App::joinKit (const std::vector<int>& tracks, const juce::String& queryIn
             track.setProperty (ids::note, note, um());
         }
 
-        placed.add (juce::String (t + 1) + " " + padName ((int) track[ids::note]));
+        placed.add (trackLabel (t) + " " + track[ids::name].toString());
     }
 
     return Result::good ("into kit " + busName ((int) session->track (kit)[ids::busId]) + ": " + placed.joinIntoString (", "));
@@ -217,8 +272,8 @@ Result App::setPadNote (const std::vector<int>& tracks, const juce::String& arg)
         session->track (other).setProperty (ids::note, track[ids::note], um());
 
     track.setProperty (ids::note, note, um());
-    return Result::good ("track " + juce::String (t + 1) + " " + track[ids::name].toString() + " plays on " + padName (note) + " (note " + juce::String (note) + ")"
-                         + (other >= 0 && other != t ? L" \x00b7 track " + juce::String (other + 1) + " took its old one" : juce::String()));
+    return Result::good (track[ids::name].toString() + " is pad " + trackLabel (t) + " (note " + juce::String (note) + ")"
+                         + (other >= 0 && other != t ? L" \x00b7 " + session->track (other)[ids::name].toString() + " moved to " + trackLabel (other) : juce::String()));
 }
 
 Result App::setChoke (const std::vector<int>& tracks, const juce::String& argIn)
@@ -232,7 +287,7 @@ Result App::setChoke (const std::vector<int>& tracks, const juce::String& argIn)
 
     for (auto t : tracks)
         if (kitOf (t) < 0)
-            return Result::fail ("track " + juce::String (t + 1) + L" isn't in a kit \x2014 choke groups are a kit's (3 kit drums)");
+            return Result::fail ("track " + trackLabel (t) + L" isn't in a kit \x2014 choke groups are a kit's (3 kit drums)");
 
     for (auto t : tracks)
     {
@@ -275,7 +330,7 @@ Result App::loadPad (int kit, int note, const juce::String& path)
             giveSample (track, copy, source);
             const auto index = session->tree().indexOf (track);
             focusTrack (index);
-            return Result::good (padName (note) + " " + track[ids::name].toString() + " (track " + juce::String (index + 1) + L") \x00b7 ctrl+z undoes");
+            return Result::good ("pad " + trackLabel (index) + " " + track[ids::name].toString() + L" \x00b7 ctrl+z undoes");
         }
     }
 

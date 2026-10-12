@@ -1,4 +1,4 @@
-// Clip fades and crossfades on audio tracks. A fade is a property of its clip (fadeIn, fadeOut
+﻿// Clip fades and crossfades on audio tracks. A fade is a property of its clip (fadeIn, fadeOut
 // and their shapes, in samples); over another clip it's a crossfade with it (renderClips). So a
 // crossfade is two clips overlapping, the one on top fading over the one under it: making one
 // stretches both into their handles (the audio past their edges in their files) until they
@@ -231,7 +231,7 @@ Result App::applyFades (FadePlan& plan, std::optional<FadeShape> shape)
     juce::StringArray tracks;
 
     for (auto t : on)
-        tracks.add (juce::String (t + 1));
+        tracks.add (trackLabel (t));
 
     auto what = parts.joinIntoString (", ");
 
@@ -261,7 +261,7 @@ Result App::fadeSelection (const std::vector<int>& tracks)
         const auto before = plan.ops.size();
 
         if (auto r = planFades (clipHolder (t), timeSelection(), plan); ! r.ok)
-            return Result::fail ("track " + juce::String (t + 1) + ": " + r.message);
+            return Result::fail ("track " + trackLabel (t) + ": " + r.message);
 
         for (auto i = before; i < plan.ops.size(); ++i)
             plan.ops[i].track = t;
@@ -346,7 +346,7 @@ Result App::crossfadeCommand (const juce::StringArray& args)
         }
 
     if (best < 0)
-        return Result::fail ("no two clips meet on track " + juce::String (focused + 1));
+        return Result::fail ("no two clips meet on track " + trackLabel (focused));
 
     FadePlan plan;
     const auto from = best - length / 2;

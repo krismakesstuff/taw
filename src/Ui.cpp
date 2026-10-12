@@ -1020,6 +1020,7 @@ void Ui::drawTimeline (App& app)
     }
 
     // Tracks --------------------------------------------------------------------
+    const auto numbers = app.numbering(); // a kit's pads aren't numbered as tracks
     const int n = s.numTracks();
     // Fill view (f): the focused track takes all the rows; the others are an arrow away.
     const bool fill = app.fillView && ! app.onTopLane() && ! app.mixFocused() && n > 0;
@@ -1243,17 +1244,62 @@ void Ui::drawTimeline (App& app)
 
         std::vector<LaneNote> notes;
         const auto spb = s.samplesPerBeat();
-
-        for (const auto& p : Session::placedNotes (t))
-            notes.push_back ({ p.start * spb, p.end * spb, (int) p.node[ids::pitch], false });
+        const bool kitRow = Session::isKit (t);
+        const int noteColour = kitRow ? colour::hit : colour::note;
 
         // The clips, in samples. The one a pass is recording into reaches to the playhead.
         const bool recordingHere = live && std::find (app.midiRecordTracks.begin(), app.midiRecordTracks.end(), i) != app.midiRecordTracks.end();
         const auto passClip = recordingHere && app.midiPassClips.count (i) > 0 ? app.midiPassClips.at (i) : juce::ValueTree();
         std::vector<std::pair<double, double>> clipSpans;
 
-        for (const auto& c : Session::midiClips (t))
-            clipSpans.push_back ({ (double) c[ids::beat] * spb, std::max (Session::clipEnd (c) * spb, c == passClip ? (double) playhead : 0.0) });
+        if (kitRow)
+        {
+            // A kit: every pad's hits together, like a drum part in a MIDI clip, each a step long
+            // on its pad's row (the pads in use, in note order, one per half row when they fit).
+            const auto members = app.kitMembers (i);
+            std::vector<int> used;
+
+            for (auto m : members)
+                if (! Session::placedHits (s.track (m)).empty())
+                    used.push_back ((int) s.track (m).getProperty (ids::note, 0));
+
+            std::sort (used.begin(), used.end());
+            used.erase (std::unique (used.begin(), used.end()), used.end());
+            for (auto m : members)
+            {
+                const auto member = s.track (m);
+                const auto row = (int) (std::lower_bound (used.begin(), used.end(), (int) member.getProperty (ids::note, 0)) - used.begin());
+                const auto memberPass = live && app.recording && app.midiPassClips.count (m) > 0 ? app.midiPassClips.at (m) : juce::ValueTree();
+
+                for (const auto& h : Session::placedHits (member))
+                    notes.push_back ({ h.beat * spb, h.beat * spb + 1.0, row, false }); // a mark in its column; higher pads higher, as pitches
+
+                for (const auto& c : Session::hitClips (member))
+                    clipSpans.push_back ({ (double) c[ids::beat] * spb, std::max (Session::clipEnd (c) * spb, c == memberPass ? (double) playhead : 0.0) });
+            }
+
+            // One span per stretch the members' clips cover together.
+            std::sort (clipSpans.begin(), clipSpans.end());
+            std::vector<std::pair<double, double>> merged;
+
+            for (const auto& span : clipSpans)
+            {
+                if (! merged.empty() && span.first <= merged.back().second)
+                    merged.back().second = std::max (merged.back().second, span.second);
+                else
+                    merged.push_back (span);
+            }
+
+            clipSpans = std::move (merged);
+        }
+        else
+        {
+            for (const auto& p : Session::placedNotes (t))
+                notes.push_back ({ p.start * spb, p.end * spb, (int) p.node[ids::pitch], false });
+
+            for (const auto& c : Session::midiClips (t))
+                clipSpans.push_back ({ (double) c[ids::beat] * spb, std::max (Session::clipEnd (c) * spb, c == passClip ? (double) playhead : 0.0) });
+        }
 
         // Keys still down while recording reach to the playhead.
         if (recordingHere)
@@ -1286,7 +1332,7 @@ void Ui::drawTimeline (App& app)
         auto isBlackKey = [] (int pitch) { const int k = pitch % 12; return k == 1 || k == 3 || k == 6 || k == 8 || k == 10; };
 
         // Pitch names down the left: every row in a piano roll, else where each C falls.
-        if (fill)
+        if (fill && ! kitRow)
             for (int p = bottom; p <= top; ++p)
             {
                 if (! pianoRoll && p % 12 != 0)
@@ -1357,15 +1403,15 @@ void Ui::drawTimeline (App& app)
                 if (up > 0 || down > 0)
                 {
                     ch = up > 0 && down > 0 ? L'\x2588' : up > 0 ? L'\x2580' : L'\x2584';
-                    fg = std::max (up, down) == 2 ? colour::liveWave : colour::note;
+                    fg = std::max (up, down) == 2 ? colour::liveWave : noteColour;
                 }
                 else if (edgeCh != 0)
                 {
-                    ch = edgeCh, fg = colour::note;
+                    ch = edgeCh, fg = noteColour;
                 }
                 else if (inClip >= 0 && (r == 0 || r == rowsPerTrack - 1))
                 {
-                    ch = L' ', fg = colour::note; // the outline is drawn in the cell's colour: no grid marks on it
+                    ch = L' ', fg = noteColour; // the outline is drawn in the cell's colour: no grid marks on it
                 }
 
                 // As in audio lanes: a colour behind the notes, a line where there are none.
@@ -1449,7 +1495,9 @@ void Ui::drawTimeline (App& app)
             canvas.text (x + 1, y, text, chipBg == colour::busColour ? colour::busText : colour::chipText, chipBg, true, 5);
         };
 
-        canvas.text (1, y, juce::String (i + 1).paddedLeft (' ', 2), colour::text, bg, true);
+        // A pad shows no number: it's a lane of its kit, the kit's line down its left.
+        if (app.kitOf (t) < 0)
+            canvas.text (1, y, numbers.label (i).paddedLeft (' ', 2), colour::text, bg, true);
         // The main playlist's name, as Pro Tools shows it (the track's own until there are others).
         canvas.text (4, y, padRight (Session::mainPlaylistName (t), 10), colour::text, bg);
 
@@ -1556,7 +1604,7 @@ void Ui::drawTimeline (App& app)
                 if (live && l.recorder->trackIndex == i && l.start >= 0)
                     liveTake = &l;
 
-            if (instrumentTrack)
+            if (instrumentTrack || Session::isKit (source))
                 drawNotes (i, source, rowY, contentBg, bg, rowSelected, live);
             else
             {
@@ -1727,13 +1775,15 @@ void Ui::drawTimeline (App& app)
 
         drawContent (t, y, laneBg, rowInTimeSelection, true);
 
-        // A bus lane says what feeds it.
-        if (busTrack)
+        // A bus lane says what feeds it (a kit's shows its pads' hits; an empty one says how to fill it).
+        if (Session::isKit (t) && app.kitMembers (i).empty())
+            canvas.text (laneX + 1, y, L"kit \x00b7 no pads yet \x00b7 ctrl+B: pick a pad and audition onto it \x00b7 pad 1 <file>", colour::dim, laneBg, false, laneW - 2);
+        else if (busTrack && ! Session::isKit (t))
         {
             juce::StringArray from;
 
             for (auto f : app.busFeeders (i))
-                from.add (juce::String (f + 1) + " " + s.track (f)[ids::name].toString());
+                from.add (numbers.label (f) + " " + s.track (f)[ids::name].toString());
 
             canvas.text (laneX + 1, y, from.isEmpty() ? juce::String (L"bus \x00b7 nothing feeds it yet \x00b7 2 send " + t[ids::name].toString().toLowerCase())
                                                       : L"\x2190 " + from.joinIntoString (juce::String (L" \x00b7 ")),
@@ -2008,7 +2058,10 @@ void Ui::drawTimeline (App& app)
             const bool armed = (bool) t[ids::armed];
             const auto state = ! armed ? juce::String() : app.recording ? juce::String (L" \x00b7 \x25cf recording") : juce::String (L" \x00b7 armed");
             const int top = trackY[row] - 1;
-            focusFrame = { 0, top, w - 1, top + blockRows (i) - 1, juce::String (i + 1) + " " + t[ids::name].toString() + state,
+            // A pad's frame names its kit and pad: "2.3 808SD (pad 3 of Kit 1)".
+            const auto kit = app.kitOf (t);
+            const auto where = kit < 0 ? juce::String() : " (" + app.padName (t.getProperty (ids::note, -1)) + " of " + s.track (kit)[ids::name].toString() + ")";
+            focusFrame = { 0, top, w - 1, top + blockRows (i) - 1, numbers.label (i) + " " + t[ids::name].toString() + where + state,
                            armed ? colour::rec : colour::accent, true };
         }
     }
@@ -2066,11 +2119,11 @@ void Ui::drawTimeline (App& app)
         borders (y);
 
         if (ch == 0 && fill)
-            canvas.text (laneX + 1, y, "track " + juce::String (app.focused + 1) + " of " + juce::String (n) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
+            canvas.text (laneX + 1, y, "track " + numbers.label (app.focused) + " of " + juce::String ((int) numbers.byNumber.size()) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
                          colour::faint);
         else if (ch == 0 && n > visible)
-            canvas.text (laneX + 1, y, "tracks " + juce::String (app.trackScroll + 1) + "-" + juce::String (std::min (n, app.trackScroll + visible))
-                                           + " of " + juce::String (n) + L" \x00b7 \x2191\x2193 to scroll",
+            canvas.text (laneX + 1, y, "tracks " + numbers.label (app.trackScroll) + "-" + numbers.label (std::min (n, app.trackScroll + visible) - 1)
+                                           + " of " + juce::String ((int) numbers.byNumber.size()) + L" \x00b7 \x2191\x2193 to scroll",
                          colour::faint);
 
         const auto& m = app.masterMeters[(size_t) ch];
@@ -2443,8 +2496,8 @@ void Ui::drawHelp (App& app)
             { Pair, L"import x.als", L"Live set: a new session", L"", L"" },
             { Heading, L"KITS", nullptr, L"", nullptr },
             { Pair, L"kit", L"new kit (on one: its pads)", L"pad 3 f", L"a sample onto pad 3" },
-            { Pair, L"3 kit drums", L"sample track into a kit", L"3 choke 1", L"choke group (off)" },
-            { Pair, L"shift+F", L"fold / open a kit", L"3 note 38", L"the note that plays it" },
+            { Pair, L"3 kit drums", L"sample track into a kit", L"2.3 choke 1", L"pad 3 of kit 2: choke" },
+            { Pair, L"shift+F", L"fold / open a kit", L"2.3 note 38", L"the note that plays it" },
             { Note, L"Armed (shift+R), your pads play a kit; ctrl+k: z x c v / a s d f / q w e r / 1 2 3 4." },
         } },
     };
@@ -2657,7 +2710,7 @@ void Ui::drawTrackMenu (App& app)
     const auto& tracks = app.trackMenuTracks;
     const auto title = juce::String (app.trackMenuDuplicating ? "DUPLICATE " : "")
                        + (tracks.size() == 1 ? juce::String ("TRACK ") + juce::String (tracks.front() + 1) : juce::String ("TRACKS"));
-    const auto what = tracks.size() == 1 ? app.session->track (tracks.front())[ids::name].toString() : trackList (tracks).fromFirstOccurrenceOf (" ", false, false);
+    const auto what = tracks.size() == 1 ? app.session->track (tracks.front())[ids::name].toString() : app.trackList (tracks).fromFirstOccurrenceOf (" ", false, false);
     canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
     canvas.text (x0 + 3 + title.length(), y0 + 1, what, colour::dim, bg, false, boxW - title.length() - 5);
 

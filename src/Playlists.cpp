@@ -1,4 +1,4 @@
-// Playlists, as in Pro Tools: other versions of a track's clips. The track's own clips are its
+﻿// Playlists, as in Pro Tools: other versions of a track's clips. The track's own clips are its
 // main playlist, the one that plays and records; the others are PLAYLIST children, each holding
 // clips the way a track does, so whatever reads a track's clips reads one of them the same way.
 // shift+P shows them as lanes under the track, where one can be soloed in the main's place, its
@@ -106,7 +106,7 @@ Result App::newPlaylist (bool copy)
             moveClips (track, old, um());
 
         track.setProperty (ids::playlist, name, um());
-        made.add (juce::String (i + 1) + " " + name);
+        made.add (trackLabel (i) + " " + name);
     }
 
     if (made.isEmpty())
@@ -140,7 +140,7 @@ Result App::makeMain (int trackIndex, juce::ValueTree playlist)
         track.setProperty (ids::playlist, name, um());
 
     closeEditorsOnPlaylists();
-    return Result::good ("track " + juce::String (trackIndex + 1) + " plays " + name + L" \x00b7 " + old[ids::name].toString() + " is a playlist now");
+    return Result::good ("track " + trackLabel (trackIndex) + " plays " + name + L" \x00b7 " + old[ids::name].toString() + " is a playlist now");
 }
 
 // "pl": the focused track's playlists; "pl new", "pl copy"; "pl 2" or "pl Vox.02": that one
@@ -158,7 +158,7 @@ Result App::playlistCommand (const juce::StringArray& args)
 
     auto track = session->track (focused);
     const auto list = Session::playlists (track);
-    const auto label = "track " + juce::String (focused + 1);
+    const auto label = "track " + trackLabel (focused);
 
     // A playlist by lane number or by name (whole, or its ending: "02").
     auto find = [&] (const juce::String& spec) -> juce::ValueTree
@@ -449,7 +449,7 @@ juce::String App::finishLoopRecording()
             playlist.removeChild (take, um());
             track.appendChild (take, um());
             track.removeChild (playlist, um());
-            tracks.add (juce::String (t + 1));
+            tracks.add (trackLabel (t));
         }
 
         if (! tracks.isEmpty())

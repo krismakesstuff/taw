@@ -1,4 +1,4 @@
-// Copy, cut, paste, duplicate, delete and consolidate over a time selection. Audio tracks move
+﻿// Copy, cut, paste, duplicate, delete and consolidate over a time selection. Audio tracks move
 // clips (which only point into files, so nothing is copied on disk); instrument and sample tracks
 // move their MIDI and hit clips, trimmed to the selection. Each operation is one undo step: the
 // caller opens it with beginEdit.
@@ -219,19 +219,19 @@ Result App::pasteAt (const Clipboard& c, const std::vector<int>& dest, juce::int
 
         if (Session::isBusTrack (track))
         {
-            skipped.add ("track " + juce::String (t + 1) + " (a bus)");
+            skipped.add ("track " + trackLabel (t) + " (a bus)");
             continue;
         }
 
         if (lane.sample != Session::isSampleTrack (track) || lane.instrument != Session::isInstrumentTrack (track))
         {
-            skipped.add ("track " + juce::String (t + 1) + " ("
+            skipped.add ("track " + trackLabel (t) + " ("
                          + (lane.sample ? "hits need a sample track" : lane.instrument ? "notes need an instrument track" : "audio needs an audio track") + ")");
             continue;
         }
 
         pasteLane (track, clipHolder (t), lane, at, c.beats);
-        pasted.add (juce::String (t + 1));
+        pasted.add (trackLabel (t));
     }
 
     if (pasted.isEmpty())
@@ -462,7 +462,7 @@ Result App::separateClips (const std::vector<int>& tracks)
             here += splitClipsAt (clipHolder (t), at);
 
         if (here > 0)
-            on.add (juce::String (t + 1));
+            on.add (trackLabel (t));
 
         n += here;
     }
@@ -503,7 +503,7 @@ Result App::selectClipAtCursor()
     }
 
     if (from < 0)
-        return Result::fail ("no clip under the cursor on track " + juce::String (focused + 1));
+        return Result::fail ("no clip under the cursor on track " + trackLabel (focused));
 
     timeAnchor = from;
     timeHead = to;
@@ -581,7 +581,7 @@ Result App::consolidate (const std::vector<int>& tracks)
     {
         const auto track = session->track (t);
         auto holder = clipHolder (t); // the playlist lane you're on, else the track
-        const auto label = juce::String (t + 1);
+        const auto label = trackLabel (t);
 
         if (Session::isBusTrack (track))
         {

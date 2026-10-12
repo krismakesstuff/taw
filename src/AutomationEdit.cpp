@@ -1201,7 +1201,7 @@ void App::handleControl (const ControlMsg& m)
         lane.setProperty (ids::ch, channel, um());
         midiInputs->controlRouting().learning = false;
         say (Result::good ("CC " + juce::String (cc) + " ch " + juce::String (channel) + L" \x2192 " + automationName (owner, learning.param)
-                           + (learning.track >= 0 ? " on track " + juce::String (learning.track + 1) : juce::String (" on the mix"))
+                           + (learning.track >= 0 ? " on track " + trackLabel (learning.track) : juce::String (" on the mix"))
                            + (moved.isEmpty() ? juce::String() : " (was " + moved.joinIntoString (", ") + ")")
                            + L" \x00b7 shift+W arms writing, then play records it"));
         learning = {};
@@ -1435,7 +1435,7 @@ juce::StringArray App::freeControl (int cc, int ch, const juce::ValueTree& keep)
     free (session->tree(), " on the mix");
 
     for (int t = 0; t < session->numTracks(); ++t)
-        free (session->track (t), " on track " + juce::String (t + 1));
+        free (session->track (t), " on track " + trackLabel (t));
 
     return freed;
 }

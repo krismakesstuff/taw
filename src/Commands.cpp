@@ -1,6 +1,7 @@
 ﻿// The command language: [selector] verb [args]
 //
-//   selector   1 | 1-3 | 1,4 | * (tracks are 1-based on the surface, 0-based inside)
+//   selector   1 | 1-3 | 1,4 | * | 2.3 | 2.1-4 (tracks as numbered on screen, 0-based indexes
+//              inside; a kit's pads aren't numbered as tracks: 2.3 is pad 3 of kit 2)
 //   @pos       @17  @17.3  @1:30  @0
 //
 // See docs/design.md for the full table. Every key binding ends up here or in an App method
@@ -22,30 +23,61 @@ struct Parsed
     juce::String rest; // everything after the verb, verbatim (for names)
 };
 
-juce::String parseSelector (const juce::String& text, int numTracks, std::vector<int>& out)
+// Track numbers as they're shown (TrackNumbering): 3, 1-3, 1,4, * (every track, pads too), and a
+// kit's pads by kit and pad: 2.3, 2.1-4.
+juce::String parseSelector (const juce::String& text, const TrackNumbering& numbers, std::vector<int>& out)
 {
+    const auto numTracks = (int) numbers.byNumber.size();
+
     for (const auto& part : juce::StringArray::fromTokens (text, ",", {}))
     {
         if (part == "*")
         {
-            for (int i = 0; i < numTracks; ++i)
+            for (int i = 0; i < (int) numbers.labels.size(); ++i)
                 out.push_back (i);
 
             continue;
         }
 
-        const auto dash = part.indexOfChar ('-');
-        const auto from = dash > 0 ? part.substring (0, dash).getIntValue() : part.getIntValue();
-        const auto to = dash > 0 ? part.substring (dash + 1).getIntValue() : from;
+        // Pads: kit.pad or kit.from-to.
+        const auto dot = part.indexOfChar ('.');
+        const auto range = dot >= 0 ? part.substring (dot + 1) : part;
+        const auto dash = range.indexOfChar ('-');
+        const auto from = dash > 0 ? range.substring (0, dash).getIntValue() : range.getIntValue();
+        const auto to = dash > 0 ? range.substring (dash + 1).getIntValue() : from;
 
-        if (from < 1 || to < from || part.containsOnly ("-"))
+        if (from < 1 || to < from || range.containsOnly ("-") || range.isEmpty())
             return "bad selector '" + part + "'";
+
+        if (dot >= 0)
+        {
+            const auto kit = part.substring (0, dot).getIntValue();
+            const auto it = numbers.pads.find (kit);
+
+            if (it == numbers.pads.end())
+                return "no kit " + juce::String (kit) + L" \x2014 2.3 is pad 3 of kit 2";
+
+            for (int pad = from; pad <= to; ++pad)
+            {
+                if (it->second.count (pad) == 0)
+                {
+                    if (from == to)
+                        return "kit " + juce::String (kit) + " has no pad " + juce::String (pad);
+
+                    continue; // a range takes the pads there are
+                }
+
+                out.push_back (it->second.at (pad));
+            }
+
+            continue;
+        }
 
         if (to > numTracks)
             return "no track " + juce::String (to) + " (session has " + juce::String (numTracks) + ")";
 
         for (int i = from; i <= to; ++i)
-            out.push_back (i - 1);
+            out.push_back (numbers.byNumber[(size_t) (i - 1)]);
     }
 
     std::sort (out.begin(), out.end());
@@ -100,7 +132,7 @@ void splitVerb (const juce::String& token, juce::String& verb, juce::String& glu
     }
 }
 
-juce::String parse (const juce::String& line, int numTracks, Parsed& p)
+juce::String parse (const juce::String& line, const TrackNumbering& numbers, Parsed& p)
 {
     auto s = line.trim();
     auto first = s.upToFirstOccurrenceOf (" ", false, false);
@@ -117,7 +149,7 @@ juce::String parse (const juce::String& line, int numTracks, Parsed& p)
     juce::String verbToken;
     int i = 0;
 
-    while (i < first.length() && juce::String ("0123456789,-*").containsChar (first[i]))
+    while (i < first.length() && juce::String ("0123456789,-*.").containsChar (first[i]))
         ++i;
 
     if (first.startsWithIgnoreCase ("mix") && (first.length() > 3 || afterFirst.isNotEmpty()))
@@ -129,7 +161,7 @@ juce::String parse (const juce::String& line, int numTracks, Parsed& p)
     {
         p.hasSelector = true;
 
-        if (auto err = parseSelector (first.substring (0, i), numTracks, p.tracks); err.isNotEmpty())
+        if (auto err = parseSelector (first.substring (0, i), numbers, p.tracks); err.isNotEmpty())
             return err;
 
         verbToken = i < first.length() ? first.substring (i) : takeNextWord();
@@ -153,21 +185,15 @@ juce::String parse (const juce::String& line, int numTracks, Parsed& p)
 }
 } // namespace
 
-juce::String trackList (const std::vector<int>& tracks)
-{
-    juce::StringArray s;
-
-    for (auto t : tracks)
-        s.add (juce::String (t + 1));
-
-    return (tracks.size() == 1 ? "track " : "tracks ") + s.joinIntoString (",");
-}
-
 juce::String explainCommand (const juce::String& line, int numTracks)
 {
     Parsed p;
+    TrackNumbering numbers;
 
-    if (auto err = parse (line, numTracks, p); err.isNotEmpty())
+    for (int t = 0; t < numTracks; ++t)
+        numbers.byNumber.push_back (t);
+
+    if (auto err = parse (line, numbers, p); err.isNotEmpty())
         return "error: " + err;
 
     juce::StringArray sel;
@@ -475,7 +501,7 @@ bool App::handleSettingsKey (const Key& k)
 Result App::convertTrack (int index, bool toSample)
 {
     auto track = session->track (index);
-    const auto label = "track " + juce::String (index + 1);
+    const auto label = "track " + trackLabel (index);
 
     if (Session::isBusTrack (track))
         return Result::fail (label + " is a bus");
@@ -489,7 +515,7 @@ Result App::convertTrack (int index, bool toSample)
             return Result::fail (label + " is already an audio track");
 
         track.setProperty (ids::kind, "audio", um());
-        return Result::good (label + L" is audio again \x00b7 its hits are kept (" + juce::String (index + 1) + " sample switches back)");
+        return Result::good (label + L" is audio again \x00b7 its hits are kept (" + trackLabel (index) + " sample switches back)");
     }
 
     if (Session::isSampleTrack (track))
@@ -520,7 +546,7 @@ Result App::convertTrack (int index, bool toSample)
 
     track.setProperty (ids::kind, "sample", um());
     return Result::good (label + " is a sample track" + (added > 0 ? " (" + juce::String (added) + " hits from its clips)" : juce::String())
-                         + L" \x00b7 " + juce::String (index + 1) + " audio switches back");
+                         + L" \x00b7 " + trackLabel (index) + " audio switches back");
 }
 
 // "x...x...x...x..." over the selection (repeating), or from the cursor for a bar.
@@ -549,7 +575,7 @@ Result App::writePattern (const std::vector<int>& tracks, const juce::String& st
 
     for (auto t : tracks)
         if (! Session::isSampleTrack (session->track (t)))
-            return Result::fail ("track " + juce::String (t + 1) + L" isn't a sample track \x2014 " + juce::String (t + 1) + " sample converts it");
+            return Result::fail ("track " + trackLabel (t) + L" isn't a sample track \x2014 " + trackLabel (t) + " sample converts it");
 
     // Positions are whole samples, so at tempos like 99 bpm a step lands a fraction of a sample
     // off the exact beat. Anything within half a sample of a step is on it.
@@ -597,7 +623,7 @@ Result App::writePattern (const std::vector<int>& tracks, const juce::String& st
         track.appendChild (clip, um());
     }
 
-    return Result::good (juce::String (written) + " hits" + (swing > 50.0 ? " (swing " + juce::String (swing, 0) + ")" : juce::String()) + " on " + juce::String (tracks.size() == 1 ? "track " + juce::String (tracks.front() + 1) : juce::String ((int) tracks.size()) + " tracks")
+    return Result::good (juce::String (written) + " hits" + (swing > 50.0 ? " (swing " + juce::String (swing, 0) + ")" : juce::String()) + " on " + juce::String (tracks.size() == 1 ? trackList (tracks) : juce::String ((int) tracks.size()) + " tracks")
                          + L" \x00b7 " + formatBars (std::llround (from * spb)) + L" \x2192 " + formatBars (std::llround (to * spb)));
 }
 
@@ -720,7 +746,7 @@ Result App::execute (const juce::String& line)
 
     Parsed p;
 
-    if (auto err = parse (trimmed, session->numTracks(), p); err.isNotEmpty())
+    if (auto err = parse (trimmed, numbering(), p); err.isNotEmpty())
         return Result::fail (err);
 
     const auto& v = p.verb;
@@ -1161,7 +1187,7 @@ Result App::execute (const juce::String& line)
                     if (! used[(size_t) in] && (width == 1 || ! used[(size_t) in + 1]))
                         input = in;
 
-            const auto n = session->numTracks() + 1;
+            const auto n = (int) numbering().byNumber.size() + 1; // tracks as numbered (a kit's pads aren't)
             const auto name = baseName.isEmpty() ? "Track " + juce::String (n)
                                                  : (count == 1 ? baseName : baseName + " " + juce::String (i + 1));
             auto track = session->addTrack (name, input, um());
@@ -1217,7 +1243,7 @@ Result App::execute (const juce::String& line)
     {
         for (auto t : targets)
             if (Session::isBusTrack (session->track (t)) && ! Session::isKit (session->track (t)))
-                return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 it plays what's sent to it, nothing to record");
+                return Result::fail ("track " + trackLabel (t) + L" is a bus \x2014 it plays what's sent to it, nothing to record");
 
         const auto r = toggle (ids::armed, "armed");
 
@@ -1325,7 +1351,7 @@ Result App::execute (const juce::String& line)
 
         for (auto t : targets)
             if (Session::isBusTrack (session->track (t)))
-                return Result::fail ("track " + juce::String (t + 1) + L" is a bus \x2014 no input; 2 out " + juce::String (t + 1) + " feeds it");
+                return Result::fail ("track " + trackLabel (t) + L" is a bus \x2014 no input; 2 out " + trackLabel (t) + " feeds it");
 
         for (auto t : targets)
         {

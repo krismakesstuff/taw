@@ -1,4 +1,4 @@
-#include "App.h"
+﻿#include "App.h"
 
 #include <algorithm>
 
@@ -249,7 +249,7 @@ std::vector<App::TrackMenuItem> App::trackMenuItems()
     juce::StringArray numbers;
 
     for (auto t : trackMenuTracks)
-        numbers.add (juce::String (t + 1));
+        numbers.add (trackLabel (t));
 
     const auto sel = numbers.joinIntoString (",");
     const bool one = trackMenuTracks.size() == 1;
@@ -304,7 +304,7 @@ std::vector<App::TrackMenuItem> App::trackMenuItems()
                                        return Result::good();
                                    }
 
-                               return Result::fail ("track " + juce::String (first + 1) + L"'s five inserts are full \x2014 \\ then del removes one");
+                               return Result::fail ("track " + trackLabel (first) + L"'s five inserts are full \x2014 \\ then del removes one");
                            } });
 
     if (one && (Session::isInstrumentTrack (track) || Session::insert (track, 0).isValid() || Session::insert (track, 1).isValid()

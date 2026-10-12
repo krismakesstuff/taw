@@ -558,10 +558,10 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
         track = session->track (index);
 
         if (Session::isBusTrack (track))
-            return Result::fail ("track " + juce::String (index + 1) + L" is a bus \x2014 inst alone makes a new instrument track");
+            return Result::fail ("track " + trackLabel (index) + L" is a bus \x2014 inst alone makes a new instrument track");
 
         if (Session::isSampleTrack (track) || (Session::isAudioTrack (track) && ! Session::clips (track).empty()))
-            return Result::fail ("track " + juce::String (index + 1) + L" has audio on it \x2014 inst alone makes a new instrument track");
+            return Result::fail ("track " + trackLabel (index) + L" has audio on it \x2014 inst alone makes a new instrument track");
     }
 
     const auto rate = engine.deviceSampleRate() > 0.0 ? engine.deviceSampleRate() : sampleRate();
@@ -607,7 +607,7 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     focusTrack (index);
     rebuildGraph();
 
-    auto msg = "track " + juce::String (index + 1) + " plays " + desc.name;
+    auto msg = "track " + trackLabel (index) + " plays " + desc.name;
     const bool armed = track[ids::armed];
 
     if (midiInputs != nullptr && ! midiInputs->opening() && midiInputs->names().isEmpty())
@@ -754,7 +754,7 @@ Result App::toggleEditor (int index)
     auto* slot = instrumentFor (index);
 
     if (slot == nullptr)
-        return Result::fail ("track " + juce::String (index + 1) + ": " + instrumentProblem (index));
+        return Result::fail ("track " + trackLabel (index) + ": " + instrumentProblem (index));
 
     if (slot->editorShowing())
     {
@@ -773,7 +773,7 @@ Result App::toggleEditor (int index)
     if (auto* in = hostedEntry (t))
         in->touched = true; // whatever happens in there may differ from the save
 
-    slot->showEditor (juce::String (index + 1) + " " + t[ids::name].toString() + L" \x00b7 " + slot->name() + L" \x00b7 taw");
+    slot->showEditor (trackLabel (index) + " " + t[ids::name].toString() + L" \x00b7 " + slot->name() + L" \x00b7 taw");
     return Result::good (slot->name() + L" window open \x00b7 | again (or its close button) closes it");
 }
 

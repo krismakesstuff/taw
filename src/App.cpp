@@ -1190,7 +1190,7 @@ Result App::record (const std::vector<int>& tracks)
     juce::StringArray names;
 
     for (auto i : armed)
-        names.add (juce::String (i + 1));
+        names.add (trackLabel (i));
 
     return Result::good ((countIn > 0 ? "counting in, then recording " : "recording ") + names.joinIntoString (","));
 }
@@ -1235,8 +1235,8 @@ Result App::startRecorders (const std::vector<int>& armedTracks)
         const int last = input + (trackIsStereo (session->track (i)) ? 1 : 0); // a stereo track records a pair
 
         if (input < 1 || last > numInputs)
-            return Result::fail ("track " + juce::String (i + 1) + " has no valid input (device has " + juce::String (numInputs)
-                                 + L") \x2014 try " + juce::String (i + 1) + " i 1");
+            return Result::fail ("track " + trackLabel (i) + " has no valid input (device has " + juce::String (numInputs)
+                                 + L") \x2014 try " + trackLabel (i) + " i 1");
     }
 
     const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
@@ -1422,7 +1422,7 @@ void App::recoverTakes()
 
             beginEdit ("recover take");
             placeTake (track, file, start, length, (juce::int64) t["comp"]);
-            recovered.add ("track " + juce::String (track + 1) + " (" + juce::String ((double) length / sampleRate(), 1) + " s)");
+            recovered.add ("track " + trackLabel (track) + " (" + juce::String ((double) length / sampleRate(), 1) + " s)");
         }
     }
 
@@ -1457,14 +1457,14 @@ void App::collectFinishedTakes()
             continue;
         }
 
-        beginEdit ("record track " + juce::String (f.trackIndex + 1));
+        beginEdit ("record track " + trackLabel (f.trackIndex));
         const auto passes = placeTake (f.trackIndex, f.file, f.start, f.length, latencyCompensation());
 
         // Saved before the journal forgets the take, so a crash between the two can't lose it.
         persist();
         writeTakeJournal();
 
-        auto msg = L"take saved \x00b7 track " + juce::String (f.trackIndex + 1) + L" \x00b7 " + juce::String ((double) f.length / sampleRate(), 1) + " s"
+        auto msg = L"take saved \x00b7 track " + trackLabel (f.trackIndex) + L" \x00b7 " + juce::String ((double) f.length / sampleRate(), 1) + " s"
                    + (passes.isNotEmpty() ? L" \x00b7 " + passes : juce::String());
 
         if (f.droppedBlocks > 0)
@@ -1588,27 +1588,27 @@ Result App::discardTake (int trackIndex)
     auto t = session->track (trackIndex);
 
     if (Session::isSampleTrack (t))
-        return Result::fail ("track " + juce::String (trackIndex + 1) + L" is a sample track \x00b7 pat or enter edit its hits");
+        return Result::fail ("track " + trackLabel (trackIndex) + L" is a sample track \x00b7 pat or enter edit its hits");
 
     if (Session::isInstrumentTrack (t))
     {
         const auto midi = Session::lastMidiClip (t);
 
         if (! midi.isValid())
-            return Result::fail ("track " + juce::String (trackIndex + 1) + " has no clips");
+            return Result::fail ("track " + trackLabel (trackIndex) + " has no clips");
 
         t.removeChild (midi, um());
-        return Result::good ("dropped the latest clip on track " + juce::String (trackIndex + 1) + L" \x00b7 ctrl+z brings it back");
+        return Result::good ("dropped the latest clip on track " + trackLabel (trackIndex) + L" \x00b7 ctrl+z brings it back");
     }
 
     auto clip = Session::lastClip (t);
 
     if (! clip.isValid())
-        return Result::fail ("track " + juce::String (trackIndex + 1) + " has no clips");
+        return Result::fail ("track " + trackLabel (trackIndex) + " has no clips");
 
     // Non-destructive: the file stays in audio/, only the clip goes, uncovering anything under it.
     t.removeChild (clip, um());
-    return Result::good ("dropped the latest clip on track " + juce::String (trackIndex + 1) + " (file kept in audio/)");
+    return Result::good ("dropped the latest clip on track " + trackLabel (trackIndex) + " (file kept in audio/)");
 }
 
 //==============================================================================
@@ -2138,7 +2138,7 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
 #endif
 
     if (targetTrack >= 0 && targetTrack < session->numTracks() && Session::isBusTrack (session->track (targetTrack)))
-        return Result::fail ("track " + juce::String (targetTrack + 1) + L" is a bus \x2014 import alone makes new tracks");
+        return Result::fail ("track " + trackLabel (targetTrack) + L" is a bus \x2014 import alone makes new tracks");
 
     // A Live set is a whole session of its own.
     for (const auto& path : paths)
@@ -2243,9 +2243,9 @@ void App::pollImport()
         const auto index = session->tree().indexOf (track); // tracks come first in the tree
 
         if (importKitBus > 0)
-            placed.add (padName (importNote) + " " + track[ids::name].toString() + " (track " + juce::String (index + 1) + ")");
+            placed.add ("pad " + trackLabel (index) + " " + track[ids::name].toString());
         else
-            placed.add (juce::String (index + 1) + " " + track[ids::name].toString() + (asSample ? " (sample)" : "")
+            placed.add (trackLabel (index) + " " + track[ids::name].toString() + (asSample ? " (sample)" : "")
                     + (item.channels > 1 ? " (stereo)" : ""));
         focusTrack (index);
     }
@@ -3787,7 +3787,7 @@ Result App::toggleEditor()
         return Result::fail (L"shift+E opens the focused track in an editor \x2014 focus a track (\x2191\x2193)");
 
     const auto track = session->track (focused);
-    const auto label = "track " + juce::String (focused + 1);
+    const auto label = "track " + trackLabel (focused);
 
     // The clip at the cursor, else the one nearest it (by its nearer edge).
     auto nearest = [this] (const std::vector<juce::ValueTree>& list, auto startOf, auto endOf)

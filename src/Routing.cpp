@@ -377,7 +377,7 @@ Result App::setWidth (const std::vector<int>& tracks, bool stereo)
         const auto track = session->track (t);
 
         if (Session::isInstrumentTrack (track) || Session::isBusTrack (track))
-            return Result::fail ("track " + juce::String (t + 1) + " is " + (Session::isBusTrack (track) ? "a bus" : "an instrument") + ": always stereo");
+            return Result::fail ("track " + trackLabel (t) + " is " + (Session::isBusTrack (track) ? "a bus" : "an instrument") + ": always stereo");
     }
 
     for (auto t : tracks)
@@ -448,7 +448,7 @@ Result App::addBus (const juce::String& name)
 juce::String App::busName (int busId) const
 {
     const auto t = session->findBus (busId);
-    return t < 0 ? juce::String ("Mix") : juce::String (t + 1) + " " + session->track (t)[ids::name].toString();
+    return t < 0 ? juce::String ("Mix") : trackLabel (t) + " " + session->track (t)[ids::name].toString();
 }
 
 // A bus by track number or name: exact, then the start of a name, then anywhere in it. A name
@@ -501,10 +501,10 @@ Result App::checkRoute (int track, int busId) const
         return Result::fail ("no such bus");
 
     if (bus == track)
-        return Result::fail ("track " + juce::String (track + 1) + " can't feed itself");
+        return Result::fail ("track " + trackLabel (track) + " can't feed itself");
 
     if (feeds (bus, track))
-        return Result::fail (busName (busId) + " already feeds track " + juce::String (track + 1) + L" \x2014 that would loop");
+        return Result::fail (busName (busId) + " already feeds track " + trackLabel (track) + L" \x2014 that would loop");
 
     return Result::good();
 }
@@ -521,7 +521,7 @@ Result App::setOutputBus (int track, int busId)
     else
         t.setProperty (ids::out, busId, um());
 
-    return Result::good ("track " + juce::String (track + 1) + L" \x2192 " + busName (busId));
+    return Result::good ("track " + trackLabel (track) + L" \x2192 " + busName (busId));
 }
 
 Result App::setSendBus (int track, int slot, int busId)
@@ -613,7 +613,7 @@ juce::String App::describeSends (int track) const
         if (const auto insert = Session::insert (t, s); insert.isValid())
             inserts.add (Session::slotName (s) + " " + insert[ids::pluginName].toString() + ((bool) insert[ids::bypass] ? " (bypassed)" : ""));
 
-    return "track " + juce::String (track + 1) + (inserts.isEmpty() ? juce::String() : L" \x00b7 inserts " + inserts.joinIntoString (juce::String (L" \x00b7 ")))
+    return "track " + trackLabel (track) + (inserts.isEmpty() ? juce::String() : L" \x00b7 inserts " + inserts.joinIntoString (juce::String (L" \x00b7 ")))
            + L" \x2192 " + busName (t[ids::out])
            + (parts.isEmpty() ? juce::String (L" \x00b7 no sends") : L" \x00b7 sends " + parts.joinIntoString (juce::String (L" \x00b7 ")));
 }
@@ -721,14 +721,14 @@ Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& a
                 s = k;
 
         if (s < 0)
-            return Result::fail ("track " + juce::String (t + 1) + L"'s sends are all used \x2014 2 send e verb replaces E");
+            return Result::fail ("track " + trackLabel (t) + L"'s sends are all used \x2014 2 send e verb replaces E");
 
         if (remove)
         {
             if (const auto send = Session::send (track, s); send.isValid())
                 track.removeChild (send, um());
 
-            done.add ("track " + juce::String (t + 1) + " send " + Session::slotName (s) + " removed");
+            done.add ("track " + trackLabel (t) + " send " + Session::slotName (s) + " removed");
             continue;
         }
 
@@ -790,7 +790,7 @@ std::vector<App::BusChoice> App::busChoices() const
             continue;
 
         if (filter.isEmpty() || name.containsIgnoreCase (filter))
-            choices.push_back ({ juce::String (t + 1) + " " + name, (int) track[ids::busId] });
+            choices.push_back ({ trackLabel (t) + " " + name, (int) track[ids::busId] });
 
         exact = exact || name.equalsIgnoreCase (filter);
     }
@@ -988,7 +988,7 @@ bool App::handleIoKey (const Key& k)
             {
                 beginEdit ("remove send");
                 session->track (track).removeChild (send, um());
-                say (Result::good ("track " + juce::String (track + 1) + " send " + Session::slotName (sendSlot) + L" removed \x00b7 ctrl+z brings it back"));
+                say (Result::good ("track " + trackLabel (track) + " send " + Session::slotName (sendSlot) + L" removed \x00b7 ctrl+z brings it back"));
             }
             return true;
 

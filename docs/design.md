@@ -235,7 +235,7 @@ separates the numbers, so nothing is ambiguous. Glued letters only count as an a
 names and click modes (`2nVox`, `clickrec`), so a typo like `mutr` is rejected rather than read
 as `m` + `utr`. `taw --parse "2i2"` shows how a line parses without running it.
 
-Selectors: `1`, `1-3`, `1,4`, `*` (all), `mix`. With no selector, commands act on the
+Selectors: `1`, `1-3`, `1,4`, `*` (all), `mix`, and a kit's pads `2.3`, `2.1-4` (see Kits). With no selector, commands act on the
 shift-selected tracks, else the focused track (or the Mix, for `v`). `r` with no selector
 records the selected tracks, else whatever is armed.
 
@@ -384,9 +384,9 @@ TRACK { kind: "sample", out: <kit's busId>, note, choke?, sampleFrom, … }   # 
 |---|---|
 | `kit` / `add kit [name]` | a new kit ("Kit 1"), focused; `kit` on a kit (or a member) lists its pads |
 | `pad 3 <file>` | a sample onto pad 3 of the kit here (1-16; pad 1 is note 36, what drum pads send): the member on it gets the new sound and keeps its hits, or a new member is made under the kit. `pad 3` alone lights pad 3 for the browser |
-| `3 kit drums` / `3 kit off` | sample track 3 into kit Drums (on the next free pad unless it has a note) / out of it, to the mix |
-| `3 note 38` / `3 note d2` | which note plays member 3 (names with middle C as C4); the member already there swaps |
-| `3 choke 1` / `3 choke off` | its choke group, 1-16 |
+| `3 kit drums` / `2.3 kit off` | sample track 3 into kit Drums (on the next free pad unless it has a note) / pad 2.3 out of it, a track again |
+| `2.3 note 38` / `2.3 note d2` | which note plays pad 3 of kit 2 (names with middle C as C4); the pad already there swaps |
+| `2.3 choke 1` / `2.1-4 choke off` | its choke group, 1-16 |
 | `shift+F` / `kit fold` | fold the kit's members away under it (or open it) |
 
 - **Playing:** a kit armed (`shift+R` on it: it shows `R` like a track) plays from the MIDI
@@ -408,9 +408,18 @@ TRACK { kind: "sample", out: <kit's busId>, note, choke?, sampleFrom, … }   # 
   same moment doesn't cut), so it depends only on positions and bounces agree; live, a pad press
   fades out the group's other voices. Groups are numbered per kit, so two kits never choke each
   other. Not yet: a live pad choking the timeline's hits, or the other way round.
-- **Screen:** the kit row has `kit` as its label and `▾`/`▸` before its name; members show `│`
-  there and their pad (`pad1`, or `n60` past 16) as their label. Folded members take no rows;
-  ↑↓ pass them, and anything that focuses one (a pad load) opens the kit.
+- **Pads are lanes, not tracks.** Members aren't numbered as tracks: the tracks after a kit
+  carry on from its number (Mic 1, Kit 2, Gtr 3), and a pad is its kit and pad, `2.3`, on screen
+  (its frame says "2.3 808SD (pad 3 of Kit 1)"), in messages and as a selector: `2.3 m`,
+  `2.3 v -6`, `2.1-4 choke 1` (a range takes the pads there are). `*` still means every track,
+  pads too. `App::numbering` maps both ways (`TrackNumbering`); inside, a pad is still a track
+  index. With no selector, commands act on the pad lane you're on, as on any track.
+- **Screen:** the kit row has `kit` as its label and `▾`/`▸` before its name, and always shows
+  every pad's hits together like a drum part in a MIDI clip: the pads in use one per half row
+  (higher notes higher), each hit a mark in its column, over one clip shade per stretch the
+  pads' clips cover. Pad lanes show `│` instead of a number and their pad (`pad1`, or `n60`
+  past 16) as their label. Folded, the pad lanes take no rows; ↑↓ pass them, and anything that
+  focuses one (a pad load) opens the kit.
 - `taw --livetest` checks a note playing its pad and choking another; `--cliptest` the timeline's
   choke.
 

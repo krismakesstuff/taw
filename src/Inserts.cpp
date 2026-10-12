@@ -94,7 +94,7 @@ juce::String App::insertProblem (const juce::ValueTree& node) const
 //==============================================================================
 juce::String App::insertOwnerName (int track) const
 {
-    return track < 0 ? juce::String ("the mix") : "track " + juce::String (track + 1);
+    return track < 0 ? juce::String ("the mix") : "track " + trackLabel (track);
 }
 
 Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc)
@@ -181,7 +181,7 @@ Result App::toggleInsertEditor (int index, int slot)
     // One plugin window at a time: it follows you from slot to slot.
     closePluginWindows();
     in->touched = true; // whatever happens in there may differ from the save
-    in->slot->showEditor ((index < 0 ? juce::String ("Mix") : juce::String (index + 1) + " " + track[ids::name].toString()) + L" \x00b7 " + Session::slotName (slot) + L" \x00b7 "
+    in->slot->showEditor ((index < 0 ? juce::String ("Mix") : trackLabel (index) + " " + track[ids::name].toString()) + L" \x00b7 " + Session::slotName (slot) + L" \x00b7 "
                           + in->slot->name() + L" \x00b7 taw");
     return Result::good (in->slot->name() + L" window open \x00b7 | again (or its close button) closes it");
 }

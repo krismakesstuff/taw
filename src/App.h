@@ -66,7 +66,15 @@ struct DeviceChoice
 };
 
 juce::String formatDb (double db); // "+1.5", "-6.0", "-inf"
-juce::String trackList (const std::vector<int>& tracks); // "track 2", "tracks 1,3"
+// Tracks as they're numbered on screen and typed: 1, 2, 3...; a kit's pads aren't numbered as
+// tracks but by their kit and pad, 2.3 (App::numbering).
+struct TrackNumbering
+{
+    std::vector<int> byNumber;              // number - 1: the track's index
+    std::map<int, std::map<int, int>> pads; // kit number: pad (1-16): the track's index
+    std::vector<juce::String> labels;       // index: "3", or "2.3" for pad 3 of kit 2
+    juce::String label (int index) const { return index >= 0 && index < (int) labels.size() ? labels[(size_t) index] : juce::String (index + 1); }
+};
 // The rate new sessions are made at (settings.json "newRate", all sessions): 44.1 kHz unless
 // changed. The device switches to a session's rate when it opens.
 double newSessionRate();
@@ -460,6 +468,9 @@ public:
     int kitMemberOnNote (int kit, int note) const;     // the member playing that note, or -1
     bool trackHidden (int track) const;                // a member of a folded kit
     int nextShownTrack (int from, int direction) const; // up or down past folded members
+    TrackNumbering numbering() const;
+    juce::String trackLabel (int index) const { return numbering().label (index); } // "3", "2.3"
+    juce::String trackList (const std::vector<int>& tracks) const;                    // "track 2", "tracks 1,3", "pad 2.3"
     bool keysPlayKit() const;                          // keys mode plays the 4x4 pads (LiveKeys::setPads)
     Result addKit (const juce::String& name);          // kit / add kit [name]
     Result joinKit (const std::vector<int>& tracks, const juce::String& kitQuery); // 3 kit drums: into a kit; 3 kit off: out

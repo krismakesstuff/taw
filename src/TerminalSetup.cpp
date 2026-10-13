@@ -19,6 +19,7 @@ juce::File askedFile() { return configFolder().getChildFile ("terminal-profile.j
 const std::pair<const char*, const char*> added[] = {
     { "$F700", "\x1b[1;2A" },  { "$F701", "\x1b[1;2B" },   // shift+up/down: select tracks
     { "~F700", "\x1b[1;3A" },  { "~F701", "\x1b[1;3B" },   // option+up/down: move tracks
+    { "$~F700", "\x1b[1;4A" }, { "$~F701", "\x1b[1;4B" },  // shift+option+up: a playlist lane's selection to the main
     { "^F700", "\x1b[1;5A" },  { "^F701", "\x1b[1;5B" },   // ctrl+up/down: the browser's jumps
     { "^m", "\x1b[109;5u" },   { "^[", "\x1b[91;5u" },     // ctrl+m, ctrl+[: apart from return, esc
     { "F729", "\x1b[H" },      { "F72B", "\x1b[F" },       // home/end (fn+left/right)

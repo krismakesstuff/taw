@@ -1271,8 +1271,8 @@ void Ui::drawTimeline (App& app)
                 const auto row = (int) (std::lower_bound (used.begin(), used.end(), (int) member.getProperty (ids::note, 0)) - used.begin());
                 const auto memberPass = live && app.recording && app.midiPassClips.count (m) > 0 ? app.midiPassClips.at (m) : juce::ValueTree();
 
-                for (const auto& h : Session::placedHits (member))
-                    notes.push_back ({ h.beat * spb, h.beat * spb + 1.0, row, false }); // a mark in its column; higher pads higher, as pitches
+                for (const auto& hit : Session::placedHits (member))
+                    notes.push_back ({ hit.beat * spb, hit.beat * spb + 1.0, row, false }); // a mark in its column; higher pads higher, as pitches
 
                 for (const auto& c : Session::hitClips (member))
                     clipSpans.push_back ({ (double) c[ids::beat] * spb, std::max (Session::clipEnd (c) * spb, c == memberPass ? (double) playhead : 0.0) });

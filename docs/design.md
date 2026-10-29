@@ -264,11 +264,11 @@ records the selected tracks, else whatever is armed.
 | `bpm 92` | set tempo; with `bpm ` typed, `t` taps it (the average of the last 8 taps, a 2 s pause starts over) and enter sets it |
 | `grid` | toggle grid |
 | `click` | toggle the click (metronome) |
-| `click rec` / `click always` | click only while recording / during playback too |
+| `click rec` / `click always` (`click a`) | click only while recording / during playback too |
 | `click -12` | click level in dB |
 | `lowlat` / `lowlat 256` | low latency mode on/off / its limit in samples (plugins over it sit out) |
 | `count 4` / `count off` | count-in: clicks before recording starts (default 4; also in `project`) |
-| `count always` / `count rec` | count in on plain playback too / only when recording starts (default) |
+| `count always` (`count a`) / `count rec` | count in on plain playback too / only when recording starts (default) |
 | `height 3` | rows per track, 1-4 (default 2); saved with the session |
 | `dark` / `light` / `grey` | colour theme, for every session (saved in `settings.json`) |
 | `dev` | choose audio device; ←→ on a row picks its input (CoreAudio: another device, or none) |

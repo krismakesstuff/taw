@@ -602,6 +602,17 @@ void Ui::drawTransport (App& app)
     add (juce::String (s->bpm(), 1) + " bpm " + juce::String (s->beatsPerBar()) + "/" + s->tree()[ids::timeSigDen].toString(), colour::dim);
     gap();
 
+    // The beat, blinking: lit for the first 100 ms of each (half a beat when they're quicker),
+    // the downbeat brightest. Counting in, the clicks before the playhead, as the engine plays them.
+    {
+        const auto spb = s->samplesPerBeat();
+        const auto at = clicksLeft > 0 ? (double) (app.engine.playhead() - countIn) : (double) pos;
+        const auto beat = spb > 0.0 ? std::floor (at / spb) : 0.0;
+        const bool lit = (rolling || clicksLeft > 0) && spb > 0.0 && at - beat * spb < std::min (0.1 * s->sampleRate(), 0.5 * spb);
+        const bool downbeat = s->beatsPerBar() > 0 && (juce::int64) beat % s->beatsPerBar() == 0;
+        add (L"\x25cf ", lit ? (downbeat ? colour::accent : colour::text) : colour::faint, bg, lit);
+    }
+
     if ((bool) s->tree()[ids::click])
         add (s->tree()[ids::clickWhen].toString() == "rec" ? "click rec" : "click", colour::accent, bg, true);
     else
@@ -2465,9 +2476,9 @@ void Ui::drawHelp (App& app)
         { L"SESSION", {
             { Heading, L"SESSION", nullptr, L"BOUNCE", nullptr },
             { Pair, L"click", L"click on / off", L"b  b mp3", L"bounce the selection" },
-            { Pair, L"click rec", L"click only recording", L"bounces", L"open the bounce folder" },
+            { Pair, L"click rec / a", L"only recording / always", L"bounces", L"open the bounce folder" },
             { Pair, L"count 4", L"count-in clicks (off)", L"bounces off", L"...don't open after" },
-            { Pair, L"count always", L"...on play too", L"bv", L"bounce with video (mp4)" },
+            { Pair, L"count a", L"...on play too", L"bv", L"bounce with video (mp4)" },
             { Pair, L"bpm 92", L"tempo  (grid: on/off)", L"bv cue 3", L"named (no sel: all)" },
 #if TAW_HUB
             { Pair, L"dev  panel", L"audio device / driver", L"hub", L"the hub: routes, sessions" },

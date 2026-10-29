@@ -253,6 +253,12 @@ juce::Result App::parsePosition (const juce::String& specIn, juce::int64& pos) c
     return juce::Result::ok();
 }
 
+// "always" by any start of it: click a, count al.
+static juce::String whenArg (const juce::String& arg)
+{
+    return arg.isNotEmpty() && juce::String ("always").startsWith (arg) ? juce::String ("always") : arg;
+}
+
 juce::String App::clickStatus() const
 {
     const auto& s = session->tree();
@@ -267,7 +273,7 @@ juce::String App::clickStatus() const
 Result App::setClick (const juce::String& argIn)
 {
     auto s = session->tree();
-    const auto arg = argIn.trim().toLowerCase();
+    const auto arg = whenArg (argIn.trim().toLowerCase());
 
     if (arg.isEmpty())
         s.setProperty (ids::click, ! (bool) s[ids::click], um());
@@ -278,7 +284,7 @@ Result App::setClick (const juce::String& argIn)
     else if (arg.containsOnly ("-+0123456789."))
         s.setProperty (ids::clickDb, juce::jlimit (-60.0, 6.0, arg.getDoubleValue()), um());
     else
-        return Result::fail ("click [on|off|rec|always|-12]");
+        return Result::fail ("click [on|off|rec|always (a)|-12]");
 
     return Result::good (clickStatus());
 }
@@ -308,11 +314,11 @@ Result App::setLowLatency (const juce::String& argIn)
                          + juce::String (mixLatency * 1000.0 / sampleRate(), 1) + L" ms late \x00b7 lowlat again restores them");
 }
 
-// count 4 | count off (or 0) | count rec (only when recording starts) | count always (play too)
+// count 4 | count off (or 0) | count rec (only when recording starts) | count always / count a (play too)
 Result App::setCountIn (const juce::String& argIn)
 {
     auto s = session->tree();
-    const auto arg = argIn.trim().toLowerCase();
+    const auto arg = whenArg (argIn.trim().toLowerCase());
 
     if (arg.isEmpty())
         return Result::good (countInStatus() + L" \x00b7 count 2, count off, count always");
@@ -326,7 +332,7 @@ Result App::setCountIn (const juce::String& argIn)
     else if (arg.containsOnly ("0123456789"))
         s.setProperty (ids::countIn, juce::jlimit (0, 16, arg.getIntValue()), um());
     else
-        return Result::fail ("count [4|off|rec|always]");
+        return Result::fail ("count [4|off|rec|always (a)]");
 
     return Result::good (countInStatus());
 }

@@ -66,6 +66,12 @@ struct EditorWindow : juce::DocumentWindow, TitledWindow
     {
         DocumentWindow::activeWindowStatusChanged();
 
+        // In front with the keys: they go to the content. On a Mac, showWithKeys' grab comes
+        // before the window is really active (taw runs in a terminal), so it's lost; the keys
+        // would go to the bare window and do nothing.
+        if (isActiveWindow() && content != nullptr && content->isShowing() && ! content->hasKeyboardFocus (true))
+            content->grabKeyboardFocus();
+
         for (auto* b : { getMinimiseButton(), getCloseButton() })
             if (b != nullptr)
                 b->setEnabled (true);

@@ -126,6 +126,7 @@ private:
     FocusFrame focusFrame;
     void drawFocusFrame();
     void drawTyping (App&); // text in the command line: it has the keys, so it's lit
+    void drawKeysWarning (App&); // a shortcut typed in keys mode: the way out, lit for a moment
     void drawHelp (App&);
     void drawSettings (App&);
     void drawPluginPicker (App&);

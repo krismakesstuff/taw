@@ -325,6 +325,7 @@ void Ui::drawMain (App& app)
     drawBottom (app);
     drawFocusFrame();
     drawTyping (app);
+    drawKeysWarning (app);
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
@@ -2217,6 +2218,18 @@ void Ui::drawTyping (App& app)
 
     if (const int chipX = w - 1 - chip.length(); chipX > used + 1)
         canvas.text (chipX, cmdY, chip, 16, colour::accent, true);
+}
+
+// A shortcut typed in keys mode does nothing (the letters are notes there), so for a couple of
+// seconds the line over the command line says so in red, as the typing one does, with the way out.
+void Ui::drawKeysWarning (App& app)
+{
+    if (! app.liveKeys.on() || juce::Time::getMillisecondCounterHiRes() - app.keysWarnedAt > 2000.0)
+        return;
+
+    const int w = canvas.width(), sepY = canvas.height() - 4;
+    canvas.fill (0, sepY, w, L'\x2501', colour::error);
+    canvas.text (2, sepY, L" KEYS MODE \x00b7 letters play notes, not shortcuts \x00b7 esc or ctrl+k leaves it ", 231, colour::error, true, w - 4);
 }
 
 void Ui::drawVolume (int x, int y, double db, int bg, bool automated, bool flash)

@@ -569,6 +569,7 @@ public:
     std::unique_ptr<MidiInputs> midiInputs;
 
     // Keys mode (ctrl+k): the typing keyboard plays the armed instrument tracks (LiveKeys.h).
+    double keysWarnedAt = -1.0e9; // a shortcut typed in keys mode (ms): the way out is shown for a moment
     LiveKeys liveKeys { [this] (MidiMsg m) { engine.playTyped (m); }, [this] (wchar_t ch) { return console.keyDown (ch); } };
     Result toggleLiveKeys();
 

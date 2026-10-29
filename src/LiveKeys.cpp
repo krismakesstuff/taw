@@ -47,10 +47,13 @@ int LiveKeys::padOf (wchar_t ch)
 
 bool LiveKeys::handle (const Key& k, double nowMs)
 {
+    lastSwallowed = false;
+
     if (! active || k.code != Key::Char || k.ctrl || k.alt || k.ch == ' ')
         return false;
 
     const auto ch = (wchar_t) juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch);
+    const bool shifted = juce::CharacterFunctions::isUpperCase ((juce::juce_wchar) k.ch);
 
     // Pads: shift (an upper case letter; ! @ # $ on the number row) is the accent.
     if (pads)
@@ -82,8 +85,19 @@ bool LiveKeys::handle (const Key& k, double nowMs)
             noteOn (key, padBase + pad, nowMs);
             vel = keep;
         }
+        else
+        {
+            lastSwallowed = true; // anything else typed is swallowed, as for notes
+        }
 
-        return true; // anything else typed is swallowed, as for notes
+        return true;
+    }
+
+    // Shift plays nothing here: shift+R and the like are taw's shortcuts, kept from it.
+    if (shifted)
+    {
+        lastSwallowed = true;
+        return true;
     }
 
     if (const auto offset = offsetOf (ch); offset >= 0)
@@ -114,6 +128,7 @@ bool LiveKeys::handle (const Key& k, double nowMs)
     else if (ch == 'x') base = juce::jmin (120, base + 12);
     else if (ch == 'c') vel = vel == 127 ? 120 : vel <= 20 ? 1 : vel - 20;
     else if (ch == 'v') vel = vel == 1 ? 20 : juce::jmin (127, vel + 20);
+    else lastSwallowed = true;
 
     return true; // anything else typed is swallowed: letters are notes here, not commands
 }

@@ -24,4 +24,5 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
 - The audio hub (macOS): routing between apps and sessions through taw's own audio devices; the hub
   panel shows open sessions only (a closed one's routes come back with it).
 - `click a` / `count a` for `always`; a blinking beat in the transport, the downbeat lit.
+- Keys mode: a shortcut typed there (shift+R and the like) says, in red, how to leave it.
 - Keycast: a window showing the keys you press, for screen recordings.

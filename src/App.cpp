@@ -3950,7 +3950,18 @@ void App::handleMainKey (const Key& k)
         liveKeys.setPads (keysPlayKit(), firstPadNote);
 
         if (liveKeys.handle (k, juce::Time::getMillisecondCounterHiRes()))
+        {
+            // A shortcut (shift+R, r zoom...) typed here is kept from taw: say how to get to it.
+            if (liveKeys.swallowed())
+            {
+                keysWarnedAt = juce::Time::getMillisecondCounterHiRes();
+                const auto ch = juce::String::charToString ((juce::juce_wchar) k.ch);
+                const auto name = juce::CharacterFunctions::isUpperCase ((juce::juce_wchar) k.ch) ? "shift+" + ch : ch;
+                say (Result::fail (L"keys mode has the keyboard  14 esc or ctrl+k leaves it, then " + name + " works"));
+            }
+
             return;
+        }
     }
 
     // Naming a new marker: the command line is its name field. Enter keeps the name, esc keeps

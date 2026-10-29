@@ -41,6 +41,7 @@ public:
     // character it swallows so it can't type commands). Space, arrows, esc and ctrl/alt keys
     // are left to taw.
     bool handle (const Key&, double nowMs);
+    bool swallowed() const { return lastSwallowed; } // the last key handled played nothing: a shortcut, kept from taw
 
     void poll (double nowMs); // ends the notes whose keys are up
 
@@ -65,6 +66,7 @@ private:
     int padBase = 36;
     int base = 60; // A's note
     int vel = 100;
+    bool lastSwallowed = false;
     bool polling = false; // keyDown has said a key is down: it can be trusted to say it's up
     std::map<wchar_t, Held> held;
 };

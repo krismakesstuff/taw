@@ -387,9 +387,17 @@ std::vector<Key> Console::poll()
 #if defined(__APPLE__)
     // Terminal.app sends shift+return as a plain return; whether shift is down is read from the
     // keyboard instead (shift+enter: a new sample track from the browser).
+    // Arrows with option are only told apart if the Terminal profile maps them (and a profile
+    // made by an older taw may not): whether option is down is read from the keyboard as well.
     for (auto& k : keys)
+    {
+        const bool arrow = k.code == Key::Up || k.code == Key::Down || k.code == Key::Left || k.code == Key::Right;
+
         if (k.code == Key::Enter && ! k.shift)
             k.shift = (CGEventSourceFlagsState (kCGEventSourceStateHIDSystemState) & kCGEventFlagMaskShift) != 0;
+        else if (arrow && ! k.alt)
+            k.alt = (CGEventSourceFlagsState (kCGEventSourceStateHIDSystemState) & kCGEventFlagMaskAlternate) != 0;
+    }
 #endif
 
     return keys;

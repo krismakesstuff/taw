@@ -717,6 +717,7 @@ by all of them. `Playlists.cpp`.
 | `Ctrl+Alt+P` | `pl copy` | likewise, starting as a copy of the main |
 | `Shift+P` | | the focused track's playlists as lanes under it, each as tall as the track (closes its automation lanes: a track shows one or the other) |
 | `Shift+S` on a lane | | it plays in the main's place, on that track only (one at a time; again: the main). Closing the lanes ends it |
+| `Ctrl+Alt+↑/↓` | | the previous / next playlist (by name, round again) becomes the main, playlist lanes open or closed |
 | `Alt+Shift+↑` on a lane | | its selection replaces that range on the main (Copy Selection to Main Playlist); no selection: the whole playlist becomes the main |
 | | `pl`, `pl 2`, `pl Vox.02` | list them; make one the main (numbered as the lanes are), the main taking its place |
 | | `pl del [n]` | delete one (its audio stays in `audio\`) |

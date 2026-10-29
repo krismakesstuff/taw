@@ -1006,6 +1006,7 @@ public:
     Result togglePlaylistLanes();                              // shift+P
     Result soloPlaylistLane();                                 // shift+S on a playlist lane
     Result promoteToMain();                                    // alt+shift+up on a playlist lane
+    Result cyclePlaylist (int direction);                      // ctrl+alt+up/down: the previous / next playlist is the main
     Result makeMain (int track, juce::ValueTree playlist);
     std::vector<juce::ValueTree> playlistsShown (int track) const; // the lanes under it (empty: closed)
     juce::ValueTree focusedPlaylist() const;                   // the playlist lane you're on, or invalid

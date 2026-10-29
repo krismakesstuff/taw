@@ -293,6 +293,42 @@ Result App::promoteToMain()
                          + " to the main (" + Session::mainPlaylistName (track) + L") \x00b7 ctrl+z undoes");
 }
 
+// ctrl+alt+up/down: the previous or next playlist by name (Vox, Vox.01, Vox.02, round again)
+// becomes the main, on the focused track, its playlist lanes shown or not.
+Result App::cyclePlaylist (int direction)
+{
+    if (session == nullptr || onTopLane() || mixFocused() || focused >= session->numTracks())
+        return Result::fail (L"ctrl+alt+\x2191\x2193 cycles a track's playlists \x2014 \x2193 to one");
+
+    if (recording)
+        return Result::fail ("stop recording first");
+
+    const auto track = session->track (focused);
+    const auto list = Session::playlists (track);
+
+    if (list.empty())
+        return Result::fail (Session::mainPlaylistName (track) + L" is the only playlist \x00b7 ctrl+p a new one, ctrl+alt+p a copy of it");
+
+    juce::StringArray names { Session::mainPlaylistName (track) };
+
+    for (const auto& p : list)
+        names.add (p[ids::name].toString());
+
+    juce::StringArray order (names);
+    order.sortNatural();
+    const auto n = order.size();
+    const auto next = order[(order.indexOf (names[0]) + direction + n) % n];
+
+    for (const auto& p : list)
+        if (p[ids::name].toString() == next)
+        {
+            beginEdit ("choose playlist");
+            return makeMain (focused, p);
+        }
+
+    return Result::fail ("no such playlist");
+}
+
 // The editors show a track's clips from where they were opened: when playlists swap, they close
 // rather than show clips that have moved.
 void App::closeEditorsOnPlaylists()

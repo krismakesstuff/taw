@@ -4066,6 +4066,9 @@ void App::handleMainKey (const Key& k)
             // Alt+shift+up on a playlist lane: its selection to the main (Pro Tools' key).
             if (k.alt && k.shift && ! k.ctrl && k.code == Key::Up && focusedPlaylist().isValid())
                 say (promoteToMain());
+            // Ctrl+alt: the track's playlists in turn as the main, lanes open or closed.
+            else if (k.ctrl && k.alt && ! k.shift)
+                say (cyclePlaylist (k.code == Key::Up ? -1 : +1));
             else if (k.alt && ! k.ctrl && session != nullptr && ! onTopLane() && selectedTracks().size() <= 1 && focusedLaneParam().isNotEmpty())
             {
                 // On a lane: its points up or down (the selection's, or the one at the cursor).

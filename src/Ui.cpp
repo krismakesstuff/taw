@@ -2461,6 +2461,7 @@ void Ui::drawHelp (App& app)
             { Pair, L"ctrl+p", L"new playlist (empty)", L"shift+P", L"playlists as lanes" },
             { Pair, L"ctrl+alt+p", L"copy of the main", L"shift+S lane", L"plays in the main's place" },
             { Pair, L"pl  pl 2", L"list / make it the main", L"alt+shift+\x2191", L"lane's selection to main" },
+            { Pair, L"ctrl+alt+\x2191\x2193", L"previous / next main", L"", L"" },
             { Note, L"Loop on, recording: each pass a take, the last on the main." },
         } },
         { L"PLUGINS", {

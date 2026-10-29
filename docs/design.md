@@ -1140,7 +1140,8 @@ join it later through virtual devices.
   1": the hardware by its first word, so it isn't taken for the Mac's own output), the app
   devices as `taw1in` (what apps play to taw 1) and sessions' outputs as stereo; columns are
   the interface's outputs in pairs ("MacBook / out 1-2"), the app devices as `taw1out` (what
-  apps hear with taw 1 as their mic) and sessions' inputs. Beside an app device: who uses it
+  apps hear with taw 1 as their mic) and sessions' inputs. Only open sessions are shown: a
+  closed one's routes wait in the hub and come back with it (`hub forget` drops them). Beside an app device: who uses it
   now (macOS's process list, a helper as its app, "system output" when the Mac's sound is set
   to it; an app shows only while its audio runs). The chosen row and column are in the accent.
   Arrows move, space turns a cell on or off (stereo to stereo side by side, mono to both sides;

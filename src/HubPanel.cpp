@@ -564,9 +564,12 @@ std::vector<App::HubEnd> App::hubRows() const
         rows.push_back ({ key, 1, 2, hubAppName (key, true), named + (playing.isNotEmpty() ? L"\x25c2 " + playing : juce::String ("no app")), false, true });
     }
 
+    // Open sessions only: a closed one's routes stay in the hub and show again when it opens
+    // (hub forget <name> drops them).
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
-            rows.push_back ({ s["key"].toString(), 1, 2, s["name"].toString(), {}, true, (bool) s["connected"] });
+            if ((bool) s["connected"])
+                rows.push_back ({ s["key"].toString(), 1, 2, s["name"].toString(), {}, true, true });
 
     return rows;
 }
@@ -595,7 +598,8 @@ std::vector<App::HubEnd> App::hubCols() const
 
     if (auto* sessions = hubStatus["sessions"].getArray())
         for (const auto& s : *sessions)
-            cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), "inputs", true, (bool) s["connected"] });
+            if ((bool) s["connected"])
+                cols.push_back ({ s["key"].toString(), 1, 0, s["name"].toString(), "inputs", true, true });
 
     return cols;
 }

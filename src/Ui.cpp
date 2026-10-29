@@ -3287,8 +3287,8 @@ void Ui::drawClosePrompt (App& app)
 
 // The session screen, top to bottom: a new session (its name, where it goes, the templates),
 // then two columns: recent sessions on the left, the bounces taw made on the right (enter
-// plays one, without opening anything). Each is framed, the focused one lit. Arrows move
-// within the focused area, tab and shift+tab between areas.
+// plays one, without opening anything). Each is framed, the focused one lit. Up and down move
+// within the focused area; tab and shift+tab, and left and right, between areas.
 static juce::String agoText (juce::Time t)
 {
     const auto age = juce::Time::getCurrentTime() - t;
@@ -3356,7 +3356,19 @@ void Ui::drawTemplatePicker (App& app)
 
     canvas.fill (0, 0, w, L' ', -1, colour::headerBg);
     canvas.text (1, 0, "taw", colour::accent, colour::headerBg, true);
-    canvas.text (5, 0, L"\x25b8 sessions", colour::text, colour::headerBg);
+    const auto afterTitle = canvas.text (5, 0, L"\x25b8 sessions", colour::text, colour::headerBg);
+
+    // The audio device the bounces play through (a saved one that's gone leaves none).
+    {
+        auto* device = app.engine.devices().getCurrentAudioDevice();
+        const auto x = canvas.text (afterTitle + 3, 0, device != nullptr ? L"\x266a " + device->getName() : juce::String (L"\x266a no audio device"),
+                                    device != nullptr ? colour::text : colour::error, colour::headerBg, device == nullptr, w / 2);
+
+        if (device != nullptr)
+            canvas.text (x + 1, 0, juce::String (device->getCurrentSampleRate() / 1000.0, 1) + "k", colour::dim, colour::headerBg);
+
+        canvas.text (x + (device != nullptr ? 8 : 1), 0, L"alt+d change", colour::faint, colour::headerBg);
+    }
 
     // Which build, out of the way on the right: the version, the commit (+: changes on top of
     // it) and when it was built.
@@ -3596,12 +3608,14 @@ void Ui::drawTemplatePicker (App& app)
     }
 
 #if TAW_HUB
-    const juce::String areas (L"tab area \x00b7 alt+h hub");
+    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device \x00b7 alt+h hub");
 #else
-    const juce::String areas (L"tab area");
+    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device");
 #endif
+    const bool bouncePlaying = app.bouncePlaySeconds() >= 0.0;
     const auto hint = app.pickArea == Area::bounces
-                          ? L"enter play/stop \x00b7 \x2190\x2192 seek (alt: 30 s) \x00b7 o session \x00b7 r reveal \x00b7 " + areas
+                          ? (bouncePlaying ? L"enter play/stop \x00b7 \x2190\x2192 seek (alt: 30 s) \x00b7 o session \x00b7 r reveal \x00b7 tab area"
+                                           : L"enter play/stop \x00b7 o session \x00b7 r reveal \x00b7 " + areas)
                       : app.pickArea == Area::sessions
                           ? L"\x2191\x2193 choose \x00b7 enter open \x00b7 type: new session \x00b7 " + areas + L" \x00b7 esc quit"
                           : L"type a name (ctrl \x2190\x2192 by word) \x00b7 \x2191\x2193 template \x00b7 enter create \x00b7 " + areas + L" \x00b7 esc quit";

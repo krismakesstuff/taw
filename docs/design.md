@@ -1206,17 +1206,20 @@ save to `session.json` as they go, as before.
 
 The session screen: a new session at the top (type its name; the templates under it), then two
 columns, recent sessions on the left and bounces on the right, each in a frame; the one with
-the keys is drawn heavy and lit. Arrows move within that area (off the end of a list, into the
-area beyond); `tab` and `shift+tab` go round the areas, so you never scroll through one list to
-reach another. The name is a text field: `left` and `right` move its cursor, `ctrl` with them
-(and with `backspace` and `delete`) a word at a time, `home` and `end` to either end. Typing a
+the keys is drawn heavy and lit. `up` and `down` move within that area (off the end of a list,
+into the area beyond); `tab` and `shift+tab` go round the areas, and so do `right` and `left`, so
+you never scroll through one list to reach another. The name is a text field: `left` and `right`
+move its cursor (past either end, to the next area), `ctrl` with them (and with `backspace` and
+`delete`) a word at a time, `home` and `end` to either end. Typing a
 name from a list takes you to the templates. The bounces list shows what taw bounced, newest
 first: every `b` bounce and last-saved (remembered in `bounces.json` in the config folder),
 plus whatever is in the recent sessions' `bounces` folders. With the bounces focused (or one
 playing), a player sits at the foot of their frame: the one playing and how far through, else
 the one picked, ready. `enter` (or `space`) plays it through the output, decoded on a thread,
-without opening anything; `left` and `right` seek 5 s (alt: 30), `home` goes back to the start,
-`esc` stops it, `o` opens the session it came from, `r` shows the file in Explorer.
+without opening anything; while it plays `left` and `right` seek 5 s (alt: 30) instead of moving
+between areas, `home` goes back to the start,
+`esc` stops it, `o` opens the session it came from, `r` shows the file in Explorer. The header names the audio device they play through (red "no audio device" when a saved
+one has gone); `alt+d` opens the device picker, and `esc` or `enter` there comes back.
 
 Each recent session shows its size at a glance, in grey between its name and when it was last
 saved: tracks, tempo, plugins (instruments and inserts, the mix's too) and length (to the end

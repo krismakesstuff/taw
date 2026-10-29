@@ -273,7 +273,8 @@ public:
 
     // The session screen's areas: templates (a new session) on top, then recent sessions and
     // the bounces taw made side by side (newest first, to audition without opening anything).
-    // Arrows move within the focused area; tab and shift+tab move between areas.
+    // Up and down move within the focused area; tab and shift+tab (and left and right, where
+    // they've nothing else to do) move between areas.
     enum class PickArea { templates, sessions, bounces };
     PickArea pickArea = PickArea::sessions;
     int newSessionCursor = 0; // in newSessionName (clamped to it: other places set the name)
@@ -640,6 +641,7 @@ public:
     bool interactive = false;                       // run() is driving (not taw --exec): may open other windows
     const Bounce* currentBounce() const { return bounce.get(); } // for the progress bar; nullptr when idle
     void openDevicePicker();
+    bool devicePickerFromSessions = false; // alt+d on the session screen: esc goes back there, even with no device
     Result showControlPanel();
     // Quitting closes the session first (asking about unsaved changes): on screen, in steps
     // under the closing box.

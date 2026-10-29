@@ -915,11 +915,22 @@ void App::openDevicePicker()
     const auto* current = dm.getCurrentAudioDevice();
     const auto currentInput = dm.getAudioDeviceSetup().inputDeviceName;
 
+    // taw's driver's app devices ("taw 1" to "taw 4") are for other apps, the system and
+    // sessions to reach the hub through, never a session's own device: they aren't offered.
+    const auto withoutAppDevices = [] (juce::StringArray names)
+    {
+        for (int i = names.size(); --i >= 0;)
+            if (names[i].length() == 5 && names[i].startsWith ("taw ") && juce::CharacterFunctions::isDigit (names[i][4]))
+                names.remove (i);
+
+        return names;
+    };
+
     for (auto* type : dm.getAvailableDeviceTypes())
     {
         type->scanForDevices();
-        const auto outputs = type->getDeviceNames (false);
-        const auto inputs = type->getDeviceNames (true);
+        const auto outputs = withoutAppDevices (type->getDeviceNames (false));
+        const auto inputs = withoutAppDevices (type->getDeviceNames (true));
         const auto defaultInput = inputs[juce::jmax (0, type->getDefaultDeviceIndex (true))];
 
         // Where outputs and inputs are separate devices (CoreAudio), ←→ picks the input: a
@@ -948,8 +959,9 @@ void App::openDevicePicker()
         }
     }
 
-    // Put ASIO first: it's what a dedicated interface should be using. (macOS has only CoreAudio.)
+    // The hub first, then ASIO: it's what a dedicated interface should be using. (macOS has only CoreAudio.)
     std::stable_partition (deviceChoices.begin(), deviceChoices.end(), [] (const auto& c) { return c.type == "ASIO"; });
+    std::stable_partition (deviceChoices.begin(), deviceChoices.end(), [] (const auto& c) { return c.type == "taw hub"; });
 
     if (current != nullptr)
         for (int i = 0; i < (int) deviceChoices.size(); ++i)
@@ -4417,7 +4429,7 @@ void App::handleDevicePickerKey (const Key& k)
 
             return;
         case Key::Escape:
-            if (engine.devices().getCurrentAudioDevice() != nullptr)
+            if (engine.devices().getCurrentAudioDevice() != nullptr || std::exchange (devicePickerFromSessions, false))
                 proceedToSession();
             else
                 quit();
@@ -4429,7 +4441,10 @@ void App::handleDevicePickerKey (const Key& k)
                 say (r);
 
                 if (r.ok)
+                {
+                    devicePickerFromSessions = false;
                     proceedToSession();
+                }
             }
             return;
         case Key::Char:
@@ -4537,11 +4552,20 @@ void App::handleTemplatePickerKey (const Key& k)
         return;
     }
 
-    // Between areas: tab and shift+tab, round them all. The arrows stay in the area, so the
-    // name can be edited like any text field.
+    // Between areas: tab and shift+tab, round them all; left and right too, except where they
+    // have work of their own (the name's cursor, until it's at either end; seeking a playing bounce).
     if (k.code == Key::Tab && ! k.ctrl && ! k.alt)
     {
         cyclePickArea (k.shift ? -1 : 1);
+        return;
+    }
+
+    // alt+d: the audio device the bounces play through (the picker comes back here).
+    if (k.code == Key::Char && k.alt && ! k.ctrl && (k.ch == 'd' || k.ch == 'D'))
+    {
+        stopBounce();
+        openDevicePicker();
+        devicePickerFromSessions = true;
         return;
     }
 
@@ -4590,8 +4614,18 @@ void App::handleTemplatePickerKey (const Key& k)
 
         switch (k.code)
         {
-            case Key::Left:  at = k.ctrl ? wordLeft() : juce::jmax (0, at - 1); return;
-            case Key::Right: at = k.ctrl ? wordRight() : juce::jmin (name.length(), at + 1); return;
+            case Key::Left:
+                if (at == 0)
+                    cyclePickArea (-1); // past the start: the area before
+                else
+                    at = k.ctrl ? wordLeft() : at - 1;
+                return;
+            case Key::Right:
+                if (at == name.length())
+                    cyclePickArea (+1); // past the end: the area after
+                else
+                    at = k.ctrl ? wordRight() : at + 1;
+                return;
             case Key::Home:  at = 0; return;
             case Key::End:   at = name.length(); return;
             case Key::Backspace:
@@ -4638,6 +4672,10 @@ void App::handleTemplatePickerKey (const Key& k)
                 movePickArea (PickArea::sessions);
             else
                 index = juce::jmax (0, juce::jmin (count - 1, index + 1));
+            return;
+        case Key::Left:
+        case Key::Right:
+            cyclePickArea (k.code == Key::Left ? -1 : +1);
             return;
         case Key::Enter:
             if (opening != nullptr)

@@ -26,4 +26,7 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
   panel shows open sessions only (a closed one's routes come back with it).
 - `click a` / `count a` for `always`; a blinking beat in the transport, the downbeat lit.
 - Keys mode: a shortcut typed there (shift+R and the like) says, in red, how to leave it.
+- The session screen: ←→ move between areas; the header names the audio device bounces play
+  through, `alt+d` changes it. The hub comes first among devices, and taw's own app devices
+  aren't offered to sessions.
 - Keycast: a window showing the keys you press, for screen recordings.

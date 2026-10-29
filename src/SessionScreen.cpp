@@ -127,8 +127,14 @@ void App::handleBouncesKey (const Key& k)
                 --bounceIndex;
             return;
         case Key::Down:  bounceIndex = juce::jmax (0, juce::jmin (n - 1, bounceIndex + 1)); return;
-        case Key::Left:  seekBounce (bouncePlaySeconds() - (k.alt ? 30.0 : 5.0)); return; // 5 s, alt: 30 s
-        case Key::Right: seekBounce (bouncePlaySeconds() + (k.alt ? 30.0 : 5.0)); return;
+        // Playing: left and right seek 5 s (alt: 30 s). Stopped, they move between areas.
+        case Key::Left:
+        case Key::Right:
+            if (bouncePlaySeconds() >= 0.0)
+                seekBounce (bouncePlaySeconds() + (k.code == Key::Left ? -1.0 : 1.0) * (k.alt ? 30.0 : 5.0));
+            else
+                cyclePickArea (k.code == Key::Left ? -1 : +1);
+            return;
         case Key::Home:  seekBounce (0.0); return;
         case Key::Enter:
             if (sel != nullptr)
@@ -156,6 +162,12 @@ void App::handleBouncesKey (const Key& k)
 void App::playBounce (const juce::File& file)
 {
     stopBounce();
+
+    if (engine.devices().getCurrentAudioDevice() == nullptr)
+    {
+        say (Result::fail (L"no audio device to play it through \x00b7 alt+d picks one"));
+        return;
+    }
 
     auto p = std::make_unique<BouncePlayer>();
     p->file = file;

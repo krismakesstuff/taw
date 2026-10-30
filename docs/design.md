@@ -775,6 +775,14 @@ client) work in the one open in a running taw while you record and audition in i
   `asks you` (the tempo box), or ✗ and why. An edit refused while playing also puts a yellow
   `● claude-code waiting ×3` chip on the transport; on stop the status line says it tried and can
   edit now.
+- **Sessions:** `list_sessions` (recent and in the sessions folder, the templates, which is
+  open), `new_session` (a name, dated as yours are, in the sessions folder, from a template) and
+  `open_session` (a folder or name). On the session screen they happen at once (`taw --mcp` with
+  no `--session` picks a taw with nothing open when none has a session). Over an open session a
+  box asks: with unsaved changes `s` save (and bounce last-saved) / `o` save only / `d` don't
+  save, then switch; with none, `enter` switch; `esc` stays. The agent gets `needs-user`, and
+  calling again with the same name says what you chose (`declined` for 2 minutes). Nothing is
+  made until you say yes. `run_command` can't `import` a Live set (that closes the session).
 - **On or off:** `agents` / `agents on` / `agents off` (and a row in `project`), kept in
   `settings.json` for every session, on by default. Off, nothing listens, and `taw --mcp` says
   agents are turned off.

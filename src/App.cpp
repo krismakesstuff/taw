@@ -3624,6 +3624,15 @@ void App::dispatchKey (const Key& k)
         return;
     }
 
+    // And an agent asking to open another session.
+    if (sessionAsk.has_value())
+    {
+        if (k.code != Key::Mouse)
+            handleSessionAskKey (k);
+
+        return;
+    }
+
     // So does an agent's tempo change waiting on what to do with the audio.
     if (tempoAsk.has_value())
     {

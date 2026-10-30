@@ -222,6 +222,8 @@ juce::String Ui::snapshot (App& app, int w, int h)
 
         if (app.closePrompt.has_value())
             drawClosePrompt (app);
+        else if (app.sessionAsk.has_value())
+            drawSessionPrompt (app);
         else if (app.tempoAsk.has_value())
             drawTempoPrompt (app);
     }
@@ -280,6 +282,8 @@ void Ui::render (App& app)
             drawClosing (app);
         else if (app.closePrompt.has_value())
             drawClosePrompt (app);
+        else if (app.sessionAsk.has_value())
+            drawSessionPrompt (app);
         else if (app.tempoAsk.has_value())
             drawTempoPrompt (app);
     }
@@ -3460,6 +3464,50 @@ void Ui::drawClosePrompt (App& app)
     canvas.text (x + 1, y0 + 6, "don't save", colour::text, bg);
     x = canvas.text (x0 + 26, y0 + 6, "esc", colour::accent, bg, true);
     canvas.text (x + 1, y0 + 6, "stay", colour::text, bg);
+}
+
+// An agent wants another session open (new_session / open_session): this one closes first, so
+// it's the close prompt's choices, or plain yes / stay when nothing's unsaved.
+void Ui::drawSessionPrompt (App& app)
+{
+    const auto& ask = *app.sessionAsk;
+    const bool changes = app.hasUnsavedChanges();
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 68), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
+    const int rows = changes ? 9 : 7;
+
+    for (int y = 0; y < rows; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    int x = canvas.text (x0 + 2, y0 + 1, ask.create ? "NEW SESSION" : "OPEN", colour::text, bg, true);
+    x = canvas.text (x + 1, y0 + 1, ask.agent, colour::accent, bg, true, boxW / 3);
+    canvas.text (x + 1, y0 + 1, ask.create ? "wants to make one and open it" : "wants to open another session", colour::text, bg, false, x0 + boxW - x - 3);
+    x = canvas.text (x0 + 2, y0 + 2, ask.folder.getFileName(), colour::accent, bg, true, boxW - 4);
+
+    if (ask.create && ask.templateName.isNotEmpty())
+        canvas.text (x + 1, y0 + 2, "from " + ask.templateName, colour::dim, bg, false, x0 + boxW - x - 3);
+
+    canvas.text (x0 + 2, y0 + 3, app.session->name() + (changes ? " closes first, and has changes you haven't saved" : " closes first (nothing unsaved)"),
+                 colour::dim, bg, false, boxW - 4);
+
+    auto option = [&] (int y, const juce::String& key, const juce::String& what)
+    {
+        canvas.text (x0 + 2, y, key, colour::accent, bg, true);
+        canvas.text (x0 + 9, y, what, colour::text, bg, false, boxW - 11);
+    };
+
+    if (changes)
+    {
+        option (y0 + 5, "s", "save (and bounce last-saved), then open it");
+        option (y0 + 6, "o", "save only, then open it");
+        option (y0 + 7, "d", "don't save, open it");
+        option (y0 + 8, "esc", "stay here");
+    }
+    else
+    {
+        option (y0 + 5, "enter", "open it");
+        option (y0 + 6, "esc", "stay here");
+    }
 }
 
 // An agent wants another tempo and the session has audio clips, which are placed in samples:

@@ -1571,7 +1571,8 @@ int main (int argc, char** argv)
                 if (t["inputSchema"]["type"].toString() == "object")
                     names.add (t["name"].toString());
 
-            check (names.size() == 10 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits") && names.contains ("set_tempo"),
+            check (names.size() == 13 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits") && names.contains ("set_tempo")
+                       && names.contains ("new_session"),
                    "tools/list: " + names.joinIntoString (", "));
             check (method ("ping", "{}")["result"].isObject(), "ping");
             check ((int) rpc (bridge, "this isn't json")["error"]["code"] == -32700, "garbage: a parse error");
@@ -1955,6 +1956,90 @@ int main (int argc, char** argv)
                 got.add (loaded->track (t)[taw::ids::uid].toString());
 
             check (got.joinIntoString (",") == "t1,t2,t3", "an old session's tracks get ids on load: " + got.joinIntoString (","));
+        }
+
+        // Sessions: with one open, switching waits for the user's say; on the session screen it
+        // just happens. New ones go in the scratch folder, never the user's sessions folder.
+        {
+            app->startAgents();
+            app->sessionsFolder = app->newSessionParent = scratch;
+            pump();
+
+            auto settle = [&]
+            {
+                for (int i = 0; i < 2000 && (app->closing != nullptr || app->opening != nullptr); ++i)
+                {
+                    if (app->closing != nullptr)
+                        app->stepClosing();
+                    else
+                        app->stepOpening();
+
+                    app->pumpBackgroundWork();
+                }
+
+                pump();
+            };
+            auto press = [&] (wchar_t c, taw::Key::Code code = taw::Key::Char)
+            {
+                taw::Key k;
+                k.code = code;
+                k.ch = c;
+                app->pressKey (k);
+                app->pumpBackgroundWork();
+            };
+            const auto old = scratch.getChildFile ("old song");
+            const auto quoted = [] (const juce::File& f) { return juce::JSON::toString (f.getFullPathName()); };
+
+            const auto list = tool ("list_sessions", "{}");
+            check (! list.error && list.data["open"].toString() == dir.getFullPathName() && list.data["templates"].size() == (int) app->templates.size()
+                       && list.data["new_sessions_go_in"].toString() == scratch.getFullPathName(),
+                   "list_sessions: the open one, the templates, where new ones go");
+            check (tool ("open_session", "{\"session\":" + quoted (dir) + "}").text.contains ("already open"), "open_session on the open one: already open");
+
+            app->engine.play (0);
+            check (tool ("new_session", R"({"name":"agent idea"})").text.startsWith ("[playing]") && ! app->sessionAsk.has_value(), "new_session while playing refused");
+            app->engine.stop();
+            pump();
+
+            check (tool ("new_session", R"({"name":"agent idea","template":"no such"})").text.startsWith ("[invalid]"), "an unknown template refused");
+
+            const auto asked = tool ("new_session", R"({"name":"agent idea"})");
+            check (asked.error && asked.text.startsWith ("[needs-user]") && app->sessionAsk.has_value() && ! app->sessionAsk->folder.exists(),
+                   "new_session over an open session: taw asks, nothing made yet");
+            check (app->screenText (100, 30).contains ("NEW SESSION"), "taw shows the session box");
+            std::printf ("%s", app->screenText (100, 14).toRawUTF8());
+            check (tool ("new_session", R"({"name":"agent idea"})").text.startsWith ("[needs-user]"), "asking again: still waiting");
+            press (0, taw::Key::Escape);
+            check (! app->sessionAsk.has_value() && app->session != nullptr && app->session->folder() == dir, "esc: the session stays");
+            check (tool ("new_session", R"({"name":"agent idea"})").text.startsWith ("[declined]"), "...and the agent hears no");
+
+            tool ("new_session", R"({"name":"agent tune"})");
+            const auto folder = app->sessionAsk.has_value() ? app->sessionAsk->folder : juce::File();
+            press (app->hasUnsavedChanges() ? 'd' : 0, app->hasUnsavedChanges() ? taw::Key::Char : taw::Key::Enter);
+            settle();
+            check (app->session != nullptr && app->session->folder() == folder && folder.getFileName().startsWith ("agent tune ")
+                       && folder.getParentDirectory() == scratch,
+                   "yes: made (dated, in the sessions folder) and opened: " + folder.getFileName());
+            const auto retry = tool ("new_session", R"({"name":"agent tune"})");
+            check (! retry.error && retry.text.contains ("is open"), "the agent asks again: " + retry.text);
+            check (! tool ("add_track", R"({"kind":"audio","name":"Gtr"})").error, "edits go into the new session");
+
+            // The session screen: no box.
+            app->closeSession();
+            settle();
+            check (app->session == nullptr, "closed: the session screen");
+            check (tool ("get_session", "{}").text.startsWith ("[no-session]"), "get_session: no session");
+            const auto opened = tool ("open_session", "{\"session\":" + quoted (old) + "}");
+            settle();
+            check (! opened.error && app->session != nullptr && app->session->folder() == old && ! app->sessionAsk.has_value(),
+                   "open_session on the session screen: opened at once");
+
+            app->closeSession();
+            settle();
+            const auto made = tool ("new_session", R"({"name":"screen idea"})");
+            settle();
+            check (! made.error && app->session != nullptr && app->session->name().startsWith ("screen idea"), "new_session on the session screen: made and opened at once");
+            check (tool ("run_command", R"({"command":"import D:\\x.als"})").text.startsWith ("[invalid]"), "run_command can't import a Live set (it closes the session)");
         }
 
         app.reset();

@@ -330,6 +330,24 @@ juce::var toolList()
   "description": "Change the session's tempo. MIDI and hits follow it (they're in beats). If the session has audio clips, nothing changes yet: taw asks the user whether the audio stays where it is in time or moves with the beats, and this answers needs-user. Call again (or read get_session's tempo_request) to see what they chose; declined means they said no.",
   "inputSchema": { "type": "object", "properties": {
     "bpm": { "type": "number", "description": "20-400" } }, "required": ["bpm"] }
+},
+{
+  "name": "list_sessions",
+  "description": "The sessions taw knows (recent ones and those in the sessions folder, newest first), the templates new_session can start from, which session is open (none: taw is on its session screen), and a session switch waiting on the user (session_request). Works with no session open.",
+  "inputSchema": { "type": "object", "properties": {} }
+},
+{
+  "name": "new_session",
+  "description": "Make a new session in the sessions folder (its folder gets today's date, as taw names new sessions) from a template, and open it in taw. With no session open it happens now; answered while it opens, and edits work once it's in (busy until then). With one open, taw asks the user (save and switch, switch without saving, or stay) and this answers needs-user: call again with the same name to see what they chose; declined means they said no. Never closes or saves anything without the user.",
+  "inputSchema": { "type": "object", "properties": {
+    "name": { "type": "string", "description": "The session's name, e.g. \"bass idea\"." },
+    "template": { "type": "string", "description": "A template from list_sessions (default: taw's own default)." } }, "required": ["name"] }
+},
+{
+  "name": "open_session",
+  "description": "Open an existing session in taw: by its folder, or its name (as list_sessions gives it). Asks the user as new_session does when another session is open.",
+  "inputSchema": { "type": "object", "properties": {
+    "session": { "type": "string", "description": "Its folder (a full path) or its name." } }, "required": ["session"] }
 }
 ])JSON");
     return tools;
@@ -432,6 +450,11 @@ bool Bridge::connect (juce::String& error)
                 break;
             }
         }
+
+        // None has a session open: the newest taw, on its session screen (new_session and
+        // open_session work there; the rest say no-session).
+        if (pick == nullptr && hint.isEmpty() && ! all.empty())
+            pick = &all.front();
 
         if (pick == nullptr)
         {

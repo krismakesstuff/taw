@@ -195,6 +195,33 @@ public:
     void answerTempoAsk (TempoChoice);
     bool handleTempoAskKey (const Key&);
 
+    // An agent's new_session / open_session: on the session screen it happens at once; over an
+    // open session a box asks (save and switch, switch without saving, or stay). The agent
+    // never closes or saves anything itself.
+    struct SessionAsk
+    {
+        juce::String agent;
+        bool create = false;   // new_session: made when the user says yes
+        juce::String asked;    // the name or folder the agent gave (to know its retry)
+        juce::File folder;     // the session to open (or to make)
+        juce::String templateName;
+    };
+    struct SessionOutcome
+    {
+        juce::String agent, asked;
+        bool create = false, applied = false;
+        juce::File folder;
+        double when = 0.0; // ms
+    };
+    std::optional<SessionAsk> sessionAsk;         // the box is up
+    std::optional<SessionOutcome> sessionOutcome; // the last answer, for the agent's retry
+    // new_session / open_session as the tools call it: "" when it's under way, else why not.
+    Result switchSession (const SessionAsk&); // no session open: now; else asks
+    void answerSessionAsk (juce::juce_wchar choice); // 's', 'o', 'd' (or enter: open), 0 stays
+    bool handleSessionAskKey (const Key&);
+    Result makeSessionFolder (const SessionAsk&); // new_session: the session on disk, from its template
+    juce::File newSessionFolderFor (const juce::String& name) const; // where new_session makes one
+
     Result record (const std::vector<int>& tracks); // empty = whatever is armed
     Result punch(); // while playing: recording on or off, playback carries on
     juce::int64 countInSamples (juce::int64 from, bool forRecording) const;

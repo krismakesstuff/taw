@@ -656,6 +656,7 @@ struct AgentTools
         o->setProperty ("cursor_beat", tidy ((double) app.cursor / spb()));
         o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (session().track (app.focused)[ids::uid]) : juce::var ("mix"));
         o->setProperty ("tempo_request", tempoRequest());
+        o->setProperty ("session_request", sessionRequest());
 
         if (! l.range.isEmpty())
         {
@@ -723,6 +724,10 @@ struct AgentTools
 
         if (usersOnly().contains (shape.verb))
             return Answer::fail ("invalid", shape.verb.quoted() + " is left to the user (agents can't save, play, undo, bounce, open windows or use the clipboard)");
+
+        // A Live set comes in as a session of its own, closing this one.
+        if (shape.verb == "import" && shape.args.joinIntoString (" ").containsIgnoreCase (".als"))
+            return Answer::fail ("invalid", "importing a Live set closes this session: the user does that (or new_session for a session of your own)");
 
         if ((shape.verb == "inst" || shape.verb == "fx" || shape.verb == "ins") && shape.args.isEmpty())
             return Answer::fail ("invalid", shape.verb + " alone opens a picker for the user: name the plugin (" + shape.verb + " vital)");
@@ -1120,9 +1125,182 @@ struct AgentTools
                          return r.ok ? Answer::good (r.message) : Answer::fail ("failed", r.message); });
     }
 
+    // Sessions: list, make, open. Switching away from an open session is the user's to say
+    // (App::answerSessionAsk); on the session screen it just happens.
+    // A taw opened straight to a session hasn't read its templates yet.
+    const std::vector<Template>& templates() const
+    {
+        if (app.templates.empty())
+            app.templates = loadTemplates();
+
+        return app.templates;
+    }
+
+    std::vector<juce::File> knownSessions() const
+    {
+        auto all = loadRecentSessions();
+
+        for (const auto& parent : { app.sessionsFolder, app.newSessionParent,
+                                    app.session != nullptr ? app.session->folder().getParentDirectory() : juce::File() })
+            if (parent != juce::File() && parent.isDirectory())
+                for (const auto& dir : parent.findChildFiles (juce::File::findDirectories, false))
+                    if (Session::existsIn (dir) && std::find (all.begin(), all.end(), dir) == all.end())
+                        all.push_back (dir);
+
+        std::stable_sort (all.begin(), all.end(), [] (const auto& a, const auto& b)
+                          { return a.getChildFile ("session.json").getLastModificationTime() > b.getChildFile ("session.json").getLastModificationTime(); });
+        return all;
+    }
+
+    juce::File findSession (const juce::String& what) const
+    {
+        if (juce::File::isAbsolutePath (what) && Session::existsIn (juce::File (what)))
+            return juce::File (what);
+
+        const auto all = knownSessions();
+
+        for (const auto& dir : all)
+            if (dir.getFileName().equalsIgnoreCase (what))
+                return dir;
+
+        for (const auto& dir : all) // the newest whose name has it
+            if (dir.getFileName().containsIgnoreCase (what))
+                return dir;
+
+        return {};
+    }
+
+    juce::var sessionRequest() const
+    {
+        if (const auto& ask = app.sessionAsk)
+            return object ({ { "status", "waiting for the user" }, { "agent", ask->agent }, { "session", ask->folder.getFullPathName() },
+                             { "new", ask->create } });
+
+        if (const auto& done = app.sessionOutcome)
+            return object ({ { "status", done->applied ? "applied" : "declined" }, { "agent", done->agent },
+                             { "session", done->folder.getFullPathName() }, { "new", done->create } });
+
+        return {};
+    }
+
+    Answer listSessions() const
+    {
+        juce::Array<juce::var> sessions, templates;
+        const auto open = app.session != nullptr ? app.session->folder() : juce::File();
+
+        for (const auto& dir : knownSessions())
+            sessions.add (object ({ { "name", dir.getFileName() }, { "folder", dir.getFullPathName() },
+                                    { "saved", dir.getChildFile ("session.json").getLastModificationTime().toISO8601 (true) },
+                                    { "open", dir == open } }));
+
+        for (const auto& t : this->templates())
+            templates.add (t.name);
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("open", open != juce::File() ? juce::var (open.getFullPathName()) : juce::var());
+        o->setProperty ("new_sessions_go_in", app.newSessionFolderFor ("x").getParentDirectory().getFullPathName());
+        o->setProperty ("sessions", sessions);
+        o->setProperty ("templates", templates);
+        o->setProperty ("session_request", sessionRequest());
+        const auto n = sessions.size();
+        return Answer::good (juce::String (n) + (n == 1 ? " session" : " sessions") + (open != juce::File() ? ", " + open.getFileName() + " open" : juce::String (", none open")),
+                             juce::var (o));
+    }
+
+    Answer switchTo (bool create)
+    {
+        const auto asked = arg (create ? "name" : "session").toString().trim();
+
+        if (asked.isEmpty())
+            return Answer::fail ("invalid", create ? "name the session" : "which session? its folder or name (list_sessions)");
+
+        if (app.sessionAsk.has_value())
+            return Answer::fail ("needs-user", "taw is asking the user about " + app.sessionAsk->agent + L"'s switch to " + app.sessionAsk->folder.getFileName()
+                                                   + L" \x00b7 call again in a moment");
+
+        // A call again after the user answered.
+        const auto& last = app.sessionOutcome;
+        const auto openFolder = app.session != nullptr ? app.session->folder() : juce::File();
+
+        if (last.has_value() && last->agent == call.agent && last->asked == asked && last->create == create
+            && juce::Time::getMillisecondCounterHiRes() - last->when < 120000.0)
+        {
+            if (! last->applied)
+                return Answer::fail ("declined", "the user said no to opening " + last->folder.getFileName() + ": ask them in the chat before trying again");
+
+            const auto data = object ({ { "session", last->folder.getFullPathName() } });
+
+            if (app.opening != nullptr || app.closing != nullptr)
+                return Answer::good ("opening " + last->folder.getFileName() + L" (the user said yes) \x00b7 edits work once it's in", data);
+
+            if (openFolder == last->folder)
+                return Answer::good (last->folder.getFileName() + " is open", data);
+        }
+
+        if (app.engine.isRolling() || app.recording)
+            return Answer::fail ("playing", juce::String (app.recording ? "taw is recording" : "taw is playing") + L" \x00b7 try again when it stops");
+
+        if (app.opening != nullptr || app.closing != nullptr || app.closePrompt.has_value() || app.tempoAsk.has_value())
+            return Answer::fail ("busy", "the session is opening or closing, or taw is asking the user something");
+
+        if (app.import != nullptr || app.bounce != nullptr)
+            return Answer::fail ("busy", juce::String (app.import != nullptr ? "an import" : "a bounce") + L" is running \x00b7 try again in a moment");
+
+        App::SessionAsk ask { call.agent, create, asked, {}, arg ("template").toString().trim() };
+
+        if (create)
+        {
+            templates(); // makeSessionFolder starts from one
+
+            if (ask.templateName.isNotEmpty()
+                && std::none_of (templates().begin(), templates().end(), [&] (const auto& t) { return t.name.equalsIgnoreCase (ask.templateName); }))
+            {
+                juce::StringArray names;
+
+                for (const auto& t : templates())
+                    names.add (t.name);
+
+                return Answer::fail ("invalid", "no template called " + ask.templateName.quoted() + " (there are: " + names.joinIntoString (", ") + ")");
+            }
+
+            ask.folder = app.newSessionFolderFor (asked);
+        }
+        else
+        {
+            ask.folder = findSession (asked);
+
+            if (ask.folder == juce::File())
+                return Answer::fail ("invalid", "no session called " + asked.quoted() + " (list_sessions lists them)");
+
+            if (ask.folder == openFolder)
+                return Answer::good (ask.folder.getFileName() + " is already open", object ({ { "session", ask.folder.getFullPathName() } }));
+        }
+
+        const bool now = app.session == nullptr;
+
+        if (const auto r = app.switchSession (ask); ! r.ok)
+            return Answer::fail ("failed", r.message);
+
+        if (now)
+            return Answer::good ((create ? "made " : "opening ") + ask.folder.getFileName() + (create ? ", opening it" : "")
+                                     + L" \x00b7 edits work once it's in (busy until then)",
+                                 object ({ { "session", ask.folder.getFullPathName() } }));
+
+        return Answer::fail ("needs-user", "taw is asking the user whether to " + juce::String (create ? "make and open " : "switch to ") + ask.folder.getFileName()
+                                               + " (" + openFolder.getFileName() + L" is open) \x00b7 call again with the same "
+                                               + (create ? "name" : "session") + " in a moment to see what they chose");
+    }
+
     Answer run()
     {
         const auto& tool = call.tool;
+
+        if (tool == "list_sessions")
+            return listSessions();
+        if (tool == "new_session")
+            return switchTo (true);
+        if (tool == "open_session")
+            return switchTo (false);
 
         if (tool == "get_session")
             return getSession();
@@ -1228,6 +1406,126 @@ bool App::handleTempoAskKey (const Key& k)
     return true;
 }
 
+//==============================================================================
+// An agent's new_session / open_session. Never reuses a folder: a second "bass idea" today is
+// "bass idea 10.30.26 2".
+juce::File App::newSessionFolderFor (const juce::String& name) const
+{
+    const auto parent = sessionsFolder != juce::File() && sessionsFolder.isDirectory() ? sessionsFolder
+                        : newSessionParent != juce::File()                            ? newSessionParent
+                        : session != nullptr                                          ? session->folder().getParentDirectory()
+                                                                                      : juce::File::getCurrentWorkingDirectory();
+    const auto base = juce::File::createLegalFileName (dateSessionNames ? datedName (name.trim()) : name.trim());
+    auto dir = parent.getChildFile (base);
+
+    for (int n = 2; dir.exists(); ++n)
+        dir = parent.getChildFile (base + " " + juce::String (n));
+
+    return dir;
+}
+
+Result App::makeSessionFolder (const SessionAsk& ask)
+{
+    const Template* from = nullptr;
+
+    for (const auto& t : templates)
+        if (ask.templateName.isNotEmpty() ? t.name.equalsIgnoreCase (ask.templateName) : &t == &templates[(size_t) defaultTemplateRow()])
+            from = &t;
+
+    if (ask.folder.exists())
+        return Result::fail (ask.folder.getFullPathName() + " is there already");
+
+    juce::String error;
+
+    if (Session::create (ask.folder, from != nullptr ? from->tree : juce::ValueTree(), newRate, error) == nullptr)
+        return Result::fail (error);
+
+    return Result::good();
+}
+
+Result App::switchSession (const SessionAsk& ask)
+{
+    if (session != nullptr)
+    {
+        sessionAsk = ask; // the box asks
+        return Result::good();
+    }
+
+    if (ask.create)
+        if (auto r = makeSessionFolder (ask); ! r.ok)
+            return r;
+
+    sessionOutcome = SessionOutcome { ask.agent, ask.asked, ask.create, true, ask.folder, juce::Time::getMillisecondCounterHiRes() };
+    startOpening (ask.folder);
+    return Result::good();
+}
+
+// The session box: s save and switch (and bounce last-saved, as closing does), o save only,
+// d switch without saving, 0 stay. With nothing unsaved, any yes just switches.
+void App::answerSessionAsk (juce::juce_wchar choice)
+{
+    if (! sessionAsk.has_value())
+        return;
+
+    const auto ask = *sessionAsk;
+    sessionAsk.reset();
+    SessionOutcome done { ask.agent, ask.asked, ask.create, false, ask.folder, juce::Time::getMillisecondCounterHiRes() };
+    sessionOutcome = done;
+
+    if (choice == 0 || session == nullptr)
+    {
+        say (Result::good ("staying in " + (session != nullptr ? session->name() : juce::String ("taw")) + " (" + ask.agent + " wanted "
+                           + ask.folder.getFileName() + ")"));
+        return;
+    }
+
+    if (bounce != nullptr || import != nullptr)
+    {
+        say (Result::fail (L"wait for the bounce or import to finish (esc cancels it)"));
+        return;
+    }
+
+    if (ask.create)
+        if (auto r = makeSessionFolder (ask); ! r.ok)
+        {
+            say (Result::fail ("couldn't make " + ask.folder.getFileName() + ": " + r.message));
+            return;
+        }
+
+    sessionOutcome->applied = true;
+    openAfterClose = ask.folder;
+    openAfterCloseNote = ask.agent + (ask.create ? ": made " : ": opening ") + ask.folder.getFileName();
+
+    if (! hasUnsavedChanges())
+        startClosing (false, false);
+    else if (choice == 'o')
+        startClosing (false, true, false);
+    else
+        startClosing (false, choice == 's');
+}
+
+bool App::handleSessionAskKey (const Key& k)
+{
+    if (! sessionAsk.has_value())
+        return false;
+
+    const auto c = k.code == Key::Char ? juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch) : 0;
+    const bool changes = hasUnsavedChanges();
+
+    if (k.code == Key::Escape || c == 'c')
+        answerSessionAsk (0);
+    else if (changes && (k.code == Key::Enter || c == 's' || c == 'y'))
+        answerSessionAsk ('s');
+    else if (changes && (c == 'o' || c == 'd' || c == 'n'))
+        answerSessionAsk (c == 'n' ? 'd' : c);
+    else if (! changes && (k.code == Key::Enter || c == 'y' || c == 'o'))
+        answerSessionAsk ('o');
+    else if (! changes && c == 'n')
+        answerSessionAsk (0);
+
+    return true;
+}
+
 // "agents" / "agents on" / "agents off": whether taw listens for agents (settings.json, every
 // session). Off: no socket and no listing, so taw --mcp says agents are off.
 Result App::agentsCommand (const juce::String& arg)
@@ -1244,6 +1542,7 @@ Result App::agentsCommand (const juce::String& arg)
     {
         agentServer.reset();
         tempoAsk.reset();
+        sessionAsk.reset();
         return Result::good (L"agents off \x00b7 taw --mcp can't reach this taw (agents on lets them in)");
     }
 
@@ -1279,7 +1578,7 @@ agents::Answer App::agentCall (const agents::Call& call)
 void App::noteAgentCall (const agents::Call& call, const agents::Answer& answer)
 {
     AgentSeen seen { call.agent, call.tool, answer.text, answer.ok ? juce::String() : answer.code,
-                     ! call.tool.startsWith ("get_") && call.tool != "tempo_request",
+                     ! call.tool.startsWith ("get_") && ! call.tool.startsWith ("list_"),
                      juce::Time::getMillisecondCounterHiRes() };
 
     if (answer.code == "waiting") // an import under way: noted again when it's answered
@@ -1324,6 +1623,7 @@ void App::pollAgents()
         recentEdits.watch ({});
         tempoAsk.reset();
         tempoOutcome.reset();
+        sessionAsk.reset(); // nothing to switch away from (the outcome stays, for the agent's retry)
     }
     else if (! recentEdits.watching (session->tree()))
         recentEdits.watch (session->tree());

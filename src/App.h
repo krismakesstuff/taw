@@ -854,6 +854,7 @@ private:
 public:
     std::vector<juce::ValueTree> pluginQueue; // plugins still to load after opening (one a frame)
     bool pluginPending (const juce::ValueTree& node) const;
+    bool editorOpen (const juce::ValueTree& node) const; // its plugin window is showing (an instrument track or an INSERT)
     bool loadNextPlugin(); // the most wanted one; false when none are waiting
 
 private:

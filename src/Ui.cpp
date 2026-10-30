@@ -1554,12 +1554,17 @@ void Ui::drawTimeline (App& app)
             chip ("smp", typeColour);
         else if (instrumentTrack)
         {
-            // "inst", red when its plugin didn't load; the plugin's name after the flags.
+            // "inst", red when its plugin didn't load; the plugin's name after the flags. While its
+            // window is open both light up in the plugin colour (as "keys → plugin" does), so with
+            // several of the same plugin it's plain which one the window belongs to.
             const auto problem = app.instrumentProblem (i);
             const bool pending = app.pluginPending (t);
-            chip ("inst", problem.isNotEmpty() ? colour::error : pending ? colour::dim : typeColour);
+            const bool open = problem.isEmpty() && app.editorOpen (t);
+            chip ("inst", problem.isNotEmpty() ? colour::error : pending ? colour::dim : open ? colour::accent : typeColour);
 
-            if (twoRows)
+            if (twoRows && open)
+                canvas.text (9, y + 1, L"\x25b8 " + t[ids::pluginName].toString(), 16, colour::accent, true, fill ? 6 : leftW - 10);
+            else if (twoRows)
                 canvas.text (9, y + 1, problem.isNotEmpty() ? problem : pending ? juce::String (L"loading\x2026") : t[ids::pluginName].toString(),
                              problem.isNotEmpty() ? colour::error : colour::dim, bg, false, fill ? 6 : leftW - 10);
         }
@@ -1815,12 +1820,15 @@ void Ui::drawTimeline (App& app)
 
             for (int k = 0; k < Session::numSends; ++k)
             {
-                const int x = ioX + ioSlots + k * ioSlotW, cbg = cellBg (App::ioFirstInsert + k);
                 const auto insert = Session::insert (t, k);
+                const bool open = insert.isValid() && app.editorOpen (insert); // lit like an open instrument
+                const int x = ioX + ioSlots + k * ioSlotW, cbg = open ? colour::accent : cellBg (App::ioFirstInsert + k);
                 canvas.fill (x - 1, y, ioSlotW, L' ', -1, cbg);
 
                 if (! insert.isValid())
                     canvas.put (x, y, L'\x00b7', colour::faint, cbg);
+                else if (open)
+                    canvas.text (x, y, insert[ids::pluginName].toString(), 16, cbg, true, ioSlotW - 1);
                 else
                     canvas.text (x, y, insert[ids::pluginName].toString(),
                                  app.insertProblem (insert).isNotEmpty() ? colour::error
@@ -2111,12 +2119,15 @@ void Ui::drawTimeline (App& app)
             for (int k = 0; k < Session::numSends; ++k)
             {
                 const int x = ioX + ioSlots + k * ioSlotW;
-                const int cbg = inColumn && app.ioCell == App::ioFirstInsert + k ? colour::selBg : bg;
                 const auto insert = Session::insert (s.tree(), k);
+                const bool open = insert.isValid() && app.editorOpen (insert);
+                const int cbg = open ? colour::accent : inColumn && app.ioCell == App::ioFirstInsert + k ? colour::selBg : bg;
                 canvas.fill (x - 1, y, ioSlotW, L' ', -1, cbg);
 
                 if (! insert.isValid())
                     canvas.put (x, y, L'\x00b7', colour::faint, cbg);
+                else if (open)
+                    canvas.text (x, y, insert[ids::pluginName].toString(), 16, cbg, true, ioSlotW - 1);
                 else
                     canvas.text (x, y, insert[ids::pluginName].toString(),
                                  app.insertProblem (insert).isNotEmpty() ? colour::error

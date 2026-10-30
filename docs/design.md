@@ -566,7 +566,7 @@ Stereo one. Typed names pick the same way.
   keep reaching taw (not while a menu is open or a button is held; a plugin's own dialogs, like
   naming a preset, keep it). `Ctrl+\` (or `ed close`) closes every plugin window from anywhere. Double-click a plugin window's title bar to let it keep the
   keyboard (typing into the plugin): its title and the transport bar say `keys → plugin` until
-  you click the terminal, close it, or double-click the title again. Windows only. Loading an effect opens its window. One window at a time: opening
+  you click the terminal, close it, or double-click the title again. Windows only. Loading an effect opens its window, and so does picking an instrument (`inst`), to choose its sound. While a plugin's window is open, the track shows which plugin it is in the plugin colour (as `keys → plugin` is): the `inst` label and the plugin's name on an instrument track, the insert's slot in the routing column, so with several of the same plugin it's plain which one you're changing. One window at a time: opening
   another closes the first, and while one is open it follows you as you move between inserts.
 - **Signal flow.** Source (clips, hits, instrument, input) → inserts A to E → pre-fader sends →
   fader → post-fader sends → output. Bypassed inserts are skipped. Effects run while stopped

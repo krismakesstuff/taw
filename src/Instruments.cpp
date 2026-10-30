@@ -144,6 +144,15 @@ bool App::pluginPending (const juce::ValueTree& node) const
     return std::find (pluginQueue.begin(), pluginQueue.end(), node) != pluginQueue.end();
 }
 
+bool App::editorOpen (const juce::ValueTree& node) const
+{
+    for (const auto& in : hosted)
+        if (in.node == node)
+            return in.slot != nullptr && in.slot->editorShowing();
+
+    return false;
+}
+
 bool App::loadNextPlugin()
 {
     // Gone (undo) or loaded some other way meanwhile: nothing to do for those.
@@ -607,14 +616,18 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     focusTrack (index);
     rebuildGraph();
 
+    // Its window opens straight away, to pick a sound (not for scripts: taw --exec has no screen).
+    const bool opened = interactive && toggleEditor (index).ok;
+    const auto window = opened ? L" \x00b7 its window is open (ed closes it)" : L" \x00b7 ed opens its window";
+
     auto msg = "track " + trackLabel (index) + " plays " + desc.name;
     const bool armed = track[ids::armed];
 
     if (midiInputs != nullptr && ! midiInputs->opening() && midiInputs->names().isEmpty())
-        return Result::good (msg + L" \x00b7 no MIDI input found yet (plug one in) \x00b7 ed opens its window");
+        return Result::good (msg + L" \x00b7 no MIDI input found yet (plug one in)" + window);
 
     return Result::good (msg + (armed ? L" \x00b7 armed: play your controller" : L" \x00b7 shift+R arms it for your controller")
-                         + L" \x00b7 ed opens its window \x00b7 ctrl+space records");
+                         + window + L" \x00b7 ctrl+space records");
 }
 
 // import song.mid: each of the file's tracks (each channel, in a one-track file) becomes an

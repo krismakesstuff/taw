@@ -1700,7 +1700,12 @@ int main (int argc, char** argv)
             check (r.error && r.text.startsWith ("[playing]") && s.numTracks() == 3, "add_track while playing refused");
             const auto read = tool ("get_session", "{}");
             check (! read.error && (bool) read.data["playing"], "get_session while playing");
+            const auto screen = app->screenText (120, 12);
+            check (app->agentHeld == 1 && screen.contains ("mcptest waiting") && screen.contains ("held: waiting for stop"),
+                   "the transport and title line show the agent held off");
             app->engine.stop();
+            app->pollAgents();
+            check (app->agentHeld == 0 && app->message.contains ("mcptest tried to edit once while it played"), "stopping says it can edit now: " + app->message);
         }
 
         // A sample track with a sound: answered once the import is in.

@@ -486,8 +486,10 @@ void Ui::drawTitle (App& app)
         x = canvas.text (x, 0, L" \x25b8 " + s->name(), colour::text, -1, true);
 
         if (app.unsaved)
-            canvas.text (x + 1, 0, "unsaved", colour::dim); // ctrl+s saves
+            x = canvas.text (x + 1, 0, "unsaved", colour::dim); // ctrl+s saves
     }
+
+    int right = canvas.width() - 1; // where the MIDI readout starts
 
     // MIDI inputs on the right, with a light that blinks as messages come in.
     if (app.midiInputs != nullptr)
@@ -506,9 +508,71 @@ void Ui::drawTitle (App& app)
                                                : "midi " + juce::String (names.size()) + " in (midi: choose)";
         const int lx = canvas.width() - 3 - std::min (label.length(), 40);
         canvas.text (lx, 0, label, names.isEmpty() ? colour::faint : colour::dim, -1, false, 40);
+        right = lx;
 
         if (! names.isEmpty())
             canvas.put (canvas.width() - 2, 0, L'\x25cf', now - midiLitAt < 150.0 ? colour::note : colour::faint);
+    }
+
+    // Agents (taw --mcp), left of the MIDI: who's connected, a light that blinks with each call,
+    // and what their last edit did for a while after (held off by playing, hands off, in).
+    {
+        struct Piece { juce::String text; int fg; };
+        std::vector<Piece> pieces;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const int connected = app.agentServer != nullptr ? app.agentServer->connections() : 0;
+
+        if (! app.agentsOn)
+            pieces.push_back ({ "agents off", colour::faint });
+        else if (app.agentServer == nullptr)
+        {
+            if (app.interactive) // headless taws don't listen
+                pieces.push_back ({ "agents: no socket", colour::error });
+        }
+        else if (! app.agentLastCall.has_value())
+            pieces.push_back ({ connected > 0 ? "agent connected" : "agents on", connected > 0 ? colour::dim : colour::faint });
+        else
+        {
+            const auto& last = *app.agentLastCall;
+            pieces.push_back ({ L"\x25cf ", now - last.when < 150.0 ? colour::note : connected > 0 ? colour::accent : colour::faint });
+            pieces.push_back ({ last.agent, connected > 0 ? colour::dim : colour::faint });
+
+            if (app.agentLastEdit.has_value() && now - app.agentLastEdit->when < 10000.0)
+            {
+                const auto& e = *app.agentLastEdit;
+                const auto rolling = app.engine.isRolling() || app.recording;
+
+                if (e.code.isEmpty())
+                    pieces.push_back ({ L"  \x2713 " + e.text, colour::dim });
+                else if (e.code == "playing")
+                    pieces.push_back ({ rolling ? L"  held: waiting for stop" : L"  held while playing \x00b7 it can edit now", colour::meterYellow });
+                else if (e.code == "working")
+                    pieces.push_back ({ L"  working\x2026", colour::accent });
+                else if (e.code == "hands-off")
+                    pieces.push_back ({ L"  hands off: " + e.text, colour::meterYellow });
+                else if (e.code == "needs-user")
+                    pieces.push_back ({ L"  asks you", colour::accent });
+                else
+                    pieces.push_back ({ L"  \x2717 " + e.text, colour::error });
+            }
+        }
+
+        int total = 0;
+
+        for (const auto& p : pieces)
+            total += p.text.length();
+
+        const int room = right - 3 - (x + 3);
+
+        if (room >= 10)
+        {
+            int ax = right - 3 - std::min (total, room);
+            const int end = right - 3;
+
+            for (const auto& p : pieces)
+                if (ax < end)
+                    ax = canvas.text (ax, 0, p.text, p.fg, -1, false, end - ax);
+        }
     }
 }
 
@@ -634,6 +698,14 @@ void Ui::drawTransport (App& app)
     {
         gap();
         add (L" \x25cf WRITE ", 231, rolling ? colour::rec : colour::recBg, true);
+    }
+
+    // An agent tried to edit while this plays: it gets in once it stops.
+    if (app.agentHeld > 0 && (rolling || app.recording))
+    {
+        gap();
+        add (L" \x25cf " + app.agentHeldBy + " waiting" + (app.agentHeld > 1 ? L" \x00d7" + juce::String (app.agentHeld) : juce::String()) + " ",
+             16, colour::meterYellow, true);
     }
 
     // Plugins still loading after the session opened.

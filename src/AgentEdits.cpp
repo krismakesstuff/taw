@@ -1276,10 +1276,46 @@ agents::Answer App::agentCall (const agents::Call& call)
     return AgentTools { *this, call }.run();
 }
 
+void App::noteAgentCall (const agents::Call& call, const agents::Answer& answer)
+{
+    AgentSeen seen { call.agent, call.tool, answer.text, answer.ok ? juce::String() : answer.code,
+                     ! call.tool.startsWith ("get_") && call.tool != "tempo_request",
+                     juce::Time::getMillisecondCounterHiRes() };
+
+    if (answer.code == "waiting") // an import under way: noted again when it's answered
+        seen.code = "working";
+
+    if (seen.edit && answer.code == "playing")
+    {
+        ++agentHeld;
+        agentHeldBy = call.agent;
+    }
+
+    agentLastCall = seen;
+
+    if (seen.edit)
+        agentLastEdit = seen;
+}
+
 void App::pollAgents()
 {
     if (agentServer == nullptr)
         return;
+
+    // Stopped after an agent was held off: say so once, so the user knows it can edit now.
+    const bool rolling = engine.isRolling() || recording;
+
+    if (agentRolling && ! rolling && agentHeld > 0)
+    {
+        say (Result::good (agentHeldBy + " tried to edit " + (agentHeld == 1 ? juce::String ("once") : juce::String (agentHeld) + " times")
+                           + L" while it played \x00b7 it can edit now"));
+        agentHeld = 0;
+    }
+
+    if (! agentRolling && rolling)
+        agentHeld = 0;
+
+    agentRolling = rolling;
 
     agentServer->setSession (session != nullptr ? session->folder() : juce::File(), session != nullptr ? session->name() : juce::String());
 
@@ -1302,6 +1338,7 @@ void App::pollAgents()
             return;
 
         agentWaiting.reset();
+        noteAgentCall (call, *done);
         agentServer->answer (call, *done);
     }
 
@@ -1316,6 +1353,8 @@ void App::pollAgents()
             break;
 
         const auto answer = agentCall (*call);
+
+        noteAgentCall (*call, answer);
 
         if (answer.code != "waiting")
             agentServer->answer (*call, answer);

@@ -769,6 +769,12 @@ client) work in the one open in a running taw while you record and audition in i
   Each call is one undo step named for the agent ("claude-code: add track Bass"), and its line
   shows on the status line. Agents never save; their edits wait in `unsaved\` like yours. Your
   cursor, focus, selection and view stay where they were.
+- **Readout:** the title line, left of the MIDI, says `agents on` (`agents off`), then the
+  agent's name once it calls, with a light that blinks on each call, and for 10 s what its last
+  edit did: ✓ and its line, `held: waiting for stop`, `hands off: ...`, `working...` (an import),
+  `asks you` (the tempo box), or ✗ and why. An edit refused while playing also puts a yellow
+  `● claude-code waiting ×3` chip on the transport; on stop the status line says it tried and can
+  edit now.
 - **On or off:** `agents` / `agents on` / `agents off` (and a row in `project`), kept in
   `settings.json` for every session, on by default. Off, nothing listens, and `taw --mcp` says
   agents are turned off.

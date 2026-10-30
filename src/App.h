@@ -164,6 +164,20 @@ public:
     bool agentsOn = true;                      // settings.json "agents": the socket at all
     Result agentsCommand (const juce::String& arg); // "agents", "agents on", "agents off"
 
+    // What the agents are doing, for the readout on the title line, and the chip on the
+    // transport while an edit is held off by playing.
+    struct AgentSeen
+    {
+        juce::String agent, tool, text, code; // code: why it was refused ("" when it went in)
+        bool edit = false;                    // a change, not a read
+        double when = 0.0;                    // ms
+    };
+    std::optional<AgentSeen> agentLastCall, agentLastEdit;
+    int agentHeld = 0;          // edits refused for playing since it started
+    juce::String agentHeldBy;
+    bool agentRolling = false;  // as pollAgents last saw it
+    void noteAgentCall (const agents::Call&, const agents::Answer&);
+
     // An agent's new tempo on a session with audio clips waits for the user to say what
     // happens to the audio (the tempo box). MIDI and hits follow the beats either way.
     enum class TempoChoice { cancel, keepInTime, moveWithBeats };

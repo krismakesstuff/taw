@@ -737,7 +737,7 @@ public:
     bool recording = false, helpVisible = false;
     // Help is in pages (tabs), so it fits a small screen: left/right, tab or 1-9 turn them.
     int helpPage = 0;
-    static constexpr int helpPages = 7;
+    static constexpr int helpPages = 9;
     bool handleHelpKey (const Key&);
 
     // "project": the session's settings in a panel like help. Up/down choose, left/right change,

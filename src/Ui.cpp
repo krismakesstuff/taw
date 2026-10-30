@@ -2582,7 +2582,8 @@ void Ui::drawHelp (App& app)
                 { L"save / close session", L"ctrl+s / w" },
                 { L"quit (asks to save)", L"ctrl+q  exit" },
                 { L"tempo (grid: on/off)", L"bpm 92" },
-                { L"the session's settings", L"project" } } } },
+                { L"the session's settings", L"project" },
+                { L"let agents edit (MCP)", L"agents on/off" } } } },
           { { L"SETUP", {
                 { L"audio device / driver", L"dev  panel" },
                 { L"themes (also: grey)", L"dark  light" },

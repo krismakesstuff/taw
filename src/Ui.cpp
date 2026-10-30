@@ -2096,8 +2096,10 @@ void Ui::drawTimeline (App& app)
                 canvas.put (2, y + r, r == 0 ? (lastLane ? L'\x2514' : L'\x251c') : (lastLane ? L' ' : L'\x2502'), colour::faint, bg);
             }
 
-            const auto nameEnd = canvas.text (indent, y, app.automationName (t, param, false), focusedLane ? colour::text : colour::dim, bg, focusedLane,
-                                              leftW - indent - 1 - (off ? 4 : 0));
+            const int laneAgent = agentLook (app, t, "auto " + param); // an agent just wrote it
+            const auto nameEnd = canvas.text (indent, y, app.automationName (t, param, false),
+                                              laneAgent == 2 ? colour::agentText : laneAgent == 1 ? colour::agent : focusedLane ? colour::text : colour::dim,
+                                              laneAgent == 2 ? colour::agent : bg, focusedLane || laneAgent > 0, leftW - indent - 1 - (off ? 4 : 0));
 
             if (off)
                 canvas.text (nameEnd + 1, y, "OFF", colour::rec, bg, true);

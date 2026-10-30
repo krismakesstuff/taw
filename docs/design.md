@@ -781,6 +781,12 @@ client) work in the one open in a running taw while you record and audition in i
   `asks you` (the tempo box), or ✗ and why. An edit refused while playing also puts a yellow
   `● claude-code waiting ×3` chip on the transport; on stop the status line says it tried and can
   edit now.
+- **Automation:** `write_automation` (a track or `mix`; `vol`, `pan`, `mute`, `send a`-`e`, or a
+  plugin parameter by name or by `get_parameters`' param; points as beat and value in the lane's
+  units, or text as `pt` takes it). By default it replaces only the span it writes; `replace:
+  all` the whole lane. The lane is made if needed and opened under its track (not over open
+  playlists), and its name lights up like other agent edits. `get_track` and `get_session`
+  (`mix_automation`) read lanes back.
 - **Sessions:** `list_sessions` (recent and in the sessions folder, the templates, which is
   open), `new_session` (a name, dated as yours are, in the sessions folder, from a template) and
   `open_session` (a folder or name). On the session screen they happen at once (`taw --mcp` with

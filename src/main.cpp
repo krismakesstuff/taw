@@ -1573,7 +1573,7 @@ int main (int argc, char** argv)
                 if (t["inputSchema"]["type"].toString() == "object")
                     names.add (t["name"].toString());
 
-            check (names.size() == 13 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits") && names.contains ("set_tempo")
+            check (names.size() == 15 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits") && names.contains ("set_tempo")
                        && names.contains ("new_session"),
                    "tools/list: " + names.joinIntoString (", "));
             check (method ("ping", "{}")["result"].isObject(), "ping");
@@ -1867,6 +1867,55 @@ int main (int argc, char** argv)
             check (juce::approximatelyEqual (s.bpm(), 80.0) && (juce::int64) audioClip[taw::ids::start] == moved, "t: 80 bpm, the clip stays where it is in time");
             const auto read = tool ("get_session", "{}");
             check (read.data["tempo_request"]["status"].toString() == "applied", "get_session: tempo_request applied");
+        }
+
+        // Automation: points on a lane (made, shown, lit), a span replaced, read back.
+        {
+            const auto made = tool ("add_track", R"({"kind":"audio","name":"Pad"})");
+            const auto id = made.data["track"].toString();
+            const auto pad = s.track (s.numTracks() - 1);
+            auto pointsOf = [&] (const juce::String& param)
+            {
+                juce::StringArray out;
+
+                for (const auto& p : taw::Session::points (taw::Session::automation (pad, param)))
+                    out.add (juce::String ((double) p[taw::ids::beat], 2) + ":" + juce::String ((double) p[taw::ids::val], 2));
+
+                return out.joinIntoString (" ");
+            };
+
+            app->agentMarks.clear();
+            const auto vol = tool ("write_automation", "{\"track\":\"" + id + R"(","param":"volume","points":[{"beat":0,"value":-6},{"beat":4,"value":0}]})");
+            check (! vol.error && pointsOf ("vol") == "0.00:-6.00 4.00:0.00", "write_automation: a vol lane with two points: " + pointsOf ("vol"));
+            check ((bool) pad[taw::ids::lanes] && app->agentMarkAge (pad, "auto vol") >= 0.0, "...shown under the track, and lit");
+            check (app->um()->getUndoDescription().startsWith ("mcptest: automate"), "...one undo step: " + app->um()->getUndoDescription());
+
+            tool ("write_automation", "{\"track\":\"" + id + R"(","param":"vol","points":[{"beat":2,"value":-12}]})");
+            check (pointsOf ("vol") == "0.00:-6.00 2.00:-12.00 4.00:0.00", "a point between: the rest kept: " + pointsOf ("vol"));
+            tool ("write_automation", "{\"track\":\"" + id + R"(","param":"vol","points":[{"beat":1,"value":-3},{"beat":3,"value":-3}]})");
+            check (pointsOf ("vol") == "0.00:-6.00 1.00:-3.00 3.00:-3.00 4.00:0.00", "a span: what was inside it replaced: " + pointsOf ("vol"));
+
+            tool ("write_automation", "{\"track\":\"" + id + R"(","param":"pan","points":[{"beat":0,"value":"l30"},{"beat":8,"value":2}]})");
+            check (pointsOf ("pan") == "0.00:-0.30 8.00:1.00", "pan from text (l30), a value past the end clamped: " + pointsOf ("pan"));
+
+            const auto back = tool ("get_track", "{\"track\":\"" + id + "\"}");
+            check (back.data["automation"].size() == 2 && back.data["automation"][0]["points"].size() == 4, "get_track reads the lanes back");
+
+            tool ("write_automation", "{\"track\":\"" + id + R"(","param":"pan","points":[],"replace":"all"})");
+            check (pointsOf ("pan").isEmpty(), "replace all with no points: the lane emptied");
+
+            check (tool ("write_automation", R"({"track":"mix","param":"pan","points":[{"beat":0,"value":0}]})").text.startsWith ("[invalid]"), "the mix has no pan lane");
+            check (tool ("write_automation", R"({"track":"mix","param":"vol","points":[{"beat":0,"value":-2}]})").error == false
+                       && taw::Session::automation (s.tree(), "vol").isValid(),
+                   "the mix's volume");
+            check (tool ("write_automation", "{\"track\":\"" + id + R"(","param":"cutoff","points":[{"beat":0,"value":0.5}]})").text.contains ("no plugin"),
+                   "a plugin parameter on a track with no plugin: says so");
+            check (tool ("write_automation", "{\"track\":\"" + id + R"(","param":"vol","points":[{"beat":0,"value":"loud"}]})").text.startsWith ("[invalid]"),
+                   "a value it can't read refused");
+            check (tool ("write_automation", "{\"track\":\"" + s.track (app->focused)[taw::ids::uid].toString() + R"(","param":"vol","points":[{"beat":0,"value":-6}]})")
+                       .text.startsWith ("[hands-off]"),
+                   "the focused track while the user's at the keys: refused");
+            check (! tool ("get_parameters", "{\"track\":\"" + id + "\"}").error, "get_parameters on a track with no plugins: an empty list");
         }
 
         // Agents never save.

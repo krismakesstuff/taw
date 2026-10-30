@@ -332,6 +332,24 @@ juce::var toolList()
     "bpm": { "type": "number", "description": "20-400" } }, "required": ["bpm"] }
 },
 {
+  "name": "get_parameters",
+  "description": "The plugin parameters write_automation can automate on a track (its instrument, then its inserts) or on the mix (its inserts): each one's param string, name, plugin, value now (0 to 1) and how the plugin shows it. Up to 200; search narrows them by name (\"cutoff\").",
+  "inputSchema": { "type": "object", "properties": {
+    "track": { "type": "string", "description": "A track (id, number or name), or \"mix\"." },
+    "search": { "type": "string" } }, "required": ["track"] }
+},
+{
+  "name": "write_automation",
+  "description": "Write automation points on a track's (or the mix's) lane, making the lane if there isn't one, and show it under the track. param: \"vol\", \"pan\", \"mute\", \"send a\" to \"send e\", or a plugin parameter (its param from get_parameters, or its name, e.g. \"cutoff\"); the mix has vol and its inserts' parameters. Points: beat from the session start (beat 0 is bar 1, as in get_session) and value in the lane's units: dB for vol and sends (-96 to 12), -1 (left) to 1 (right) for pan, 0 or 1 for mute (held, not ramped), 0 to 1 for plugin parameters; or as text as taw takes it (\"-6\", \"l30\", \"on\", \"40%\"). Values ramp in a line from point to point and hold after the last. By default the lane's points between the first and last beat written are replaced and the rest kept; replace \"all\" replaces the whole lane (with no points: empties it). One undo step. get_track reads a track's lanes back.",
+  "inputSchema": { "type": "object", "properties": {
+    "track": { "type": "string", "description": "A track (id, number or name), or \"mix\"." },
+    "param": { "type": "string" },
+    "points": { "type": "array", "items": { "type": "object", "properties": {
+      "beat": { "type": "number" }, "value": { "type": ["number", "string"] } }, "required": ["beat", "value"] } },
+    "replace": { "type": "string", "enum": ["range", "all"], "description": "range (default): only between the first and last beat written; all: the whole lane." },
+    "show": { "type": "boolean", "description": "Open the lane under the track (default true)." } }, "required": ["track", "param", "points"] }
+},
+{
   "name": "list_sessions",
   "description": "The sessions taw knows (recent ones and those in the sessions folder, newest first), the templates new_session can start from, which session is open (none: taw is on its session screen), and a session switch waiting on the user (session_request). Works with no session open.",
   "inputSchema": { "type": "object", "properties": {} }
@@ -555,12 +573,15 @@ juce::String Bridge::handle (const juce::String& line)
                                 { "serverInfo", object ({ { "name", "taw" }, { "version", TAW_VERSION } }) },
                                 { "instructions",
                                   "taw is a terminal DAW. These tools read and edit the session open in the user's running taw, live, while the user "
-                                  "works in it. Read with get_session first. Edits are refused (and nothing changes) on the track the user's cursor "
-                                  "is on, inside their time selection, on anything they edited in the last few seconds, and while taw plays or "
-                                  "records: read again, pick other tracks, or try again in a moment. Each edit is one undo step the user can take "
-                                  "back; you never save (the user saves). Positions are beats from the session start; tracks go by the ids "
-                                  "get_session gives (\"t3\"), which never change. A tempo change on a session with audio waits for the user "
-                                  "to choose what the audio does (needs-user): don't press them, call again later." } }));
+                                  "works in it. Read with get_session first. Edits are refused (and nothing changes) on anything the user edited "
+                                  "in the last few seconds, while taw plays or records, and, while the user is at the keys, on the track their "
+                                  "cursor is on and inside their time selection (once they've left the keys for a while those are open to you: "
+                                  "a selected track is often the one they want worked on). Read again, pick other tracks, or try again in a "
+                                  "moment. Each edit is one undo step the user can take back; you never save (the user saves). Positions are "
+                                  "beats from the session start; tracks go by the ids get_session gives (\"t3\"), which never change. "
+                                  "write_automation draws volume, pan, mute, sends and plugin parameters (get_parameters finds them). A tempo "
+                                  "change on a session with audio, or switching sessions, waits for the user (needs-user): don't press them, "
+                                  "call again later." } }));
     }
 
     if (notification)

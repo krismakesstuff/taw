@@ -229,6 +229,9 @@ struct AgentTools
                 what = "bpm";
             else if (subject.hasType (ids::MARKER) || (t.node.hasType (ids::MARKER)))
                 what = "markers";
+            else if (const auto lane = subject.hasType (ids::AUTO) ? subject : t.node.hasType (ids::AUTO) ? t.node : t.node.getParent();
+                     lane.hasType (ids::AUTO))
+                what = "auto " + lane[ids::param].toString();
 
             if (owner.isValid())
                 app.markAgentEdit (owner, what);
@@ -682,7 +685,260 @@ struct AgentTools
         }
 
         o->setProperty ("clips", clips);
+        o->setProperty ("automation", describeAutomation (track, full));
         return o;
+    }
+
+    // A track's (or the mix's) automation lanes: what each controls and its points, values in
+    // the lane's units (dB, pan -1 to 1, mute 0 or 1, plugin parameters 0 to 1).
+    juce::var describeAutomation (const juce::ValueTree& owner, bool full) const
+    {
+        juce::Array<juce::var> lanes;
+
+        for (const auto& lane : Session::automations (owner))
+        {
+            const auto param = lane[ids::param].toString();
+            juce::Array<juce::var> points;
+            const auto all = Session::points (lane);
+
+            if (full)
+                for (const auto& p : all)
+                    points.add (object ({ { "beat", tidy ((double) p[ids::beat]) }, { "value", tidy ((double) p[ids::val]) } }));
+
+            lanes.add (object ({ { "param", param }, { "name", app.automationName (owner, param, false) }, { "off", App::laneOff (lane) },
+                                 { full ? "points" : "point_count", full ? juce::var (points) : juce::var ((int) all.size()) } }));
+        }
+
+        return lanes;
+    }
+
+    // Automation ------------------------------------------------------------------------
+    // What a track argument names for automation: "mix" (its volume and inserts), else a track.
+    bool automationOwnerFor (const juce::var& want, int& index, juce::ValueTree& owner, juce::String& error) const
+    {
+        if (want.toString().trim().equalsIgnoreCase ("mix"))
+        {
+            index = -1;
+            owner = session().tree();
+            return true;
+        }
+
+        index = findTrack (want, error);
+
+        if (index < 0)
+            return false;
+
+        owner = session().track (index);
+        return true;
+    }
+
+    // The plugins whose parameters it can automate: the instrument, then the inserts, with
+    // the prefix their params take ("inst/", "fx b/").
+    std::vector<std::pair<juce::String, PluginSlot*>> pluginsOf (const juce::ValueTree& owner) const
+    {
+        std::vector<std::pair<juce::String, PluginSlot*>> found;
+
+        if (Session::isInstrumentTrack (owner))
+            if (auto* p = app.automationPlugin (owner, AutomationTarget::parse ("inst/x")))
+                found.push_back ({ "inst/", p });
+
+        for (int s = 0; s < Session::numSends; ++s)
+            if (Session::insert (owner, s).isValid())
+            {
+                const auto prefix = "fx " + Session::slotName (s).toLowerCase() + "/";
+
+                if (auto* p = app.automationPlugin (owner, AutomationTarget::parse (prefix + "x")))
+                    found.push_back ({ prefix, p });
+            }
+
+        return found;
+    }
+
+    // The lane param for what the agent named: vol, pan, mute, send a-e, a param string as
+    // get_parameters gives it, or a plugin parameter by (part of) its name.
+    juce::String paramFor (const juce::ValueTree& owner, bool mix, const juce::String& asked, juce::String& error) const
+    {
+        const auto what = asked.trim().toLowerCase();
+
+        if (what == "vol" || what == "volume")
+            return "vol";
+
+        if (what == "pan" || what == "mute" || what.startsWith ("send"))
+        {
+            if (mix)
+                return (error = "the mix automates its volume and its inserts' parameters"), juce::String();
+
+            if (what == "pan" || what == "mute")
+                return what;
+
+            const auto letter = what.getLastCharacter();
+
+            if (what.length() >= 6 && letter >= 'a' && letter <= 'e')
+                return "send " + juce::String::charToString (letter);
+
+            return (error = "a send: send a to send e"), juce::String();
+        }
+
+        const auto plugins = pluginsOf (owner);
+
+        if (const auto direct = AutomationTarget::parse (asked.trim()); direct.isPlugin())
+        {
+            for (const auto& [prefix, plugin] : plugins)
+                if (asked.trim().startsWith (prefix) && plugin->findParameter (direct.paramId) >= 0)
+                    return asked.trim();
+
+            return (error = "no parameter " + asked.trim().quoted() + " (get_parameters lists them)"), juce::String();
+        }
+
+        juce::String partial;
+
+        for (const auto& [prefix, plugin] : plugins)
+            for (const auto& p : plugin->parameters())
+            {
+                if (p.name.equalsIgnoreCase (what))
+                    return prefix + p.id;
+
+                if (partial.isEmpty() && p.name.toLowerCase().contains (what))
+                    partial = prefix + p.id;
+            }
+
+        if (partial.isEmpty())
+            error = plugins.empty() ? "no plugin on it to automate: vol, pan, mute or send a-e"
+                                    : "no parameter called " + asked.trim().quoted() + " (get_parameters lists them; or vol, pan, mute, send a-e)";
+
+        return partial;
+    }
+
+    Answer getParameters() const
+    {
+        if (app.session == nullptr)
+            return Answer::fail ("no-session", "no session is open in taw");
+
+        int index = -1;
+        juce::ValueTree owner;
+        juce::String error;
+
+        if (! automationOwnerFor (arg ("track"), index, owner, error))
+            return Answer::fail ("invalid", error);
+
+        const auto search = arg ("search").toString().trim().toLowerCase();
+        juce::Array<juce::var> list;
+        int matching = 0;
+
+        for (const auto& [prefix, plugin] : pluginsOf (owner))
+            for (const auto& p : plugin->parameters())
+                if (search.isEmpty() || p.name.toLowerCase().contains (search))
+                {
+                    if (++matching > 200)
+                        continue;
+
+                    const auto param = prefix + p.id;
+                    const auto value = app.staticValue (owner, param, false);
+                    list.add (object ({ { "param", param }, { "name", p.name }, { "plugin", plugin->name() }, { "value", tidy (value) },
+                                        { "text", app.automationText (owner, param, value, false) } }));
+                }
+
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("also", index < 0 ? "vol" : "vol, pan, mute, send a-e");
+        o->setProperty ("parameters", list);
+
+        if (matching > 200)
+            o->setProperty ("more", juce::String (matching - 200) + " more: narrow it with search");
+
+        return Answer::good (juce::String (matching) + " plugin parameters" + (search.isNotEmpty() ? " matching " + search.quoted() : juce::String()), juce::var (o));
+    }
+
+    Answer writeAutomation()
+    {
+        if (app.session == nullptr)
+            return Answer::fail ("no-session", "no session is open in taw");
+
+        int index = -1;
+        juce::ValueTree owner;
+        juce::String error;
+
+        if (! automationOwnerFor (arg ("track"), index, owner, error))
+            return Answer::fail ("invalid", error);
+
+        const auto param = paramFor (owner, index < 0, arg ("param").toString(), error);
+
+        if (param.isEmpty())
+            return Answer::fail ("invalid", error);
+
+        const auto target = AutomationTarget::parse (param);
+        const auto* given = arg ("points").getArray();
+        const bool all = arg ("replace").toString().trim().equalsIgnoreCase ("all");
+        std::vector<std::pair<double, double>> points;
+
+        if (given == nullptr)
+            return Answer::fail ("invalid", R"(points: [{"beat": 0, "value": -6}, ...])");
+
+        for (const auto& p : *given)
+        {
+            if (! p.hasProperty ("beat") || ! p.hasProperty ("value") || (double) p["beat"] < 0.0)
+                return Answer::fail ("invalid", "each point needs a beat (0 or more, from the session start) and a value");
+
+            double value = 0.0;
+
+            if (p["value"].isString())
+            {
+                if (! app.parseAutomationValue (param, p["value"].toString(), value))
+                    return Answer::fail ("invalid", "can't read " + p["value"].toString().quoted() + R"( as a value for )" + param);
+            }
+            else
+                value = target.clamp ((float) (double) p["value"]);
+
+            points.push_back ({ (double) p["beat"], value });
+        }
+
+        if (points.empty() && ! all)
+            return Answer::fail ("invalid", R"(no points (replace "all" with no points empties the lane))");
+
+        const auto name = app.automationName (owner, param);
+        const auto where = index < 0 ? juce::String ("the mix") : trackText (owner);
+        const bool show = ! arg ("show").isBool() || (bool) arg ("show");
+
+        return edit ("automate " + name, [&]
+                     {
+                         std::vector<std::pair<double, double>> out;
+                         double lo = 0.0, hi = 0.0;
+
+                         if (! points.empty())
+                         {
+                             lo = std::min_element (points.begin(), points.end())->first;
+                             hi = std::max_element (points.begin(), points.end())->first;
+                         }
+
+                         // The lane's points outside the span written stay (all: none do).
+                         if (const auto lane = Session::automation (owner, param); lane.isValid() && ! all)
+                             for (const auto& p : Session::points (lane))
+                                 if (const auto b = (double) p[ids::beat]; b < lo - 1e-9 || b > hi + 1e-9)
+                                     out.push_back ({ b, (double) p[ids::val] });
+
+                         out.insert (out.end(), points.begin(), points.end());
+                         app.writeLane (owner, param, out);
+
+                         // Shown under its track, unless that's showing its playlists (a view, not an edit).
+                         if (show && ! (bool) owner[ids::playlists])
+                         {
+                             auto lanes = app.laneList (owner);
+
+                             if (! (bool) owner[ids::lanes] && lanes.size() == 1 && lanes.front() == "vol" && param != "vol" && ! Session::automation (owner, "vol").isValid())
+                                 lanes.clear();
+
+                             if (std::find (lanes.begin(), lanes.end(), param) == lanes.end())
+                                 lanes.push_back (param);
+
+                             app.setLaneList (owner, lanes);
+                             juce::ValueTree (owner).setProperty (ids::lanes, true, nullptr);
+                         }
+
+                         if (points.empty())
+                             return Answer::good ("emptied the " + name + " lane on " + where);
+
+                         return Answer::good ("wrote " + juce::String ((int) points.size()) + (points.size() == 1 ? " point" : " points") + " of " + name + " on " + where
+                                              + " (beats " + juce::String (tidy (lo)) + " to " + juce::String (tidy (hi)) + ")",
+                                              object ({ { "param", param } })); });
     }
 
     Answer getSession() const
@@ -707,6 +963,7 @@ struct AgentTools
         o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (session().track (app.focused)[ids::uid]) : juce::var ("mix"));
         o->setProperty ("tempo_request", tempoRequest());
         o->setProperty ("session_request", sessionRequest());
+        o->setProperty ("mix_automation", describeAutomation (session().tree(), (bool) arg ("include_notes")));
 
         if (! l.range.isEmpty())
         {
@@ -1345,6 +1602,10 @@ struct AgentTools
     {
         const auto& tool = call.tool;
 
+        if (tool == "get_parameters")
+            return getParameters();
+        if (tool == "write_automation")
+            return writeAutomation();
         if (tool == "list_sessions")
             return listSessions();
         if (tool == "new_session")

@@ -777,7 +777,7 @@ public:
     bool recording = false, helpVisible = false;
     // Help is in pages (tabs), so it fits a small screen: left/right, tab or 1-9 turn them.
     int helpPage = 0;
-    static constexpr int helpPages = 7;
+    static constexpr int helpPages = 9;
     bool handleHelpKey (const Key&);
 
     // "project": the session's settings in a panel like help. Up/down choose, left/right change,
@@ -894,6 +894,7 @@ private:
 public:
     std::vector<juce::ValueTree> pluginQueue; // plugins still to load after opening (one a frame)
     bool pluginPending (const juce::ValueTree& node) const;
+    bool editorOpen (const juce::ValueTree& node) const; // its plugin window is showing (an instrument track or an INSERT)
     bool loadNextPlugin(); // the most wanted one; false when none are waiting
 
 private:

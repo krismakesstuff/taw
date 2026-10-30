@@ -76,6 +76,8 @@ TAW_ID (ch)           // NOTE, CC: MIDI channel 1-16 (absent = 1)
 TAW_ID (num)          // CC: controller 0-127, 128 = pitch bend, 129 = channel pressure
 TAW_ID (val)          // CC: value (0-127; pitch bend 0-16383, 8192 = centre)
 TAW_ID (gridDiv)      // SESSION: fine grid step as a note value (4 = quarter, 16 = sixteenth)
+TAW_ID (uid)         // TRACK: its id for good ("t7"), through moves, renames, undo and saves; a copy gets a new one
+TAW_ID (nextTrackId) // SESSION: the number the next new track's uid gets (never reused)
 TAW_ID (input)
 TAW_ID (armed)
 TAW_ID (mute)

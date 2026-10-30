@@ -74,7 +74,7 @@ my-song/
 
 ```
 SESSION { name, sampleRate, bpm, timeSigNum, timeSigDen, grid, latencyComp, click, clickWhen, clickDb, mixDb, loop, loopStart, loopEnd }
-  TRACK { name, input, armed, mute, solo, monitor, gainDb }
+  TRACK { uid, name, input, armed, mute, solo, monitor, gainDb }   # uid: "t7", the track's for good
     CLIP { file, start, offset, length }  # plays file[offset, offset+length) from timeline start
   MARKER { position, name }
 ```
@@ -769,6 +769,16 @@ client) work in the one open in a running taw while you record and audition in i
   Each call is one undo step named for the agent ("claude-code: add track Bass"), and its line
   shows on the status line. Agents never save; their edits wait in `unsaved\` like yours. Your
   cursor, focus, selection and view stay where they were.
+- **On or off:** `agents` / `agents on` / `agents off` (and a row in `project`), kept in
+  `settings.json` for every session, on by default. Off, nothing listens, and `taw --mcp` says
+  agents are turned off.
+- **Track ids:** every TRACK has a `uid` ("t7", with `nextTrackId` on the SESSION) that stays
+  through moves, renames, undo and saves; a copy gets a new one, and none is handed out twice.
+  Sessions from before get them on load. Agents name tracks by it.
+- **Tempo:** an agent's tempo change goes straight through unless there are audio clips (MIDI
+  and hits are in beats and follow it). Then a box asks you: `t` keep the audio where it is in
+  time, `b` move each clip's start with the beats (not stretched), `esc` cancel; stretching is
+  shown as coming. The agent hears what you chose when it asks again.
 - `taw --mcptest <folder>` checks it all with no device; `taw --serve <session> [seconds]` holds a
   session open headless so `taw --mcp` can be tried from a shell.
 

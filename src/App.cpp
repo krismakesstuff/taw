@@ -3294,6 +3294,7 @@ void App::loadSettings()
         browserAxisX = browserAxisY = 0; // a half-saved pair: the sound-alike map
 
     dateSessionNames = (bool) json.getProperty ("dateNames", true);
+    agentsOn = (bool) json.getProperty ("agents", true);
 
     if (const auto folder = json["sessionsFolder"].toString(); folder.isNotEmpty())
         sessionsFolder = juce::File (folder);
@@ -3327,6 +3328,7 @@ void App::saveSettings() const
     o->setProperty ("io", ioVisible);
     o->setProperty ("auditionDb", auditionDb);
     o->setProperty ("dateNames", dateSessionNames);
+    o->setProperty ("agents", agentsOn);
     o->setProperty ("sessionsFolder", sessionsFolder != juce::File() ? sessionsFolder.getFullPathName() : juce::String()); // empty: where taw starts
     o->setProperty ("newRate", newRate);
     o->setProperty ("browserHover", browserHover);
@@ -3618,6 +3620,15 @@ void App::dispatchKey (const Key& k)
     {
         if (k.code != Key::Mouse)
             handleClosePromptKey (k);
+
+        return;
+    }
+
+    // So does an agent's tempo change waiting on what to do with the audio.
+    if (tempoAsk.has_value())
+    {
+        if (k.code != Key::Mouse)
+            handleTempoAskKey (k);
 
         return;
     }

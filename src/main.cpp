@@ -1571,7 +1571,7 @@ int main (int argc, char** argv)
                 if (t["inputSchema"]["type"].toString() == "object")
                     names.add (t["name"].toString());
 
-            check (names.size() == 9 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits"),
+            check (names.size() == 10 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits") && names.contains ("set_tempo"),
                    "tools/list: " + names.joinIntoString (", "));
             check (method ("ping", "{}")["result"].isObject(), "ping");
             check ((int) rpc (bridge, "this isn't json")["error"]["code"] == -32700, "garbage: a parse error");
@@ -1584,14 +1584,15 @@ int main (int argc, char** argv)
             const auto r = tool ("get_session", "{}");
             const auto tracks = r.data["tracks"];
             check (! r.error && juce::approximatelyEqual ((double) r.data["bpm"], s.bpm()) && tracks.size() == 1 && tracks[0]["name"].toString() == "Vox"
-                       && tracks[0]["locked"].toString().contains ("cursor") && r.data["focused"].toString() == "1",
-                   "get_session: tempo, the track, the user's cursor on it");
+                       && tracks[0]["locked"].toString().contains ("cursor") && r.data["focused"].toString() == "t1" && tracks[0]["id"].toString() == "t1"
+                       && tracks[0]["number"].toString() == "1",
+                   "get_session: tempo, the track (id t1, number 1), the user's cursor on it");
         }
 
         // Tracks, notes, hits.
         {
             const auto r = tool ("add_track", R"({"kind":"instrument","name":"Bass"})");
-            check (! r.error && r.data["track"].toString() == "2" && s.numTracks() == 2 && taw::Session::isInstrumentTrack (s.track (1))
+            check (! r.error && r.data["track"].toString() == "t2" && r.data["number"].toString() == "2" && s.numTracks() == 2 && taw::Session::isInstrumentTrack (s.track (1))
                        && ! (bool) s.track (1)[taw::ids::armed] && app->focused == 0,
                    "add_track: an instrument track, not armed, the cursor left on Vox");
             check (app->message.startsWith ("mcptest: "), "the status line says who: " + app->message);
@@ -1719,6 +1720,123 @@ int main (int argc, char** argv)
             check (! gone.error && s.numTracks() == 3 && s.track (1)[taw::ids::name].toString() == "Bass" && app->focused == 0, "remove_track: Hat gone, the cursor still on Vox");
         }
 
+        // Track ids: the same through a move, an undo and a copy; never handed out twice.
+        auto idOf = [&] (const juce::String& name)
+        {
+            for (int t = 0; t < s.numTracks(); ++t)
+                if (s.track (t)[taw::ids::name].toString() == name)
+                    return s.track (t)[taw::ids::uid].toString();
+
+            return juce::String();
+        };
+        {
+            check (idOf ("Vox") == "t1" && idOf ("Bass") == "t2" && idOf ("Tick") == "t4", "ids: Vox t1, Bass t2, Tick t4 (Hat's t3 went with it)");
+            app->focusTrack (1);
+            const auto moved = app->moveTracks (-1); // alt+up: Bass above Vox
+            app->pumpBackgroundWork();
+            app->focusTrack (1); // the cursor back on Vox, now second
+            wait (700);
+            const auto r = tool ("get_track", R"({"track":"t2"})");
+            check (moved.ok && r.data["name"].toString() == "Bass" && r.data["number"].toString() == "1" && idOf ("Bass") == "t2",
+                   "moved to the top: Bass is number 1, still t2");
+            const auto byId = tool ("write_notes", R"({"track":"t2","clip":0,"clip_beat":0,"notes":[{"beat":3.5,"length":0.5,"pitch":62}]})");
+            check (! byId.error && taw::Session::placedNotes (s.track (0)).size() == 6, "write_notes by id, with clip_beat");
+            const auto stale = tool ("write_notes", R"({"track":"t2","clip":0,"clip_beat":4,"notes":[{"beat":0,"length":1,"pitch":62}]})");
+            check (stale.error && stale.text.contains ("changed"), "a clip_beat that doesn't match: refused");
+
+            const auto gone = tool ("remove_track", R"({"track":"t4"})");
+            const auto undone = app->undoEdit();
+            app->pumpBackgroundWork();
+            check (! gone.error && undone.ok && idOf ("Tick") == "t4", "removed by an agent, back with ctrl+z: still t4");
+            wait (700);
+
+            app->execute ("1 dup track"); // the user copies Bass
+            app->pumpBackgroundWork();
+            check (idOf ("Bass") == "t2" && idOf ("Bass.dup1") == "t5", "a copy gets an id of its own: " + idOf ("Bass.dup1"));
+            app->focusTrack (s.trackById ("t1"));
+            wait (700);
+            const auto fresh = tool ("add_track", R"({"kind":"bus","name":"Verb"})");
+            check (! fresh.error && fresh.data["track"].toString() == "t6", "a new track: t6 (t3 is never used again)");
+        }
+
+        // The setting: off, nothing listens and taw --mcp says why; on again, back.
+        {
+            const auto off = app->execute ("agents off");
+            const auto listing = taw::agents::folder().getChildFile (juce::String (taw::safety::thisProcess()) + ".json");
+            check (off.ok && app->agentServer == nullptr && ! listing.existsAsFile() && ! app->agentsOn, "agents off: no socket, no listing");
+            const auto r = tool ("get_session", "{}");
+            check (r.error && r.text.startsWith ("[agents-off]"), "taw --mcp: " + r.text);
+            const auto on = app->execute ("agents on");
+            pump();
+            check (on.ok && app->agentServer != nullptr && listing.existsAsFile(), "agents on: listening again");
+            check (! tool ("get_session", "{}").error, "...and the bridge finds it");
+            const auto panel = app->projectSettings();
+            check (std::any_of (panel.begin(), panel.end(), [] (const auto& row) { return row.name.startsWith ("Agents"); }), "the project panel has it");
+        }
+
+        // Tempo: with no audio it just changes; with audio the user says what the clips do.
+        {
+            const auto direct = tool ("set_tempo", R"({"bpm":100})");
+            check (! direct.error && juce::approximatelyEqual (s.bpm(), 100.0), "set_tempo 100 with no audio clips: done");
+
+            // The user records (well, imports) some audio at bar 2.
+            app->cursor = (juce::int64) std::llround (s.samplesPerBar());
+            app->execute ("import \"" + tick.getFullPathName() + "\"");
+
+            while (app->hasBackgroundWork())
+                pump();
+
+            app->focusTrack (s.trackById ("t1"));
+            wait (700);
+            juce::ValueTree audioClip;
+
+            for (int t = 0; t < s.numTracks(); ++t)
+                if (const auto c = taw::Session::clips (s.track (t)); ! c.empty())
+                    audioClip = c.front();
+
+            const auto start = (juce::int64) audioClip[taw::ids::start];
+            check (audioClip.isValid() && start > 0, "an audio clip at bar 2");
+
+            const auto asked = tool ("set_tempo", R"({"bpm":120})");
+            check (asked.error && asked.text.startsWith ("[needs-user]") && app->tempoAsk.has_value() && juce::approximatelyEqual (s.bpm(), 100.0),
+                   "set_tempo 120 with audio: needs the user, nothing changed yet");
+            check (app->screenText (100, 30).contains ("TEMPO"), "taw shows the tempo box");
+            std::printf ("%s", app->screenText (100, 16).toRawUTF8());
+            const auto waiting = tool ("get_session", "{}");
+            check (waiting.data["tempo_request"]["status"].toString() == "waiting for the user", "get_session: tempo_request waiting");
+            check (tool ("set_tempo", R"({"bpm":120})").text.startsWith ("[needs-user]"), "asking again: still waiting");
+
+            auto press = [&] (wchar_t c, taw::Key::Code code = taw::Key::Char)
+            {
+                taw::Key k;
+                k.code = code;
+                k.ch = c;
+                app->pressKey (k);
+                app->pumpBackgroundWork();
+            };
+
+            press ('s');
+            check (app->tempoAsk.has_value(), "s (stretch): not built yet, the box stays");
+            press ('b');
+            check (! app->tempoAsk.has_value() && juce::approximatelyEqual (s.bpm(), 120.0) && (juce::int64) audioClip[taw::ids::start] == std::llround ((double) start * 100.0 / 120.0),
+                   "b: 120 bpm, the clip moved with the beats");
+            check (app->um()->getUndoDescription() == "mcptest: bpm 120", "...one undo step, the agent's: " + app->um()->getUndoDescription());
+            const auto after = tool ("set_tempo", R"({"bpm":120})");
+            check (! after.error && after.text.contains ("moved with the beats"), "the agent asks again: " + after.text);
+
+            const auto moved = (juce::int64) audioClip[taw::ids::start];
+            tool ("set_tempo", R"({"bpm":90})");
+            press (0, taw::Key::Escape);
+            const auto declined = tool ("set_tempo", R"({"bpm":90})");
+            check (juce::approximatelyEqual (s.bpm(), 120.0) && declined.text.startsWith ("[declined]"), "esc: the tempo stays, the agent hears no");
+
+            tool ("set_tempo", R"({"bpm":80})");
+            press ('t');
+            check (juce::approximatelyEqual (s.bpm(), 80.0) && (juce::int64) audioClip[taw::ids::start] == moved, "t: 80 bpm, the clip stays where it is in time");
+            const auto read = tool ("get_session", "{}");
+            check (read.data["tempo_request"]["status"].toString() == "applied", "get_session: tempo_request applied");
+        }
+
         // Agents never save.
         check (dir.getChildFile ("session.json").loadFileAsString() == sessionJson && dir.getChildFile ("unsaved").getChildFile ("session.json").existsAsFile(),
                "session.json untouched; the edits are in unsaved\\");
@@ -1735,6 +1853,7 @@ int main (int argc, char** argv)
 
             const auto a = f.get();
             check (! a.ok && a.text.contains ("token"), "the wrong token: " + a.text);
+            const auto tracksNow = s.numTracks();
 
             juce::StreamingSocket raw;
 
@@ -1765,11 +1884,11 @@ int main (int argc, char** argv)
             }
 
             wait (200);
-            check (unwelcome.got.contains ("say hello first") && s.numTracks() == 3, "a call without hello refused");
+            check (unwelcome.got.contains ("say hello first") && s.numTracks() == tracksNow, "a call without hello refused");
             unwelcome.disconnect();
             wait (50);
             const auto still = tool ("get_session", "{}");
-            check (! still.error && still.data["tracks"].size() == 3, "garbage on the socket: taw carries on");
+            check (! still.error && still.data["tracks"].size() == tracksNow, "garbage on the socket: taw carries on");
         }
 
         // taw going away and coming back (a new port and token): the bridge finds it again.
@@ -1781,6 +1900,56 @@ int main (int argc, char** argv)
             pump();
             const auto back = tool ("get_session", "{}");
             check (! back.error, "taw back: the bridge finds it again");
+        }
+
+        // A reload keeps every id (and the count past them).
+        {
+            std::map<juce::String, juce::String> before; // name: id ("Tick" and "tick" both)
+            const int next = s.tree()[taw::ids::nextTrackId];
+
+            for (int t = 0; t < s.numTracks(); ++t)
+                before[s.track (t)[taw::ids::name].toString()] = s.track (t)[taw::ids::uid].toString();
+
+            app.reset(); // as taw closing on unsaved work: it stays in unsaved\, offered next time
+            app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+            app->interactive = true;
+            auto& again = *app->session;
+            bool same = again.numTracks() == (int) before.size();
+
+            for (int t = 0; t < again.numTracks(); ++t)
+                same = same && before[again.track (t)[taw::ids::name].toString()] == again.track (t)[taw::ids::uid].toString();
+
+            check (same && (int) again.tree()[taw::ids::nextTrackId] == next && next > 6,
+                   "reopened: the same ids for all " + juce::String (again.numTracks()) + " tracks, the next still t" + juce::String (next));
+        }
+
+        // An old session (no ids) gets them on load.
+        {
+            const auto old = scratch.getChildFile ("old song");
+            {
+                juce::String error;
+                taw::Session::create (old, {}, 44100.0, error);
+            }
+
+            auto tree = taw::varToTree (juce::JSON::parse (old.getChildFile ("session.json")));
+            tree.removeProperty (taw::ids::nextTrackId, nullptr);
+
+            for (const auto* name : { "Kick", "Snare", "Bass" })
+            {
+                juce::ValueTree t (taw::ids::TRACK);
+                t.setProperty (taw::ids::name, name, nullptr);
+                tree.appendChild (t, nullptr);
+            }
+
+            old.getChildFile ("session.json").replaceWithText (juce::JSON::toString (taw::treeToVar (tree)));
+            juce::String error;
+            const auto loaded = taw::Session::load (old, error);
+            juce::StringArray got;
+
+            for (int t = 0; loaded != nullptr && t < loaded->numTracks(); ++t)
+                got.add (loaded->track (t)[taw::ids::uid].toString());
+
+            check (got.joinIntoString (",") == "t1,t2,t3", "an old session's tracks get ids on load: " + got.joinIntoString (","));
         }
 
         app.reset();

@@ -161,6 +161,25 @@ public:
     agents::Answer agentCall (const agents::Call&); // one call, now
     std::unique_ptr<agents::Server> agentServer;
     agents::RecentEdits recentEdits;
+    bool agentsOn = true;                      // settings.json "agents": the socket at all
+    Result agentsCommand (const juce::String& arg); // "agents", "agents on", "agents off"
+
+    // An agent's new tempo on a session with audio clips waits for the user to say what
+    // happens to the audio (the tempo box). MIDI and hits follow the beats either way.
+    enum class TempoChoice { cancel, keepInTime, moveWithBeats };
+    struct TempoAsk { juce::String agent; double from = 0.0, to = 0.0; };
+    struct TempoOutcome
+    {
+        juce::String agent;
+        double from = 0.0, to = 0.0;
+        juce::String audio; // what the user chose, in words
+        bool applied = false;
+        double when = 0.0;  // ms
+    };
+    std::optional<TempoAsk> tempoAsk;         // the box is up
+    std::optional<TempoOutcome> tempoOutcome; // the last answer, for the agent to read
+    void answerTempoAsk (TempoChoice);
+    bool handleTempoAskKey (const Key&);
 
     Result record (const std::vector<int>& tracks); // empty = whatever is armed
     Result punch(); // while playing: recording on or off, playback carries on
@@ -1136,7 +1155,14 @@ private:
     void keepInView (juce::int64 pos);
 
     void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override { treeDirty = unsaved = true; }
-    void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override { treeDirty = unsaved = true; }
+    void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override
+    {
+        treeDirty = unsaved = true;
+
+        // A new track, or a copy carrying its original's id: an id of its own.
+        if (session != nullptr && child.hasType (ids::TRACK) && parent == session->tree() && session->trackIdTaken (child))
+            session->giveTrackId (child);
+    }
     void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { treeDirty = unsaved = true; }
     void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override { treeDirty = unsaved = true; }
     void persist(); // after an edit: into unsaved\ (or session.json, headless)

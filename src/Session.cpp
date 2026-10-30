@@ -228,6 +228,7 @@ std::unique_ptr<Session> Session::create (const juce::File& dir, const juce::Val
     applyDefaults (tree);
 
     std::unique_ptr<Session> s (new Session (dir, tree));
+    s->giveTrackIds(); // a template's tracks
 
     if (! s->save())
     {
@@ -331,6 +332,7 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
         backUp (dir);
 
     std::unique_ptr<Session> s (new Session (dir, tree));
+    s->giveTrackIds(); // sessions before track ids get them now
     s->loadNote = note;
     s->recovered = recovered;
     return s;
@@ -495,6 +497,56 @@ juce::ValueTree Session::track (int index) const
             return c;
 
     return {};
+}
+
+void Session::giveTrackIds()
+{
+    juce::StringArray seen;
+
+    for (int t = 0; t < numTracks(); ++t)
+    {
+        auto node = track (t);
+
+        if (const auto id = node[ids::uid].toString(); id.isEmpty() || seen.contains (id))
+            giveTrackId (node);
+
+        seen.add (node[ids::uid].toString());
+    }
+}
+
+void Session::giveTrackId (juce::ValueTree node)
+{
+    // Past every id there is, and every one handed out before (so an undone track's id
+    // never comes back on another).
+    int next = juce::jmax (1, (int) state[ids::nextTrackId]);
+
+    for (int t = 0; t < numTracks(); ++t)
+        if (const auto id = track (t)[ids::uid].toString(); id.startsWithChar ('t'))
+            next = juce::jmax (next, id.substring (1).getIntValue() + 1);
+
+    // Not undoable: an id is the track's for good, and redo brings the track back with it.
+    node.setProperty (ids::uid, "t" + juce::String (next), nullptr);
+    state.setProperty (ids::nextTrackId, next + 1, nullptr);
+}
+
+bool Session::trackIdTaken (const juce::ValueTree& node) const
+{
+    const auto id = node[ids::uid].toString();
+
+    for (int t = 0; t < numTracks(); ++t)
+        if (const auto other = track (t); other != node && other[ids::uid].toString() == id)
+            return true;
+
+    return id.isEmpty();
+}
+
+int Session::trackById (const juce::String& id) const
+{
+    for (int t = 0; t < numTracks(); ++t)
+        if (track (t)[ids::uid].toString() == id)
+            return t;
+
+    return -1;
 }
 
 juce::ValueTree Session::addTrack (const juce::String& trackName, int input, juce::UndoManager* um)

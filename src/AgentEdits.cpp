@@ -72,7 +72,12 @@ struct Touches final : juce::ValueTree::Listener
     explicit Touches (juce::ValueTree t) : root (std::move (t)) { root.addListener (this); }
     ~Touches() override { root.removeListener (this); }
 
-    void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier&) override { list.push_back ({ t, {}, false }); }
+    void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier& id) override
+    {
+        if (! agents::RecentEdits::isBookkeeping (id))
+            list.push_back ({ t, {}, false });
+    }
+
     void valueTreeChildAdded (juce::ValueTree& p, juce::ValueTree& c) override { list.push_back ({ p, c, false }); }
     void valueTreeChildRemoved (juce::ValueTree& p, juce::ValueTree& c, int) override { list.push_back ({ p, c, true }); }
     void valueTreeChildOrderChanged (juce::ValueTree& p, int, int) override { list.push_back ({ p, {}, false }); }
@@ -110,7 +115,8 @@ const juce::StringArray& usersOnly()
     static const juce::StringArray verbs { "save", "close", "q", "quit", "exit", "play", "stop", "rec", "undo", "redo", "dev", "panel",
                                            "b", "bounce", "bv", "bounces", "hub", "scan", "midi", "crashtest", "keycast", "video",
                                            "help", "?", "project", "settings", "stats", "browse", "index", "io", "fill", "light",
-                                           "dark", "grey", "gray", "ed", "map", "unmap", "aw", "auto", "copy", "cut", "paste", "sel" };
+                                           "dark", "grey", "gray", "ed", "map", "unmap", "aw", "auto", "copy", "cut", "paste", "sel",
+                                           "agents" };
     return verbs;
 }
 } // namespace
@@ -450,7 +456,7 @@ struct AgentTools
                 }
 
                 if (session().numTracks() > before)
-                    a.data = object ({ { "track", app.trackLabel (session().numTracks() - 1) } });
+                    a.data = trackRef (session().numTracks() - 1);
 
                 if (const auto why = violation (held, touches); why.isNotEmpty())
                 {
@@ -477,7 +483,8 @@ struct AgentTools
     // Arguments ------------------------------------------------------------------------
     const juce::var& arg (const char* name) const { return call.args[name]; }
 
-    // A track by its number as on screen ("3", "2.3") or its exact name.
+    // A track by its id ("t7", what reads give and what stays put), else its number as on
+    // screen ("3", "2.3", which shifts as tracks come and go), else its exact name.
     int findTrack (const juce::var& v, juce::String& error) const
     {
         const auto want = v.toString().trim();
@@ -485,9 +492,12 @@ struct AgentTools
 
         if (want.isEmpty())
         {
-            error = "which track? give its number as on screen (\"3\", \"2.3\") or its name";
+            error = "which track? give its id from get_session (\"t3\")";
             return -1;
         }
+
+        if (const auto t = session().trackById (want); t >= 0)
+            return t;
 
         for (int t = 0; t < session().numTracks(); ++t)
             if (numbers.label (t) == want)
@@ -500,6 +510,9 @@ struct AgentTools
         error = "no track " + want.quoted() + " (get_session lists them)";
         return -1;
     }
+
+    // What an edit answers with: the track's id and its number now.
+    juce::var trackRef (int t) const { return object ({ { "track", session().track (t)[ids::uid] }, { "number", app.trackLabel (t) } }); }
 
     // Reading ---------------------------------------------------------------------------
     juce::String busName (int busId) const
@@ -516,7 +529,8 @@ struct AgentTools
         const auto kind = Session::isKit (track) ? juce::String ("kit") : track[ids::kind].toString().isEmpty() ? juce::String ("audio")
                                                                                                                 : track[ids::kind].toString();
 
-        o->setProperty ("id", numbers.label (t));
+        o->setProperty ("id", track[ids::uid]);
+        o->setProperty ("number", numbers.label (t));
         o->setProperty ("name", track[ids::name]);
         o->setProperty ("kind", kind);
 
@@ -538,7 +552,7 @@ struct AgentTools
 
         if (const auto kit = app.kitOf (t); kit >= 0)
         {
-            o->setProperty ("kit", numbers.label (kit));
+            o->setProperty ("kit", session().track (kit)[ids::uid]);
             o->setProperty ("note", (int) track.getProperty (ids::note, -1));
 
             if ((int) track[ids::choke] > 0)
@@ -551,7 +565,7 @@ struct AgentTools
 
             for (int m = 0; m < session().numTracks(); ++m)
                 if (app.kitOf (m) == t)
-                    members.add (numbers.label (m));
+                    members.add (session().track (m)[ids::uid]);
 
             o->setProperty ("members", members);
         }
@@ -640,14 +654,15 @@ struct AgentTools
         o->setProperty ("recording", app.recording);
         o->setProperty ("unsaved", app.unsaved);
         o->setProperty ("cursor_beat", tidy ((double) app.cursor / spb()));
-        o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (numbers.label (app.focused)) : juce::var ("mix"));
+        o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (session().track (app.focused)[ids::uid]) : juce::var ("mix"));
+        o->setProperty ("tempo_request", tempoRequest());
 
         if (! l.range.isEmpty())
         {
             juce::Array<juce::var> on;
 
             for (const auto& t : l.covered)
-                on.add (numbers.label (session().tree().indexOf (t)));
+                on.add (t[ids::uid]);
 
             o->setProperty ("selection", object ({ { "from_beat", tidy ((double) l.range.getStart() / spb()) },
                                                    { "to_beat", tidy ((double) l.range.getEnd() / spb()) },
@@ -712,6 +727,10 @@ struct AgentTools
         if ((shape.verb == "inst" || shape.verb == "fx" || shape.verb == "ins") && shape.args.isEmpty())
             return Answer::fail ("invalid", shape.verb + " alone opens a picker for the user: name the plugin (" + shape.verb + " vital)");
 
+        // The tempo may move audio against the beats: set_tempo asks the user when it would.
+        if (shape.verb == "bpm")
+            return setTempo (shape.args[0]);
+
         return edit (line, [&]
                      {
                          const auto r = app.execute (line);
@@ -723,7 +742,7 @@ struct AgentTools
     {
         for (int t = session().numTracks(); --t >= 0;)
             if (! has (before, session().track (t)))
-                return object ({ { "track", app.trackLabel (t) } });
+                return trackRef (t);
 
         return {};
     }
@@ -904,6 +923,10 @@ struct AgentTools
         if (intoClip && (clipIndex < 0 || clipIndex >= (int) clips.size()))
             return Answer::fail ("invalid", what + " has no clip " + juce::String (clipIndex) + " (" + juce::String ((int) clips.size()) + " clips; get_track lists them)");
 
+        if (intoClip)
+            if (auto moved = clipMoved (clips[(size_t) clipIndex], clipIndex))
+                return *moved;
+
         // A new clip: at beat (by default the bar after the track's last clip), whole bars long.
         const auto bar = (double) juce::jmax (1, session().beatsPerBar());
         double reach = 0.0;
@@ -961,7 +984,93 @@ struct AgentTools
                          const auto at = app.formatBars ((juce::int64) std::llround ((double) clip[ids::beat] * spb()));
                          return Answer::good ((replace ? "replaced with " : "wrote ") + juce::String ((int) events.size()) + " " + kindText + " "
                                                   + (intoClip ? "in clip " + juce::String (index) : juce::String ("in a new clip")) + " on " + what + " at " + at,
-                                              object ({ { "track", app.trackLabel (t) }, { "clip", intoClip ? index : (int) clips.size() } })); });
+                                              object ({ { "track", track[ids::uid] }, { "clip", intoClip ? index : (int) clips.size() } })); });
+    }
+
+    // A clip index is only good until clips change: clip_beat (its start, from the read) says
+    // which clip the agent means, and a clip that isn't there any more is refused.
+    std::optional<Answer> clipMoved (const juce::ValueTree& clip, int index) const
+    {
+        if (arg ("clip_beat").isVoid())
+            return {};
+
+        const auto at = clip.hasType (ids::CLIP) ? (double) (juce::int64) clip[ids::start] / spb() : (double) clip[ids::beat];
+
+        if (std::abs (at - (double) arg ("clip_beat")) < 1e-4)
+            return {};
+
+        return Answer::fail ("invalid", "clip " + juce::String (index) + " starts at beat " + juce::String (tidy (at)) + ", not "
+                                            + arg ("clip_beat").toString() + ": the clips have changed, read the track again");
+    }
+
+    // Tempo: MIDI and hits are in beats and follow it; audio clips are in samples and don't.
+    // With none, the change just goes through; with some, the user says what happens to them
+    // (App::answerTempoAsk), and the agent finds out by calling again or reading tempo_request.
+    bool hasAudioClips() const
+    {
+        for (int t = 0; t < session().numTracks(); ++t)
+        {
+            std::vector<juce::ValueTree> clips;
+            allClips (session().track (t), clips);
+
+            for (const auto& c : clips)
+                if (c.hasType (ids::CLIP))
+                    return true;
+        }
+
+        return false;
+    }
+
+    juce::var tempoRequest() const
+    {
+        if (const auto& ask = app.tempoAsk)
+            return object ({ { "status", "waiting for the user" }, { "agent", ask->agent }, { "from", ask->from }, { "to", ask->to } });
+
+        if (const auto& done = app.tempoOutcome)
+            return object ({ { "status", done->applied ? "applied" : "cancelled" }, { "agent", done->agent }, { "from", done->from }, { "to", done->to }, { "audio", done->audio } });
+
+        return {};
+    }
+
+    Answer setTempo (const juce::var& value)
+    {
+        if (auto no = cantEdit())
+            return *no;
+
+        const auto bpm = value.toString().trim().getDoubleValue();
+        const auto now = session().bpm();
+        auto bpmText = [] (double b)
+        { return juce::String (b, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."); };
+
+        if (bpm < 20.0 || bpm > 400.0)
+            return Answer::fail ("invalid", "bpm between 20 and 400");
+
+        if (app.tempoAsk.has_value())
+            return Answer::fail ("needs-user", "taw is asking the user about " + app.tempoAsk->agent + "'s change from " + bpmText (app.tempoAsk->from) + " to "
+                                                   + bpmText (app.tempoAsk->to) + L" bpm \x00b7 call again in a moment, or read tempo_request in get_session");
+
+        const auto& last = app.tempoOutcome;
+        const bool askedThis = last.has_value() && juce::approximatelyEqual (last->to, bpm)
+                               && juce::Time::getMillisecondCounterHiRes() - last->when < 120000.0;
+
+        if (juce::approximatelyEqual (now, bpm))
+            return Answer::good ("the tempo is " + bpmText (bpm) + (askedThis && last->applied ? " (the user chose: " + last->audio + ")" : juce::String()));
+
+        if (askedThis && ! last->applied && last->agent == call.agent)
+            return Answer::fail ("declined", "the user said no to " + bpmText (last->from) + L" \x2192 " + bpmText (bpm) + " bpm: ask them in the chat before trying again");
+
+        if (! hasAudioClips())
+            return edit ("bpm " + bpmText (bpm), [&]
+                         {
+                             session().tree().setProperty (ids::bpm, bpm, app.um());
+                             return Answer::good ("tempo " + bpmText (now) + L" \x2192 " + bpmText (bpm) + " (MIDI and hits follow the beats)"); });
+
+        if (const auto secs = app.recentEdits.recent (session().tree()); secs >= 0.0)
+            return Answer::fail ("hands-off", "the user changed the session's settings " + juce::String (secs, 1) + " s ago (try again in a few seconds)");
+
+        app.tempoAsk = App::TempoAsk { call.agent, now, bpm };
+        return Answer::fail ("needs-user", "the session has audio clips, so taw is asking the user what to do with them (" + bpmText (now) + L" \x2192 "
+                                               + bpmText (bpm) + L" bpm) \x00b7 call again in a moment, or read tempo_request in get_session");
     }
 
     Answer removeClip()
@@ -986,6 +1095,9 @@ struct AgentTools
 
         if (index < 0 || index >= (int) clips.size())
             return Answer::fail ("invalid", trackText (track) + " has no clip " + juce::String (index));
+
+        if (auto moved = clipMoved (clips[(size_t) index], index))
+            return *moved;
 
         const auto what = trackText (track);
         return edit ("remove clip " + juce::String (index) + " on " + what, [&]
@@ -1030,16 +1142,125 @@ struct AgentTools
             return removeClip();
         if (tool == "add_marker")
             return addMarker();
+        if (tool == "set_tempo")
+            return setTempo (arg ("bpm"));
 
         return Answer::fail ("invalid", "taw has no tool " + tool.quoted());
     }
 };
 
 //==============================================================================
+// The tempo box: an agent wants a new tempo and the session has audio clips. The user's
+// answer is the change (one undo step, the agent's), or none.
+void App::answerTempoAsk (TempoChoice choice)
+{
+    if (! tempoAsk.has_value())
+        return;
+
+    const auto ask = *tempoAsk;
+    tempoAsk.reset();
+
+    if (session == nullptr)
+        return;
+
+    const auto from = session->bpm();
+    auto bpmText = [] (double b)
+    { return juce::String (b, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."); };
+    TempoOutcome done { ask.agent, from, ask.to, {}, choice != TempoChoice::cancel, juce::Time::getMillisecondCounterHiRes() };
+
+    if (choice == TempoChoice::cancel)
+    {
+        done.audio = "cancelled by the user";
+        tempoOutcome = done;
+        say (Result::good ("tempo stays " + bpmText (from) + " (" + ask.agent + " wanted " + bpmText (ask.to) + ")"));
+        return;
+    }
+
+    {
+        const juce::ScopedValueSetter<bool> mine (agentEditing, true), notUsers (recentEdits.agentEditing, true);
+        um()->beginNewTransaction (ask.agent + ": bpm " + bpmText (ask.to));
+        session->tree().setProperty (ids::bpm, ask.to, um());
+
+        // With the beats: each clip starts on the beat it started on (its audio isn't stretched,
+        // so it runs as long as it did). Markers and the loop stay in time, as when you change it.
+        if (choice == TempoChoice::moveWithBeats)
+        {
+            std::function<void (juce::ValueTree)> move = [&] (juce::ValueTree holder)
+            {
+                for (auto c : holder)
+                {
+                    if (c.hasType (ids::CLIP))
+                        c.setProperty (ids::start, (juce::int64) std::llround ((double) (juce::int64) c[ids::start] * from / ask.to), um());
+                    else if (c.hasType (ids::PLAYLIST))
+                        move (c);
+                }
+            };
+
+            for (int t = 0; t < session->numTracks(); ++t)
+                move (session->track (t));
+        }
+
+        um()->setCurrentTransactionName (ask.agent + ": bpm " + bpmText (ask.to));
+    }
+
+    done.audio = choice == TempoChoice::keepInTime ? "audio kept where it is in time" : "audio clips moved with the beats";
+    tempoOutcome = done;
+    lastEditKey.clear();
+    say (Result::good (ask.agent + ": tempo " + bpmText (from) + L" \x2192 " + bpmText (ask.to) + L" \x00b7 " + done.audio));
+}
+
+bool App::handleTempoAskKey (const Key& k)
+{
+    if (! tempoAsk.has_value())
+        return false;
+
+    const auto c = k.code == Key::Char ? juce::CharacterFunctions::toLowerCase ((juce::juce_wchar) k.ch) : 0;
+
+    if (c == 't')
+        answerTempoAsk (TempoChoice::keepInTime);
+    else if (c == 'b')
+        answerTempoAsk (TempoChoice::moveWithBeats);
+    else if (k.code == Key::Escape || c == 'c' || c == 'n')
+        answerTempoAsk (TempoChoice::cancel);
+    else if (c == 's')
+        say (Result::fail (L"stretching audio to the tempo isn't built yet \x2014 t, b or esc"));
+
+    return true;
+}
+
+// "agents" / "agents on" / "agents off": whether taw listens for agents (settings.json, every
+// session). Off: no socket and no listing, so taw --mcp says agents are off.
+Result App::agentsCommand (const juce::String& arg)
+{
+    const auto a = arg.trim().toLowerCase();
+
+    if (a.isNotEmpty() && a != "on" && a != "off")
+        return Result::fail ("agents on | agents off");
+
+    agentsOn = a.isEmpty() ? ! agentsOn : a == "on";
+    saveSettings();
+
+    if (! agentsOn)
+    {
+        agentServer.reset();
+        tempoAsk.reset();
+        return Result::good (L"agents off \x00b7 taw --mcp can't reach this taw (agents on lets them in)");
+    }
+
+    if (! startAgents())
+        return Result::fail ("agents on, but taw couldn't open its local socket");
+
+    return Result::good (L"agents on \x00b7 taw --mcp reaches the session open here");
+}
+
+//==============================================================================
 bool App::startAgents()
 {
     if (agentServer != nullptr)
         return true;
+
+    if (! agentsOn)
+        return false;
 
     auto server = std::make_unique<agents::Server>();
 
@@ -1063,7 +1284,11 @@ void App::pollAgents()
     agentServer->setSession (session != nullptr ? session->folder() : juce::File(), session != nullptr ? session->name() : juce::String());
 
     if (session == nullptr)
+    {
         recentEdits.watch ({});
+        tempoAsk.reset();
+        tempoOutcome.reset();
+    }
     else if (! recentEdits.watching (session->tree()))
         recentEdits.watch (session->tree());
 

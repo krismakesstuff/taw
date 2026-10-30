@@ -402,6 +402,7 @@ std::vector<App::Setting> App::projectSettings() const
         { "New session rate", juce::String (newRate / 1000.0, newRate == 44100.0 || newRate == 88200.0 ? 1 : 0) + L" kHz  (all sessions)", {} },
         { "Dated new sessions", dateSessionNames ? "on  (" + datedName ("name") + ", all sessions)" : juce::String ("off"), {} },
         { "Keycast (all sessions)", keycastShown && ! keycastClosed ? juce::String ("shown  (keycast font|color|bg|size|fade)") : juce::String ("hidden"), "keycast " },
+        { "Agents (all sessions)", agentsOn ? juce::String ("on  (taw --mcp can edit the session open here)") : juce::String ("off"), {} },
     };
 }
 
@@ -454,6 +455,7 @@ Result App::stepSetting (int index, int direction)
     }
 
     if (name.startsWith ("Keycast")) return execute ("keycast");
+    if (name.startsWith ("Agents")) return agentsCommand ({});
     if (name.startsWith ("Show bounces")) return execute ((bool) s[ids::bounceReveal] ? "bounces off" : "bounces on");
 
     // The video: left/right shows or hides it, moves its start a frame, or its offset a frame.
@@ -905,6 +907,7 @@ Result App::execute (const juce::String& line)
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
     if (v == "stats")              return toggleStats();
+    if (v == "agents")             return agentsCommand (p.args[0]); // taw --mcp's way in (docs/plan-taw-mcp.md)
     if (v == "hub")                return hubCommand (p.rest.trim());
 
     // browse: show or hide the sample browser (ctrl+B goes into it); index <folder> adds a folder of samples to it.

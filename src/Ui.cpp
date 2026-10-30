@@ -222,6 +222,8 @@ juce::String Ui::snapshot (App& app, int w, int h)
 
         if (app.closePrompt.has_value())
             drawClosePrompt (app);
+        else if (app.tempoAsk.has_value())
+            drawTempoPrompt (app);
     }
 
     juce::String out;
@@ -278,6 +280,8 @@ void Ui::render (App& app)
             drawClosing (app);
         else if (app.closePrompt.has_value())
             drawClosePrompt (app);
+        else if (app.tempoAsk.has_value())
+            drawTempoPrompt (app);
     }
 
     if (app.loadingPlugin.isNotEmpty() && w >= 70 && h >= 16)
@@ -3283,6 +3287,33 @@ void Ui::drawClosePrompt (App& app)
     canvas.text (x + 1, y0 + 6, "don't save", colour::text, bg);
     x = canvas.text (x0 + 26, y0 + 6, "esc", colour::accent, bg, true);
     canvas.text (x + 1, y0 + 6, "stay", colour::text, bg);
+}
+
+// An agent wants another tempo and the session has audio clips, which are placed in samples:
+// MIDI and hits follow the beats, the audio does whatever the user says.
+void Ui::drawTempoPrompt (App& app)
+{
+    const auto& ask = *app.tempoAsk;
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 76), x0 = (w - boxW) / 2, y0 = 3, bg = colour::headerBg;
+    auto bpm = [] (double b) { return juce::String (b, 2).trimCharactersAtEnd ("0").trimCharactersAtEnd ("."); };
+
+    for (int y = 0; y < 10; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    int x = canvas.text (x0 + 2, y0 + 1, "TEMPO", colour::text, bg, true);
+    x = canvas.text (x + 1, y0 + 1, ask.agent, colour::accent, bg, true, boxW / 2);
+    canvas.text (x + 1, y0 + 1, "wants " + bpm (ask.from) + L" \x2192 " + bpm (ask.to) + " bpm", colour::text, bg, false, x0 + boxW - x - 3);
+    canvas.text (x0 + 2, y0 + 2, "MIDI and hits follow the beats. Your audio clips:", colour::dim, bg, false, boxW - 4);
+
+    x = canvas.text (x0 + 2, y0 + 4, "t", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 4, "keep them where they are in time (they stay at their seconds)", colour::text, bg, false, boxW - 6);
+    x = canvas.text (x0 + 2, y0 + 5, "b", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 5, "move them with the beats (each starts on its beat; not stretched)", colour::text, bg, false, boxW - 6);
+    x = canvas.text (x0 + 2, y0 + 6, "s", colour::faint, bg, true);
+    canvas.text (x + 1, y0 + 6, "stretch them to the new tempo (coming, not built yet)", colour::faint, bg, false, boxW - 6);
+    x = canvas.text (x0 + 2, y0 + 8, "esc", colour::accent, bg, true);
+    canvas.text (x + 1, y0 + 8, "cancel: the tempo stays " + bpm (ask.from), colour::text, bg, false, boxW - 8);
 }
 
 // The session screen, top to bottom: a new session (its name, where it goes, the templates),

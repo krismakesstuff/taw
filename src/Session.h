@@ -52,6 +52,14 @@ public:
     juce::ValueTree track (int index) const; // 0-based
     juce::ValueTree addTrack (const juce::String& name, int input, juce::UndoManager* = nullptr);
 
+    // Track ids (ids::uid, "t7"): each track's for good, through moves, renames, undo and saves.
+    // A track added without one (or with another's, a duplicate) gets the next; App does it as
+    // tracks arrive, load and create for every track there.
+    void giveTrackIds();
+    void giveTrackId (juce::ValueTree node);
+    bool trackIdTaken (const juce::ValueTree& node) const; // none, or another track has it
+    int trackById (const juce::String& id) const;           // its index, or -1
+
     juce::String name() const { return state[ids::name]; }
     double sampleRate() const { return state[ids::sampleRate]; }
     double bpm() const { return state[ids::bpm]; }

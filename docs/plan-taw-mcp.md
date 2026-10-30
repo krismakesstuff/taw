@@ -1,7 +1,8 @@
 # Plan: taw-mcp, agents in the open session
 
-Status (2026-10-29): step 1 built on branch `taw-mcp` (Windows; nothing in it is Windows-only).
-See "Step 1 as built" at the end.
+Status (2026-10-29): step 1 built on branch `taw-mcp` (Windows; nothing in it is Windows-only),
+with the user's answers to its four questions: an `agents` setting, stable track ids, tempo
+changes that ask the user about audio, `--mcptest` in CI. See "Step 1 as built" at the end.
 
 Written so another agent can pick it up. Read `docs/design.md` first (Threads, Undo, Headless
 commands, Saving, Hub), then `src/Agents.h`.
@@ -63,17 +64,32 @@ Decided here (defaults; change them if they're wrong):
 - **A token.** The socket listens on 127.0.0.1 only, and the first message must carry the
   token from that file (readable only by the user's account), so another local program can't
   drive taw without reading the user's files.
-- **The socket is always on** in interactive taw. It costs one idle thread. (Open question:
-  should there be `agents off`?)
-- **Tracks are named as on screen**: `"3"`, `"2.3"` (pad 3 of kit 2), or by exact name. Track
-  numbers move when tracks are added above or removed, so reads give both and an agent should
-  read again after the user has been busy. (Open question: stable track ids in the file; not
-  needed yet.)
+- **The socket has a setting, on by default** (decided with the user, 2026-10-29):
+  `"agents"` in `settings.json` (every session, like the theme), `agents` / `agents on` /
+  `agents off` in taw, and an "Agents (all sessions)" row in the project panel. Off: no
+  socket, no `agents\<pid>.json`, and `taw --mcp` answers `agents-off`: "agents are turned off
+  in taw: the user can type agents on there". Agents can't switch it (the passthrough refuses
+  `agents`).
+- **Stable track ids** (decided with the user): every TRACK has a `uid` ("t7") for good.
+  It survives moves, renames, undo/redo (the node keeps it) and save/load; a copy (`dup
+  track`) gets a new one; ids are never handed out twice (`nextTrackId` on the SESSION counts
+  past every id given, so an undone track's id can't come back on another). `App`'s tree
+  listener gives one to any TRACK that arrives without one, or with another's, so every way of
+  making tracks is covered without touching them; `Session::load` and `create` give ids to
+  tracks that have none (old sessions, templates). Neither property is undoable, and neither
+  counts as anyone's edit for the hands-off rules. Reads give `id` and `number` (`"3"`, as on
+  screen and in `run_command`); every tool's `track` takes the id, and falls back to the number
+  or the exact name (kept: a person pasting "3" into a chat still works, and the id is tried
+  first so it can't be mistaken).
+- **Clips stay by index**, with a check: `clip_beat` (the clip's start, as read) makes a
+  write or a removal refuse ("the clips have changed, read the track again") if clip `n` isn't
+  the clip the agent read. No clip ids: clips are made in many places (recording, splitting,
+  pasting, loop passes), and a start beat on one track is as good as an id for "the clip I
+  read". Markers need none: agents only add them.
 - **Positions are beats** from the session start (beat 0 is bar 1), as MIDI and hit clips
   store them; audio clips are given in beats and seconds too.
-- **Tempo and time-signature changes are allowed**, though they move everything in beats
-  under the user's feet; refused only when the user changed a session setting in the last few
-  seconds. (Open question.)
+- **Tempo** (decided with the user): agents may change it; see "Tempo and audio" below. The
+  time signature (`sig 3/4`) changes no positions in time and goes straight through.
 - **The passthrough can't** save, close, quit, play, stop, record, undo or redo (the user's
   history), bounce, open windows or pickers, change the device, theme or controller mapping,
   or use the clipboard (copy, cut, paste). It also can't move the user's cursor, focus,
@@ -114,7 +130,9 @@ taw → bridge   { "type": "result", "id": 7, "ok": true, "text": "wrote 8 notes
 ```
 
 Error codes: `playing`, `hands-off`, `busy` (an import or bounce is running, or a session is
-opening or closing), `no-session`, `invalid` (bad arguments), `failed` (the command said no).
+opening or closing), `no-session`, `agents-off` (the bridge: nothing listens because the
+setting is off), `needs-user` (a tempo change waiting on the user), `declined` (the user said
+no to it), `invalid` (bad arguments), `failed` (the command said no).
 
 Connection threads only parse and queue; nothing they do touches the session. Replies are sent
 from the message thread. A connection that goes away mid-call just has its answer dropped.
@@ -142,19 +160,53 @@ All edits answer with what they did, as taw's own messages do, and refuse with a
 
 | Tool | Arguments | Does |
 |---|---|---|
-| `get_session` | `{ include_notes?: bool }` | the session: `name, bpm, time_signature [n, d], sample_rate, playing, recording, cursor_beat, focused, selection { from_beat, to_beat, tracks } \| null, loop, markers [{ name, beat }], tracks [...]`; each track as `get_track`, with clips summarised (note and hit counts) unless `include_notes` |
-| `get_track` | `{ track }` | `{ id: "3", name, kind: audio\|instrument\|sample\|bus\|kit, locked?: "why", armed, mute, solo, volume_db, pan, output: "Mix"\|bus name, plugin?, sample?, kit?: "2", pad?, note?, choke?, members?: ["2.1", ...], inserts [{ slot: "A", plugin, bypass }], sends [{ slot, to, db, pre }], clips [...] }`; audio clips `{ index, beat, length_beats, seconds, length_seconds, file }`, MIDI clips `{ index, beat, length, notes [{ beat, length, pitch, vel, ch }] }`, hit clips `{ index, beat, length, hits [{ beat, vel }] }`; note and hit beats are from the clip's start |
-| `run_command` | `{ command }` | one line of taw's command language (`2 v -6`, `bpm 92`, `3 pat /16 x.x.`, `add 2 Gtr`), as typed in taw, one undo step |
-| `add_track` | `{ kind: audio\|instrument\|sample\|bus\|kit, name?, plugin?, sample? }` | a new track at the bottom; an instrument loads `plugin` (the best name match, as `inst`), or none; a sample track loads `sample` (a file path), or none yet |
+| `get_session` | `{ include_notes?: bool }` | the session: `name, bpm, time_signature [n, d], sample_rate, playing, recording, cursor_beat, focused (an id), selection { from_beat, to_beat, tracks (ids) } \| null, loop, tempo_request, markers [{ name, beat }], tracks [...]`; each track as `get_track`, with clips summarised (note and hit counts) unless `include_notes` |
+| `get_track` | `{ track }` | `{ id: "t3", number: "3", name, kind: audio\|instrument\|sample\|bus\|kit, locked?: "why", armed, mute, solo, volume_db, pan, output: "Mix"\|bus name, plugin?, sample?, kit?: (its id), note?, choke?, members?: [ids], inserts [{ slot: "A", plugin, bypass }], sends [{ slot, to, db, pre }], clips [...] }`; audio clips `{ index, beat, length_beats, seconds, length_seconds, file }`, MIDI clips `{ index, beat, length, notes [{ beat, length, pitch, vel, ch }] }`, hit clips `{ index, beat, length, hits [{ beat, vel }] }`; note and hit beats are from the clip's start |
+| `run_command` | `{ command }` | one line of taw's command language (`2 v -6`, `3 pat /16 x.x.`, `add 2 Gtr`), as typed in taw (tracks by `number`), one undo step; `bpm` goes through `set_tempo` |
+| `add_track` | `{ kind: audio\|instrument\|sample\|bus\|kit, name?, plugin?, sample? }` | a new track at the bottom, answering `{ track: id, number }`; an instrument loads `plugin` (the best name match, as `inst`), or none; a sample track loads `sample` (a file path), or none yet |
 | `remove_track` | `{ track }` | as `3 remove`: a bus's feeds go back to the mix |
-| `write_notes` | `{ track, clip?, beat?, length?, notes: [{ beat, length, pitch, vel?, ch? }], replace? }` | notes into MIDI clip `clip` (an index from `get_track`; it grows to fit), or into a new clip at `beat` (`length` beats long; by default whole bars round the notes). `replace` clears the clip's notes first. `vel` 1-127 (100), `ch` 1-16 (1) |
-| `write_hits` | `{ track, clip?, beat?, length?, hits: [{ beat, vel? }], replace? }` | the same for a sample track's hit clips. `vel` 0-1 (0.8) |
-| `remove_clip` | `{ track, clip }` | one clip, by index |
+| `write_notes` | `{ track, clip?, clip_beat?, beat?, length?, notes: [{ beat, length, pitch, vel?, ch? }], replace? }` | notes into MIDI clip `clip` (an index from `get_track`; it grows to fit; `clip_beat` checks it's the one read), or into a new clip at `beat` (`length` beats long; by default whole bars round the notes). `replace` clears the clip's notes first. `vel` 1-127 (100), `ch` 1-16 (1) |
+| `write_hits` | `{ track, clip?, clip_beat?, beat?, length?, hits: [{ beat, vel? }], replace? }` | the same for a sample track's hit clips. `vel` 0-1 (0.8) |
+| `remove_clip` | `{ track, clip, clip_beat? }` | one clip, by index |
 | `add_marker` | `{ beat, name }` | a marker |
+| `set_tempo` | `{ bpm }` | the tempo; with audio clips in the session, the user decides first (below) |
 
-Step 2 adds `set_track` (name, volume, pan, mute, solo, output, sends), `set_session` (tempo,
-time signature, loop), `move_clip`, `write_cc` and `write_automation`. Until then the passthrough
+`track` is the id from a read ("t3"); the number as on screen ("3", "2.3") or the exact name
+work too.
+
+Step 2 adds `set_track` (name, volume, pan, mute, solo, output, sends), `set_session` (time
+signature, loop), `move_clip`, `write_cc` and `write_automation`. Until then the passthrough
 does all of those.
+
+## Tempo and audio
+
+Decided with the user (2026-10-29): agents may change the tempo. MIDI and hit clips are in
+beats, so they always follow it. Audio clips are in samples (`CLIP.start`), so with audio in
+the session the user decides what happens to it, every time:
+
+1. The agent's `set_tempo` (or `run_command bpm …`) changes nothing and answers `needs-user`.
+2. taw shows the tempo box (it takes the keys until it's answered, as the save prompt does):
+   "TEMPO claude-code wants 100 → 120 bpm · MIDI and hits follow the beats. Your audio clips:"
+   - `t` keep them where they are in time (they stay at their seconds): only the tempo changes.
+   - `b` move them with the beats: each clip's start goes to the same beat at the new tempo
+     (`start × old / new`), in the main playlist and the others. The audio isn't stretched,
+     so a clip runs as long in seconds as it did and lines up with the grid only at its start.
+   - `s` stretch them to the new tempo: shown faint, "coming, not built yet". Pressing it says
+     so and the box stays.
+   - `esc` cancel: the tempo stays.
+3. The answer is applied at once, as one undo step named for the agent ("claude-code: bpm 120").
+   Markers and the loop stay in time either way, as they do when a person changes the tempo.
+4. The agent finds out by calling `set_tempo` again: "the tempo is 120 (the user chose: audio
+   clips moved with the beats)", or `declined` if they cancelled (for two minutes, so it doesn't
+   keep asking), or `needs-user` while the box is still up. `get_session`'s `tempo_request` says
+   the same (`waiting for the user`, `applied`, `cancelled`, with what was chosen).
+
+Both real options are possible with clips as they're stored today; only stretching isn't.
+**Which the user picks tells us whether time-stretching is wanted:** if they keep reaching for
+`b` and then fixing the audio, or press `s`, stretching is next.
+
+With no audio clips the change goes straight through (the hands-off rule for the session's
+settings still holds). The time signature changes nothing in time, so `sig` needs no box.
 
 ## Hands-off
 
@@ -223,7 +275,13 @@ it, as it does for a person (open: a short fade-out on removal, for everyone).
   line; refusals: playing, the focused track, a time selection, a recent edit, the passthrough's
   forbidden verbs (save, undo, play); the passthrough leaving the cursor and focus alone;
   `session.json` untouched (agents never save); a wrong token refused; a dropped connection and
-  garbage on the socket leaving taw running.
+  garbage on the socket leaving taw running. Then: track ids through a move (alt+up), an agent's
+  removal undone by the user, a user's `dup track` (a new id) and a new track (never a used id),
+  writing by id and a stale `clip_beat` refused; `agents off` (no socket, no listing, the
+  bridge says `agents-off`) and `agents on`; the tempo: straight through with no audio, and with
+  an audio clip `needs-user`, the box on screen, `s` doing nothing yet, `b` moving the clip, the
+  retry hearing the choice, `esc` and `declined`, `t` leaving the clip; a reload keeping every
+  id; an old session without ids getting t1, t2, t3 on load.
 - `taw --serve <session> [seconds]`: opens a session headless with the control socket and runs
   for a while, so `taw --mcp` can be checked from a shell by piping JSON-RPC into it.
 
@@ -243,18 +301,21 @@ it, as it does for a person (open: a short fade-out on removal, for everyone).
 - `Commands.cpp` gained `commandShape` (the parse, public) for the passthrough's checks.
 - Rolled back on refusal: our tools all or nothing; the passthrough keeps what a command did
   when it fails on its own (as for a person), and rolls back only a hands-off breach.
-- Tested: `taw --mcptest` (54 checks, all ok), clean under MSVC `/W4` and clang-cl's strict
-  set; `taw --mcp` piped from a shell against `taw --serve` (every line it writes is JSON).
+- Then, with the user's answers: the `agents` setting (`App::agentsCommand`, settings.json,
+  the project panel), track ids (`Session::giveTrackIds` / `giveTrackId`, `App`'s
+  `valueTreeChildAdded`), `clip_beat`, `set_tempo` and the tempo box (`App::tempoAsk`,
+  `answerTempoAsk`, `Ui::drawTempoPrompt`).
+- Tested: `taw --mcptest` (81 checks, all ok; in CI on Windows and macOS), the other
+  device-free self-tests and `--duptracktest` unchanged, clean under MSVC `/W4` and clang-cl's
+  strict set; `taw --mcp` piped from a shell against `taw --serve` (every line it writes is JSON).
 
 Not built yet, and open:
 
 - `set_track`, `set_session`, `move_clip`, `write_cc`, automation as tools (the passthrough
   covers them meanwhile).
-- **Agents off.** No setting to keep the socket shut; should there be one (`agents off` in
-  `settings.json`)?
-- **Stable track ids.** Numbers shift when tracks are added above or removed; agents are told to
-  read again. A `uid` on each TRACK would fix it (a file change; not needed yet).
-- **Tempo changes** are allowed (they move everything in beats). Should they be the user's?
+- Stretching audio to a new tempo (the box shows it as coming).
+- The tempo box takes the keys until it's answered, space included. If that's too much while
+  the user is mid-idea, it could sit on the status line instead and wait.
 - **A removed track that's ringing** is cut, as it is for a person. A short fade on removal
   would help both.
 - **macOS:** nothing Windows-only, but not yet built or run there.

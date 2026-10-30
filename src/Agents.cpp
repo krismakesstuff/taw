@@ -250,7 +250,7 @@ juce::var toolList()
     static const juce::var tools = juce::JSON::parse (R"JSON([
 {
   "name": "get_session",
-  "description": "Read the session open in taw: tempo, time signature, where the user is (cursor, focused track, time selection), markers, and every track with its kind, plugin, routing (output, sends, inserts), kit membership and clips. Positions are in beats from the session start (beat 0 is bar 1). Tracks are named as on taw's screen: \"3\", or \"2.3\" for pad 3 of kit 2. A track the user is working on has \"locked\" saying why; edits to it are refused. Works while taw plays.",
+  "description": "Read the session open in taw: tempo, time signature, where the user is (cursor, focused track, time selection), markers, a tempo change waiting on the user (tempo_request), and every track with its kind, plugin, routing (output, sends, inserts), kit membership and clips. Positions are in beats from the session start (beat 0 is bar 1). Each track has an id (\"t3\") that stays the same through moves, renames, undo and saves: pass it to the other tools as track. Its number (\"3\", or \"2.3\" for pad 3 of kit 2) is what taw's screen and run_command use, and shifts as tracks come and go. A track the user is working on has \"locked\" saying why; edits to it are refused. Works while taw plays.",
   "inputSchema": { "type": "object", "properties": {
     "include_notes": { "type": "boolean", "description": "Every note and hit in every clip (default: only how many)." } } }
 },
@@ -258,17 +258,17 @@ juce::var toolList()
   "name": "get_track",
   "description": "One track in full: as in get_session, with every MIDI clip's notes and every hit clip's hits. Note and hit beats are from their clip's start.",
   "inputSchema": { "type": "object", "properties": {
-    "track": { "type": "string", "description": "Its number as on screen (\"3\", \"2.3\") or its exact name." } }, "required": ["track"] }
+    "track": { "type": "string", "description": "Its id from get_session (\"t3\"); its number as on screen or its exact name also work." } }, "required": ["track"] }
 },
 {
   "name": "run_command",
-  "description": "Run one line of taw's command language, as the user would type it in taw: e.g. \"2 v -6\" (volume), \"2 n Bass\" (rename), \"3 m\" (mute), \"bpm 92\", \"sig 3/4\", \"4 pat /16 x.x.x.x.\" (a step pattern over the time selection or a bar), \"2 out Verb\", \"bus Verb\", \"2 send a Verb -12\", \"3 fx b cla-2a\", \"add inst vital\". Track numbers as on screen. One undo step. Not allowed: save, close, quit, play, stop, record, undo/redo, bounce, moving the cursor (@), focusing, the clipboard, and anything that opens a window. A command with no track number acts on the user's focused track, which is locked: always give the track number.",
+  "description": "Run one line of taw's command language, as the user would type it in taw: e.g. \"2 v -6\" (volume), \"2 n Bass\" (rename), \"3 m\" (mute), \"bpm 92\", \"sig 3/4\", \"4 pat /16 x.x.x.x.\" (a step pattern over the time selection or a bar), \"2 out Verb\", \"bus Verb\", \"2 send a Verb -12\", \"3 fx b cla-2a\", \"add inst vital\". Tracks by their number as on screen (get_session's number, not id). \"bpm\" goes through set_tempo's rules. One undo step. Not allowed: save, close, quit, play, stop, record, undo/redo, bounce, moving the cursor (@), focusing, the clipboard, and anything that opens a window. A command with no track number acts on the user's focused track, which is locked: always give the track number.",
   "inputSchema": { "type": "object", "properties": {
     "command": { "type": "string" } }, "required": ["command"] }
 },
 {
   "name": "add_track",
-  "description": "Add a track at the bottom of the session. Returns its number.",
+  "description": "Add a track at the bottom of the session. Returns its id (and number).",
   "inputSchema": { "type": "object", "properties": {
     "kind": { "type": "string", "enum": ["audio", "instrument", "sample", "bus", "kit"] },
     "name": { "type": "string" },
@@ -287,6 +287,7 @@ juce::var toolList()
   "inputSchema": { "type": "object", "properties": {
     "track": { "type": "string" },
     "clip": { "type": "integer", "description": "An existing clip's index. Leave out for a new clip." },
+    "clip_beat": { "type": "number", "description": "That clip's start beat as read: refused if the clips have changed since." },
     "beat": { "type": "number", "description": "A new clip's start on the timeline, in beats (0 is bar 1)." },
     "length": { "type": "number", "description": "A new clip's length in beats (default: whole bars around the notes)." },
     "replace": { "type": "boolean", "description": "Clear the clip's notes first." },
@@ -303,6 +304,7 @@ juce::var toolList()
   "inputSchema": { "type": "object", "properties": {
     "track": { "type": "string" },
     "clip": { "type": "integer" },
+    "clip_beat": { "type": "number" },
     "beat": { "type": "number" },
     "length": { "type": "number" },
     "replace": { "type": "boolean" },
@@ -315,13 +317,19 @@ juce::var toolList()
   "name": "remove_clip",
   "description": "Remove one clip (audio, MIDI or hits) from a track, by its index from get_track.",
   "inputSchema": { "type": "object", "properties": {
-    "track": { "type": "string" }, "clip": { "type": "integer" } }, "required": ["track", "clip"] }
+    "track": { "type": "string" }, "clip": { "type": "integer" }, "clip_beat": { "type": "number" } }, "required": ["track", "clip"] }
 },
 {
   "name": "add_marker",
   "description": "Drop a named marker at a beat.",
   "inputSchema": { "type": "object", "properties": {
     "beat": { "type": "number" }, "name": { "type": "string" } }, "required": ["beat", "name"] }
+},
+{
+  "name": "set_tempo",
+  "description": "Change the session's tempo. MIDI and hits follow it (they're in beats). If the session has audio clips, nothing changes yet: taw asks the user whether the audio stays where it is in time or moves with the beats, and this answers needs-user. Call again (or read get_session's tempo_request) to see what they chose; declined means they said no.",
+  "inputSchema": { "type": "object", "properties": {
+    "bpm": { "type": "number", "description": "20-400" } }, "required": ["bpm"] }
 }
 ])JSON");
     return tools;
@@ -430,6 +438,11 @@ bool Bridge::connect (juce::String& error)
             error = all.empty()      ? juce::String ("taw isn't running (start taw and open a session)")
                     : hint.isEmpty() ? juce::String ("taw is running but has no session open")
                                      : "no running taw has a session matching " + hint.quoted();
+
+            // Turned off (settings.json, every taw): nothing listens, and that's why.
+            if (! (bool) juce::JSON::parse (configFolder().getChildFile ("settings.json")).getProperty ("agents", true))
+                error = "agents are turned off in taw: the user can type agents on there (or switch it in the project panel)";
+
             return false;
         }
 
@@ -463,7 +476,7 @@ Answer Bridge::call (const juce::String& tool, const juce::var& args)
     juce::String error;
 
     if (! connect (error))
-        return Answer::fail ("no-session", error);
+        return Answer::fail (error.startsWith ("agents are turned off") ? "agents-off" : "no-session", error);
 
     const auto id = nextId++;
     sendJson (*link, object ({ { "type", "call" }, { "id", id }, { "tool", tool }, { "args", args } }));
@@ -522,8 +535,9 @@ juce::String Bridge::handle (const juce::String& line)
                                   "works in it. Read with get_session first. Edits are refused (and nothing changes) on the track the user's cursor "
                                   "is on, inside their time selection, on anything they edited in the last few seconds, and while taw plays or "
                                   "records: read again, pick other tracks, or try again in a moment. Each edit is one undo step the user can take "
-                                  "back; you never save (the user saves). Positions are beats from the session start; tracks are named as on "
-                                  "screen (\"3\", \"2.3\")." } }));
+                                  "back; you never save (the user saves). Positions are beats from the session start; tracks go by the ids "
+                                  "get_session gives (\"t3\"), which never change. A tempo change on a session with audio waits for the user "
+                                  "to choose what the audio does (needs-user): don't press them, call again later." } }));
     }
 
     if (notification)

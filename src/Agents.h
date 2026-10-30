@@ -143,7 +143,17 @@ public:
 
 private:
     void touched (const juce::ValueTree& owner);
-    void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier&) override { touched (ownerOf (t)); }
+    void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier& id) override
+    {
+        if (! isBookkeeping (id))
+            touched (ownerOf (t));
+    }
+
+public:
+    // Track ids being handed out: nobody's edit.
+    static bool isBookkeeping (const juce::Identifier& id) { return id == juce::Identifier ("uid") || id == juce::Identifier ("nextTrackId"); }
+
+private:
     void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override { touched (child.hasType ("TRACK") ? child : ownerOf (parent)); }
     void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override { touched (child.hasType ("TRACK") ? child : ownerOf (parent)); }
     void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override { touched (ownerOf (parent)); }

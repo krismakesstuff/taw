@@ -142,6 +142,7 @@ private:
     void drawPluginLoading (App&);
     void drawClosing (App&);
     void drawClosePrompt (App&);
+    void drawTempoPrompt (App&); // an agent's tempo change: what to do with the audio
     void drawStats (App&);
 
     void drawProgress (App&, const juce::String& title, const juce::String& doing, size_t done, size_t total);

@@ -67,6 +67,7 @@ struct Touches final : juce::ValueTree::Listener
     {
         juce::ValueTree node, child;
         bool removed = false;
+        juce::Identifier id; // a property changed (child invalid)
     };
 
     explicit Touches (juce::ValueTree t) : root (std::move (t)) { root.addListener (this); }
@@ -75,7 +76,7 @@ struct Touches final : juce::ValueTree::Listener
     void valueTreePropertyChanged (juce::ValueTree& t, const juce::Identifier& id) override
     {
         if (! agents::RecentEdits::isBookkeeping (id))
-            list.push_back ({ t, {}, false });
+            list.push_back ({ t, {}, false, id });
     }
 
     void valueTreeChildAdded (juce::ValueTree& p, juce::ValueTree& c) override { list.push_back ({ p, c, false }); }
@@ -168,6 +169,10 @@ struct AgentTools
     {
         Locks l;
 
+        // Away from the keys for a while: the cursor and selection are fair game.
+        if (app.userIdle())
+            return l;
+
         if (app.focused >= 0 && app.focused < session().numTracks())
             l.focused = session().track (app.focused);
 
@@ -198,6 +203,38 @@ struct AgentTools
 
     static bool has (const std::vector<juce::ValueTree>& v, const juce::ValueTree& t) { return std::find (v.begin(), v.end(), t) != v.end(); }
 
+    // What an edit that went in changed, lit on screen (App::markAgentEdit): the track, and the
+    // value where one's shown (volume, pan, a send, the tempo, the markers).
+    void mark (const std::vector<Touches::Touch>& touched) const
+    {
+        const auto sessionTree = session().tree();
+
+        for (const auto& t : touched)
+        {
+            const auto subject = t.child.isValid() ? t.child : t.node;
+
+            if (subject.hasType (ids::TRACK) && t.removed)
+                continue; // gone: nothing to light
+
+            const auto owner = subject.hasType (ids::TRACK) ? subject : agents::RecentEdits::ownerOf (t.node);
+            juce::String what;
+
+            if (! t.child.isValid() && t.node.hasType (ids::SEND))
+                what = "send " + t.node[ids::slot].toString().toLowerCase();
+            else if (! t.child.isValid() && t.id == ids::gainDb && (t.node.hasType (ids::TRACK) || t.node == sessionTree))
+                what = "vol";
+            else if (! t.child.isValid() && t.id == ids::pan && t.node.hasType (ids::TRACK))
+                what = "pan";
+            else if (! t.child.isValid() && t.node == sessionTree && t.id == ids::bpm)
+                what = "bpm";
+            else if (subject.hasType (ids::MARKER) || (t.node.hasType (ids::MARKER)))
+                what = "markers";
+
+            if (owner.isValid())
+                app.markAgentEdit (owner, what);
+        }
+    }
+
     juce::String trackText (const juce::ValueTree& track) const
     {
         const auto index = session().tree().indexOf (track); // tracks come first in the tree
@@ -214,7 +251,7 @@ struct AgentTools
     juce::String lockReason (const juce::ValueTree& track, const Locks& l) const
     {
         if (track == l.focused)
-            return "your cursor is on it";
+            return "your cursor is on it (agents may edit it once the user's left the keys for " + juce::String ((int) app.agentIdle) + " s)";
 
         if (const auto secs = app.recentEdits.recent (track); secs >= 0.0)
             return "you changed it " + juce::String (secs, 1) + " s ago";
@@ -240,7 +277,8 @@ struct AgentTools
             if (owner.hasType (ids::TRACK))
             {
                 if (owner == l.focused)
-                    return trackText (owner) + L" is where your cursor is \x2014 pick another track, or wait for the user to move";
+                    return trackText (owner) + L" is where your cursor is \x2014 pick another track, or try again once the user's left the keys for "
+                           + juce::String ((int) app.agentIdle) + " s";
 
                 if (const auto secs = app.recentEdits.recent (owner); secs >= 0.0)
                     return "the user changed " + trackText (owner) + " " + juce::String (secs, 1) + " s ago (try again in a few seconds)";
@@ -387,6 +425,7 @@ struct AgentTools
             const juce::ScopedValueSetter<bool> mine (app.agentEditing, true), notUsers (app.recentEdits.agentEditing, true);
             um->beginNewTransaction (call.agent + ": " + label);
             bool rollBack = false;
+            std::vector<Touches::Touch> touched;
 
             {
                 Touches touches (session().tree());
@@ -397,12 +436,17 @@ struct AgentTools
                     a = Answer::fail ("hands-off", why);
                     rollBack = true;
                 }
+
+                touched = touches.list;
             }
 
             if (rollBack || (structured && ! a.ok))
                 um->undoCurrentTransactionOnly(); // the user's redo history comes back too
             else
+            {
                 um->setCurrentTransactionName (call.agent + ": " + label);
+                mark (touched);
+            }
 
             // It started an import (add sample, import): answered once that's in (pollAgents).
             if (a.ok && ! importing && app.import != nullptr)
@@ -442,6 +486,7 @@ struct AgentTools
             const juce::ScopedValueSetter<bool> mine (app.agentEditing, true), notUsers (app.recentEdits.agentEditing, true);
             um->beginNewTransaction (call.agent + ": " + app.agentWaitingLabel);
             bool rollBack = false;
+            std::vector<Touches::Touch> touched;
 
             {
                 Touches touches (session().tree());
@@ -463,12 +508,17 @@ struct AgentTools
                     a = Answer::fail ("hands-off", why);
                     rollBack = true;
                 }
+
+                touched = touches.list;
             }
 
             if (rollBack)
                 um->undoCurrentTransactionOnly();
             else
+            {
                 um->setCurrentTransactionName (call.agent + ": " + app.agentWaitingLabel);
+                mark (touched);
+            }
         }
 
         restoreView (view);
@@ -1379,6 +1429,7 @@ void App::answerTempoAsk (TempoChoice choice)
         }
 
         um()->setCurrentTransactionName (ask.agent + ": bpm " + bpmText (ask.to));
+        markAgentEdit (session->tree(), "bpm");
     }
 
     done.audio = choice == TempoChoice::keepInTime ? "audio kept where it is in time" : "audio clips moved with the beats";
@@ -1596,8 +1647,37 @@ void App::noteAgentCall (const agents::Call& call, const agents::Answer& answer)
         agentLastEdit = seen;
 }
 
+void App::markAgentEdit (const juce::ValueTree& owner, const juce::String& what)
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    agentMarks.erase (std::remove_if (agentMarks.begin(), agentMarks.end(), [&] (const auto& m)
+                                      { return now - m.when > agentTintMs || (m.owner == owner && m.what == what); }),
+                      agentMarks.end());
+    agentMarks.push_back ({ owner, what, now });
+}
+
+double App::agentMarkAge (const juce::ValueTree& owner, const juce::String& what) const
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+    double age = -1.0;
+
+    for (const auto& m : agentMarks)
+        if (m.owner == owner && (what.isEmpty() || m.what == what) && now - m.when <= agentTintMs)
+            age = age < 0.0 ? now - m.when : juce::jmin (age, now - m.when);
+
+    return age;
+}
+
 void App::pollAgents()
 {
+    // Playing a controller counts as being at it, as keys do.
+    if (midiInputs != nullptr)
+        if (const auto seen = midiInputs->eventsReceived(); seen != midiSeenForIdle)
+        {
+            midiSeenForIdle = seen;
+            lastInputAt = juce::Time::getMillisecondCounterHiRes();
+        }
+
     if (agentServer == nullptr)
         return;
 

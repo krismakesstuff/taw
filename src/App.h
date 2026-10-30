@@ -178,6 +178,23 @@ public:
     bool agentRolling = false;  // as pollAgents last saw it
     void noteAgentCall (const agents::Call&, const agents::Answer&);
 
+    // The user's input (keys, mouse, MIDI). Their cursor and time selection are theirs while
+    // they're at it; after agentIdle seconds without any, agents may edit there too (what they
+    // changed in the last few seconds stays theirs either way: RecentEdits).
+    double lastInputAt = 0.0; // ms
+    double agentIdle = 10.0;  // seconds
+    int midiSeenForIdle = 0;
+    bool userIdle() const { return juce::Time::getMillisecondCounterHiRes() - lastInputAt >= agentIdle * 1000.0; }
+
+    // What an agent just changed, lit so you see it happen: a flash, then the agents' colour
+    // for a few seconds. owner: a track, or the session's tree; what: "vol", "pan", "send a",
+    // "bpm", "markers", or "" (the track itself).
+    struct AgentMark { juce::ValueTree owner; juce::String what; double when; };
+    std::vector<AgentMark> agentMarks;
+    static constexpr double agentFlashMs = 250.0, agentTintMs = 4000.0;
+    void markAgentEdit (const juce::ValueTree& owner, const juce::String& what);
+    double agentMarkAge (const juce::ValueTree& owner, const juce::String& what = {}) const; // ms since, or -1 (none lately; "": any)
+
     // An agent's new tempo on a session with audio clips waits for the user to say what
     // happens to the audio (the tempo box). MIDI and hits follow the beats either way.
     enum class TempoChoice { cancel, keepInTime, moveWithBeats };

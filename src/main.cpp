@@ -1500,6 +1500,8 @@ int main (int argc, char** argv)
         app->execute ("add Vox");
         app->pumpBackgroundWork();
         app->recentEdits.window = 0.6; // seconds: short, so the test needn't wait long
+        app->agentIdle = 1.0e7;        // the user at the keys throughout (idle is tested on its own)
+        app->lastInputAt = juce::Time::getMillisecondCounterHiRes();
         auto wait = [&] (int ms)
         {
             for (const auto until = juce::Time::getMillisecondCounterHiRes() + ms; juce::Time::getMillisecondCounterHiRes() < until;)
@@ -1707,6 +1709,30 @@ int main (int argc, char** argv)
             app->engine.stop();
             app->pollAgents();
             check (app->agentHeld == 0 && app->message.contains ("mcptest tried to edit once while it played"), "stopping says it can edit now: " + app->message);
+        }
+
+        // Away from the keys: the focused track is fair game (playing still isn't), and what an
+        // agent changes is lit.
+        {
+            const auto vox = s.track (app->focused);
+            app->agentIdle = 0.3;
+            app->lastInputAt = juce::Time::getMillisecondCounterHiRes();
+            const auto busy = tool ("run_command", R"({"command":"1 v -4"})");
+            check (busy.text.startsWith ("[hands-off]") && busy.text.contains ("left the keys"), "at the keys: the focused track refused, saying when it frees");
+            wait (400);
+            app->engine.play (0);
+            check (tool ("run_command", R"({"command":"1 v -4"})").text.startsWith ("[playing]"), "idle but playing: still refused");
+            app->engine.stop();
+            pump();
+            app->agentMarks.clear(); // only this edit's
+            const auto idle = tool ("run_command", R"({"command":"1 v -4"})");
+            check (! idle.error && std::abs ((double) vox[taw::ids::gainDb] + 4.0) < 0.01, "idle: the focused track's volume changed: " + idle.text);
+            check (app->agentMarkAge (vox, "vol") >= 0.0 && app->agentMarkAge (vox) >= 0.0 && app->agentMarkAge (s.track (1)) < 0.0,
+                   "the track and its volume are lit, no other track");
+            app->agentIdle = 1.0e7;
+            app->lastInputAt = juce::Time::getMillisecondCounterHiRes();
+            app->execute ("1 v 0"); // as it was, for what follows
+            wait (700);
         }
 
         // A sample track with a sound: answered once the import is in.

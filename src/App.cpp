@@ -3603,6 +3603,7 @@ juce::String App::formatTime (juce::int64 pos) const
 
 void App::handleKey (const Key& k)
 {
+    lastInputAt = juce::Time::getMillisecondCounterHiRes(); // the user's at it (agents keep off their cursor)
     dispatchKey (k);
 
     // After the key's done its job: if the command line has text, the key was typing.

@@ -760,10 +760,16 @@ client) work in the one open in a running taw while you record and audition in i
   `write_notes`, `write_hits`, `remove_clip`, `add_marker`; and `run_command`, a line of the
   command language as typed (not save, close, quit, the transport, undo/redo, bounce, the
   cursor, focus or clipboard, or anything that opens a window).
-- **Your parts stay yours:** an edit touching the track you're on, anything inside your time
-  selection, or anything you changed in the last 5 s is refused with the reason, and rolled
-  back before the engine hears it (the edit runs in a guard that notes everything it touched).
-  While playing, recording or counting in, every edit is refused ("playing"); agents try again.
+- **Your parts stay yours:** while you're at it (a key, a click or MIDI in the last 10 s), an
+  edit touching the track you're on or anything inside your time selection is refused with the
+  reason, and rolled back before the engine hears it (the edit runs in a guard that notes
+  everything it touched). Leave the keys and those are open to agents, so you can sit back with
+  the track you want worked on still selected. Anything you changed in the last 5 s is refused
+  either way. While playing, recording or counting in, every edit is refused ("playing");
+  agents try again.
+- **You see it happen:** what an agent changes flashes in the agents' colour (violet) for a
+  moment, then stays that colour for 4 s: the track's name (a new track too), its volume, pan
+  or send, the mix volume, the tempo.
 - **Like a person's edits:** on the message thread (`App::pollAgents`, once a frame, one call at a
   time), into the tree, then the usual graph rebuild, so nothing new runs on the audio thread.
   Each call is one undo step named for the agent ("claude-code: add track Bass"), and its line

@@ -19,6 +19,7 @@ int clipBg, wave, liveWave, marker;
 int videoBg, videoText; // the video row's bar
 int note, blackKeyBg; // instrument notes; piano-roll rows of the black keys
 int ok, error, meterGreen, meterYellow, meterRed, meterBg;
+int agent, agentText; // what an agent just changed (taw --mcp): its colour, and text on it
 bool lightScreen = false; // light and grey: darker kind colours
 
 // A sample kind's colour, the same on the browser's badges, map and list.
@@ -80,6 +81,7 @@ static void apply (const juce::String& theme)
         videoBg = 103, videoText = 231;
         note = 23, blackKeyBg = 247;
         ok = 22, error = 124, meterGreen = 28, meterYellow = 136, meterRed = 160, meterBg = 246;
+        agent = 91, agentText = 231;
     }
     else if (theme == "light")
     {
@@ -96,6 +98,7 @@ static void apply (const juce::String& theme)
         videoBg = 146, videoText = 235;
         note = 30, blackKeyBg = 253;
         ok = 28, error = 160, meterGreen = 34, meterYellow = 172, meterRed = 160, meterBg = 252;
+        agent = 91, agentText = 231;
     }
     else
     {
@@ -112,9 +115,18 @@ static void apply (const juce::String& theme)
         videoBg = 60, videoText = 189;
         note = 79, blackKeyBg = 233;
         ok = 114, error = 203, meterGreen = 35, meterYellow = 178, meterRed = 196, meterBg = 234;
+        agent = 141, agentText = 16;
     }
 }
 } // namespace colour
+
+// An agent's change to this lately: 2 just now (a flash), 1 in the last few seconds (the
+// agents' colour), 0 none. what: as App::markAgentEdit ("": anything on it).
+static int agentLook (const App& app, const juce::ValueTree& owner, const juce::String& what = {})
+{
+    const auto age = app.agentMarkAge (owner, what);
+    return age < 0.0 ? 0 : age < App::agentFlashMs ? 2 : 1;
+}
 
 juce::Colour sampleKindColour (const juce::String& kind) { return colour::xtermColour (colour::kind (kind)); }
 
@@ -672,7 +684,11 @@ void Ui::drawTransport (App& app)
     gap();
     add (app.formatTime (pos), colour::text, bg, true);
     gap();
-    add (juce::String (s->bpm(), 1) + " bpm " + juce::String (s->beatsPerBar()) + "/" + s->tree()[ids::timeSigDen].toString(), colour::dim);
+    {
+        const int byAgent = agentLook (app, s->tree(), "bpm"); // an agent's tempo change: lit, then in their colour
+        add (juce::String (s->bpm(), 1) + " bpm " + juce::String (s->beatsPerBar()) + "/" + s->tree()[ids::timeSigDen].toString(),
+             byAgent == 2 ? colour::agentText : byAgent == 1 ? colour::agent : colour::dim, byAgent == 2 ? colour::agent : bg, byAgent > 0);
+    }
     gap();
 
     // The beat, blinking: lit for the first 100 ms of each (half a beat when they're quicker),
@@ -1552,7 +1568,8 @@ void Ui::drawTimeline (App& app)
         const auto t = s.track (i);
         const bool focusedRow = i == app.focused && ! app.onTopLane();
         const bool selectedRow = std::find (selTracks.begin(), selTracks.end(), i) != selTracks.end();
-        const int bg = app.trackFlashing (t) ? colour::accent : focusedRow ? colour::focusBg : (selectedRow ? colour::selBg : -1);
+        const int byAgent = agentLook (app, t); // an agent just changed it: a flash, then its name in their colour
+        const int bg = byAgent == 2 ? colour::agent : app.trackFlashing (t) ? colour::accent : focusedRow ? colour::focusBg : (selectedRow ? colour::selBg : -1);
         // A time selection covers the tracks edits will act on: the selected ones, else the focused
         // one, or every track from the bar or markers row (App::defaultTargets).
         const bool rowInTimeSelection = timeSel && (app.onTopLane() || (selTracks.empty() ? focusedRow : selectedRow));
@@ -1591,7 +1608,7 @@ void Ui::drawTimeline (App& app)
         if (app.kitOf (t) < 0)
             canvas.text (1, y, numbers.label (i).paddedLeft (' ', 2), colour::text, bg, true);
         // The main playlist's name, as Pro Tools shows it (the track's own until there are others).
-        canvas.text (4, y, padRight (Session::mainPlaylistName (t), 10), colour::text, bg);
+        canvas.text (4, y, padRight (Session::mainPlaylistName (t), 10), byAgent == 2 ? colour::agentText : byAgent == 1 ? colour::agent : colour::text, bg, byAgent > 0);
 
         const int flagX = twoRows ? 4 : 15, flagY = twoRows ? y + 1 : y;
         auto flag = [&] (int x, bool on, wchar_t ch, int fg) { canvas.put (x, flagY, on ? ch : L'\x00b7', on ? fg : colour::faint, bg, on); };
@@ -1923,8 +1940,10 @@ void Ui::drawTimeline (App& app)
                 for (int k = 0; k < Session::numSends; ++k)
                 {
                     // Its level just nudged by a key: the cell lit (name and level).
-                    const bool flash = app.valueFlashing (t, "send " + Session::slotName (k).toLowerCase());
-                    const int x = ioX + ioSlots + k * ioSlotW, cbg = flash ? colour::accent : cellBg (App::ioFirstSend + k);
+                    // Changed by an agent: lit in their colour, then the name in it.
+                    const int sendAgent = agentLook (app, t, "send " + Session::slotName (k).toLowerCase());
+                    const bool flash = sendAgent == 0 && app.valueFlashing (t, "send " + Session::slotName (k).toLowerCase());
+                    const int x = ioX + ioSlots + k * ioSlotW, cbg = sendAgent == 2 ? colour::agent : flash ? colour::accent : cellBg (App::ioFirstSend + k);
                     const auto send = Session::send (t, k);
                     canvas.fill (x - 1, y + 1, ioSlotW, L' ', -1, cbg);
 
@@ -1937,7 +1956,9 @@ void Ui::drawTimeline (App& app)
                     const int dest = s.findBus (send[ids::to]);
                     const bool off = send[ids::mute];
                     canvas.text (x, y + 1, dest < 0 ? juce::String ("?") : s.track (dest)[ids::name].toString(),
-                                 flash ? 16 : dest < 0 ? colour::error : off ? colour::faint : colour::text, cbg, flash, ioSlotW - 1);
+                                 sendAgent == 2 ? colour::agentText : sendAgent == 1 ? colour::agent
+                                 : flash ? 16 : dest < 0 ? colour::error : off ? colour::faint : colour::text,
+                                 cbg, flash || sendAgent > 0, ioSlotW - 1);
 
                     // The level under the name; pre-fader sends in the accent colour.
                     if (rowsPerTrack > 2)
@@ -1947,8 +1968,9 @@ void Ui::drawTimeline (App& app)
                         const auto level = db <= -95.9 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db));
                         canvas.fill (x - 1, y + 2, ioSlotW, L' ', -1, cbg);
                         canvas.text (x, y + 2, level,
-                                     flash ? 16 : off ? colour::faint : app.isAutomated (t, sendParam) ? colour::note : (bool) send[ids::pre] ? colour::accent : colour::dim,
-                                     cbg, flash, ioSlotW - 1);
+                                     sendAgent == 2 ? colour::agentText : sendAgent == 1 ? colour::agent
+                                     : flash ? 16 : off ? colour::faint : app.isAutomated (t, sendParam) ? colour::note : (bool) send[ids::pre] ? colour::accent : colour::dim,
+                                     cbg, flash || sendAgent > 0, ioSlotW - 1);
                     }
                 }
 
@@ -1962,7 +1984,7 @@ void Ui::drawTimeline (App& app)
         // Volume and dB on the first row; the meter runs the track's full height. Armed tracks
         // show their input, others their playback.
         const auto& m = app.trackMeters[(size_t) i];
-        drawVolume (meterX, y, app.currentValue (t, "vol"), bg, app.isAutomated (t, "vol"), app.valueFlashing (t, "vol"));
+        drawVolume (meterX, y, app.currentValue (t, "vol"), bg, app.isAutomated (t, "vol"), app.valueFlashing (t, "vol"), agentLook (app, t, "vol"));
         drawDb (meterX + 12, y, m.hold, m.clipped, bg);
 
         // Pan under the volume (centre dim, like unity); "st" marks a stereo track.
@@ -1970,9 +1992,11 @@ void Ui::drawTimeline (App& app)
         {
             const double pan = app.currentValue (t, "pan");
             const bool flash = app.valueFlashing (t, "pan");
+            const int panAgent = agentLook (app, t, "pan");
             canvas.text (meterX, y + 1, App::panText (pan).paddedLeft (' ', 5),
-                         flash ? 16 : app.isAutomated (t, "pan") ? colour::note : std::abs (pan) < 0.005 ? colour::dim : colour::text,
-                         flash ? colour::accent : bg, flash);
+                         panAgent == 2 ? colour::agentText : panAgent == 1 ? colour::agent
+                         : flash ? 16 : app.isAutomated (t, "pan") ? colour::note : std::abs (pan) < 0.005 ? colour::dim : colour::text,
+                         panAgent == 2 ? colour::agent : flash && panAgent == 0 ? colour::accent : bg, flash || panAgent > 0);
 
             if (app.trackIsStereo (t))
                 canvas.text (meterX + 12, y + 1, "   st", colour::faint, bg);
@@ -2186,7 +2210,7 @@ void Ui::drawTimeline (App& app)
                 canvas.put (0, y, L'\x25b8', colour::accent, bg);
 
             canvas.text (4, y, "Mix", colour::text, bg, true);
-            drawVolume (meterX, y, app.currentValue (s.tree(), "vol"), bg, app.isAutomated (s.tree(), "vol"), app.valueFlashing (s.tree(), "vol"));
+            drawVolume (meterX, y, app.currentValue (s.tree(), "vol"), bg, app.isAutomated (s.tree(), "vol"), app.valueFlashing (s.tree(), "vol"), agentLook (app, s.tree(), "vol"));
         }
 
         canvas.text (leftW - 2, y, ch == 0 ? "L" : "R", colour::dim, bg);
@@ -2323,13 +2347,17 @@ void Ui::drawKeysWarning (App& app)
     canvas.text (2, sepY, L" KEYS MODE \x00b7 letters play notes, not shortcuts \x00b7 esc or ctrl+k leaves it ", 231, colour::error, true, w - 4);
 }
 
-void Ui::drawVolume (int x, int y, double db, int bg, bool automated, bool flash)
+void Ui::drawVolume (int x, int y, double db, int bg, bool automated, bool flash, int byAgent)
 {
     // Unity is dim so a changed fader stands out; automation (or a knob) moving it, its colour;
-    // just nudged by a key, lit.
+    // just nudged by a key, lit; just changed by an agent, lit in theirs, then in their colour.
     const auto text = formatDb (db).paddedLeft (' ', 5);
 
-    if (flash)
+    if (byAgent == 2)
+        canvas.text (x, y, text, colour::agentText, colour::agent, true);
+    else if (byAgent == 1)
+        canvas.text (x, y, text, colour::agent, bg, true);
+    else if (flash)
         canvas.text (x, y, text, 16, colour::accent, true);
     else
         canvas.text (x, y, text, automated ? colour::note : std::abs (db) < 0.05 ? colour::dim : colour::text, bg, automated || std::abs (db) >= 0.05);

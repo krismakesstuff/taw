@@ -538,6 +538,7 @@ int App::run()
     timing::mark ("console open");
     interactive = true;
     startupDevice();
+    startAgents(); // agents can reach the session once one is open
 
     // MIDI controllers, all of them, for armed instrument tracks. Only the interactive app opens
     // them (Windows MIDI inputs can't be shared).
@@ -596,6 +597,7 @@ int App::run()
         { timing::Scope t ("slow: plugin messages", 150.0); pollPlugins(); }
         pollBounce();
         pollBackgroundBounces();
+        pollAgents(); // before pollImport: an agent's import finishes inside its guard
 
         // The machine's load, for the stats panel: once a second is plenty.
         if (const auto now = juce::Time::getMillisecondCounterHiRes(); statsVisible && now - systemSampledAt > 1000.0)
@@ -1508,7 +1510,7 @@ juce::String App::placeTake (int trackIndex, const juce::File& file, juce::int64
 
 void App::beginEdit (const juce::String& name, const juce::String& coalesceKey)
 {
-    if (session == nullptr)
+    if (session == nullptr || agentEditing) // an agent's call is one step, already begun
         return;
 
     const auto now = juce::Time::getMillisecondCounterHiRes() / 1000.0;
@@ -2209,6 +2211,9 @@ void App::pollImport()
         messageIsError = false;
         return;
     }
+
+    if (agentWaiting.has_value() && ! agentEditing)
+        return; // an agent's import: pollAgents puts it in, inside the agent's guard
 
     juce::StringArray placed, failed, replaced;
     // The whole import is one undo step; pad loads in a row (auditioning onto a pad) merge.

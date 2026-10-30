@@ -1,5 +1,6 @@
 ﻿#pragma once
 
+#include "Agents.h"
 #include "AudioEngine.h"
 #include "Bounce.h"
 #include "AudioEditor.h"
@@ -111,6 +112,16 @@ inline constexpr const char* pasteMarker = "taw:paste";
 // How a command line parses, without running it: "tracks 2 | verb "i" | args "2"".
 juce::String explainCommand (const juce::String& line, int numTracks);
 
+// The same, as parts: what an agent's run_command is about to do (AgentEdits.cpp).
+struct CommandShape
+{
+    juce::String error, verb; // verb lower case
+    bool hasSelector = false, mix = false;
+    std::vector<int> tracks;
+    juce::StringArray args;
+};
+CommandShape commandShape (const juce::String& line, const TrackNumbering&);
+
 enum class Mode
 {
     Main,
@@ -140,6 +151,16 @@ public:
     // Commands ----------------------------------------------------------------
     // One line of the command language. Used by the command line now and by agents later.
     Result execute (const juce::String& line);
+
+    // Agents in the open session (AgentEdits.cpp, docs/plan-taw-mcp.md): taw listens on a local
+    // socket for taw --mcp, and runs the agents' tool calls here, on the message thread, one at a
+    // time, each one undo step. Edits are refused while playing, and on what's the user's: the
+    // focused track, the time selection, anything they changed in the last few seconds.
+    bool startAgents();  // the socket and its listing (run() does it; tests too)
+    void pollAgents();   // once a frame: the next call, or the one waiting for its import
+    agents::Answer agentCall (const agents::Call&); // one call, now
+    std::unique_ptr<agents::Server> agentServer;
+    agents::RecentEdits recentEdits;
 
     Result record (const std::vector<int>& tracks); // empty = whatever is armed
     Result punch(); // while playing: recording on or off, playback carries on
@@ -1136,6 +1157,14 @@ private:
     std::map<juce::String, juce::String> copies; // "session folder|source": its copy, from this run's imports
     juce::String pendingTemplate;
     bool treeDirty = false, quitRequested = false;
+
+    // An agent's call running: beginEdit leaves its one undo step alone. agentWaiting: a call
+    // that started an import, answered when the import is in (pollAgents finishes the import,
+    // not pollImport).
+    friend struct AgentTools;
+    bool agentEditing = false;
+    std::optional<agents::Call> agentWaiting;
+    juce::String agentWaitingLabel;
 
 
     // Each sample's rank on the chosen axes, within the kind shown (rebuilt when either changes).

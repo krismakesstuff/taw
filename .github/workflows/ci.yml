@@ -33,6 +33,7 @@ jobs:
           "$taw" --livetest
           "$taw" --cliptest
           "$taw" --paralleltest
+          "$taw" --mcptest "$RUNNER_TEMP/mcptest"
           # (no --bouncetest: Windows Server images may lack the MP3 encoder)
 
   # taw's own files compiled with clang on Windows too (clang-cl, the same strict warnings as
@@ -78,4 +79,5 @@ jobs:
           "$taw" --livetest
           "$taw" --cliptest
           "$taw" --paralleltest
+          "$taw" --mcptest "$RUNNER_TEMP/mcptest"
           "$taw" --bouncetest "$RUNNER_TEMP/bouncetest"

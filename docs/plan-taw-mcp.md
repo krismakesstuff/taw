@@ -229,4 +229,34 @@ it, as it does for a person (open: a short fade-out on removal, for everyone).
 
 ## Step 1 as built
 
-(Filled in below as it's built.)
+- `src/Agents.h/.cpp`: `agents::Server` (taw's socket and listing), `agents::Bridge` (one
+  JSON-RPC line in, the reply out; `handle` is what the test drives), `runBridge` (`taw --mcp`,
+  stdin and stdout, stdout in binary on Windows so lines end in `\n`), `toolList`, and
+  `RecentEdits` (the user's last changes, per track and the session).
+- `src/AgentEdits.cpp`: `struct AgentTools` (a friend of `App`) holds the tools, the guard
+  (`edit`), the locks, and keeping the user's view (cursor, focus, selection, scroll, open
+  panels) as it was. `App::pollAgents` runs calls for up to 20 ms a frame, one at a time.
+- `App::beginEdit` does nothing while an agent's call runs (`agentEditing`), so a command that
+  starts several steps is still one; `App::pollImport` leaves an agent's import to `pollAgents`,
+  which puts it in inside the guard and answers then.
+- In the frame loop: `startAgents()` after the device opens; `pollAgents()` before `pollImport()`.
+- `Commands.cpp` gained `commandShape` (the parse, public) for the passthrough's checks.
+- Rolled back on refusal: our tools all or nothing; the passthrough keeps what a command did
+  when it fails on its own (as for a person), and rolls back only a hands-off breach.
+- Tested: `taw --mcptest` (54 checks, all ok), clean under MSVC `/W4` and clang-cl's strict
+  set; `taw --mcp` piped from a shell against `taw --serve` (every line it writes is JSON).
+
+Not built yet, and open:
+
+- `set_track`, `set_session`, `move_clip`, `write_cc`, automation as tools (the passthrough
+  covers them meanwhile).
+- **Agents off.** No setting to keep the socket shut; should there be one (`agents off` in
+  `settings.json`)?
+- **Stable track ids.** Numbers shift when tracks are added above or removed; agents are told to
+  read again. A `uid` on each TRACK would fix it (a file change; not needed yet).
+- **Tempo changes** are allowed (they move everything in beats). Should they be the user's?
+- **A removed track that's ringing** is cut, as it is for a person. A short fade on removal
+  would help both.
+- **macOS:** nothing Windows-only, but not yet built or run there.
+- **Firewall:** the socket is on 127.0.0.1 only, which Windows doesn't usually ask about; if it
+  does, allow it (or deny: nothing outside the machine needs it).

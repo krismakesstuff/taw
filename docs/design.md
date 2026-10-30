@@ -298,7 +298,8 @@ records the selected tracks, else whatever is armed.
 - Queries: `1 ?`, `? inputs`.
 - User keymaps and macros (config files).
 - Plugins out of process; CLAP. Fades and clip gain in the audio editor.
-- Headless engine + socket/MCP front end for agents.
+- A headless engine for agents (the MCP front end to a running taw is done: "Agents in the open
+  session").
 
 ## Recording
 
@@ -743,6 +744,33 @@ report what they can't do. For testing the screen, `:key o` (or `:key right`, `:
 `:key ]`, …) presses a key and `:screen` prints the screen as plain text (160×44).
 
 `taw --new <folder>` makes an empty session for `--exec` to build in.
+
+### Agents in the open session
+
+`--exec` only reaches a session that's closed. `taw --mcp` lets an agent (Claude Code, any MCP
+client) work in the one open in a running taw while you record and audition in it
+(`docs/plan-taw-mcp.md`; `src/Agents.*`, `src/AgentEdits.cpp`).
+
+- **How:** each interactive taw listens on a local socket (127.0.0.1, a free port) and says so in
+  `agents/<pid>.json` in the config folder, with a token the bridge must send. `taw --mcp` speaks
+  MCP over stdio and relays tool calls there; it picks the newest taw with a session open
+  (`--session <folder or name>` picks another). A bridge that crashes or talks rubbish only loses
+  its connection. Claude Code: `claude mcp add taw -- <path>\taw.exe --mcp`.
+- **Tools:** `get_session`, `get_track` (reads, also while playing); `add_track`, `remove_track`,
+  `write_notes`, `write_hits`, `remove_clip`, `add_marker`; and `run_command`, a line of the
+  command language as typed (not save, close, quit, the transport, undo/redo, bounce, the
+  cursor, focus or clipboard, or anything that opens a window).
+- **Your parts stay yours:** an edit touching the track you're on, anything inside your time
+  selection, or anything you changed in the last 5 s is refused with the reason, and rolled
+  back before the engine hears it (the edit runs in a guard that notes everything it touched).
+  While playing, recording or counting in, every edit is refused ("playing"); agents try again.
+- **Like a person's edits:** on the message thread (`App::pollAgents`, once a frame, one call at a
+  time), into the tree, then the usual graph rebuild, so nothing new runs on the audio thread.
+  Each call is one undo step named for the agent ("claude-code: add track Bass"), and its line
+  shows on the status line. Agents never save; their edits wait in `unsaved\` like yours. Your
+  cursor, focus, selection and view stay where they were.
+- `taw --mcptest <folder>` checks it all with no device; `taw --serve <session> [seconds]` holds a
+  session open headless so `taw --mcp` can be tried from a shell.
 
 `taw --library` lets an agent go through the sample library the way the browser lets a person:
 `kinds` (counts, and the measurement names), `find <terms>`, and `like <name> <terms>` (the
@@ -1309,7 +1337,7 @@ threads at low priority so it doesn't crowd the audio.
   `TAW_WARNINGS_AS_ERRORS` makes any warning an error, on taw's files only; CI turns it on,
   local builds leave it off so a stray warning doesn't stop work in progress.
 - **Tests:** the self-tests that need no audio device (`--keycasttest`, `--counttest`,
-  `--livetest`, `--cliptest`, `--paralleltest`, `--bouncetest`, and `--keytest` on macOS),
+  `--livetest`, `--cliptest`, `--paralleltest`, `--bouncetest`, `--mcptest`, and `--keytest` on macOS),
   each exiting non-zero on a failure. The others need a device, plugins or files.
 - **CI** (`.github/workflows/ci.yml`, every pull request and push to `main`): Windows with
   MSVC (build and self-tests), Windows with clang-cl (taw's files only, so the Windows-only

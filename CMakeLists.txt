@@ -31,6 +31,8 @@ juce_add_console_app(taw PRODUCT_NAME "taw")
 
 target_sources(taw PRIVATE
     src/main.cpp
+    src/AgentEdits.cpp
+    src/Agents.cpp
     src/App.cpp
     src/Session.cpp
     src/Commands.cpp

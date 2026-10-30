@@ -9,6 +9,7 @@
 #include "Video.h"
 
 #include <juce_events/juce_events.h>
+#include <future>
 #include <numeric>
 
 #if TAW_HUB
@@ -74,6 +75,18 @@ int main (int argc, char** argv)
         SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
 #endif
         return taw::PluginCatalog::scanInThisProcess (args[1], juce::File (args[2]));
+    }
+
+    // taw --mcp [--session <folder or name>] [--name <agent>]   the MCP bridge for agents
+    // (docs/plan-taw-mcp.md): MCP on stdin and stdout, relayed to the session open in a running
+    // taw. Like a plugin scan, it's on its own: no crash handler, no crash dialog, and if it
+    // dies taw only loses a connection.
+    if (args[0] == "--mcp")
+    {
+#if JUCE_WINDOWS
+        SetErrorMode (SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
+#endif
+        return taw::agents::runBridge (args);
     }
 
     taw::safety::installCrashHandler();
@@ -260,7 +273,9 @@ int main (int argc, char** argv)
         std::puts ("usage: taw [session-dir] [-t template]\n\n"
                    "  taw                 open the session in this folder, or start a new one\n"
                    "  taw my-song         open my-song, or create it\n"
-                   "  taw my-song -t 3mic create my-song from the 3mic template\n\n"
+                   "  taw my-song -t 3mic create my-song from the 3mic template\n"
+                   "  taw --mcp           an MCP server for agents, editing the session open in taw\n"
+                   "                      (claude mcp add taw -- <path to taw> --mcp)\n\n"
 #if JUCE_WINDOWS
                    "templates and device settings live in %APPDATA%\\taw");
 #else
@@ -1420,6 +1435,402 @@ int main (int argc, char** argv)
 
         std::printf ("%s\n", failures == 0 ? "all ok" : "FAILURES");
         return failures;
+    }
+
+    // taw --mcptest <scratch-folder>   agents in the open session (docs/plan-taw-mcp.md), end to
+    // end with no audio device: a session made there and opened as a person's taw opens it
+    // (edits to unsaved\), its control socket, and a bridge on another thread talking to it
+    // through real sockets, the App pumped on this thread between calls as the frame loop would.
+    // Uses the config folder's agents listing (TAW_CONFIG for another).
+    if (args[0] == "--mcptest" && args.size() >= 2)
+    {
+        const auto scratch = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        scratch.deleteRecursively();
+        scratch.createDirectory();
+        const auto dir = scratch.getChildFile ("mcp song");
+
+        {
+            juce::String error;
+
+            if (taw::Session::create (dir, {}, 44100.0, error) == nullptr)
+            {
+                std::printf ("couldn't make a session: %s\n", error.toRawUTF8());
+                return 1;
+            }
+        }
+
+        // A tick for a sample track to load.
+        const auto tick = scratch.getChildFile ("tick.wav");
+        {
+            std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::FileOutputStream> (tick);
+            auto writer = juce::WavAudioFormat().createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (24));
+            juce::AudioBuffer<float> b (1, 2205);
+
+            for (int i = 0; i < b.getNumSamples(); ++i)
+                b.setSample (0, i, 0.5f * std::sin ((float) i * 0.3f) * std::exp (-(float) i / 300.0f));
+
+            writer->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+        }
+
+        const auto sessionJson = dir.getChildFile ("session.json").loadFileAsString();
+        int failures = 0;
+        auto check = [&] (bool ok, const juce::String& what)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what.toRawUTF8());
+            failures += ok ? 0 : 1;
+        };
+
+        auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        app->interactive = true; // as a person's taw: edits to unsaved\, never session.json
+
+        if (app->session == nullptr)
+        {
+            std::printf ("couldn't open: %s\n", app->message.toRawUTF8());
+            return 1;
+        }
+
+        auto& s = *app->session;
+        auto pump = [&]
+        {
+            app->pollAgents();
+            app->pumpBackgroundWork();
+        };
+
+        // The user's own track, with the cursor on it.
+        app->execute ("add Vox");
+        app->pumpBackgroundWork();
+        app->recentEdits.window = 0.6; // seconds: short, so the test needn't wait long
+        auto wait = [&] (int ms)
+        {
+            for (const auto until = juce::Time::getMillisecondCounterHiRes() + ms; juce::Time::getMillisecondCounterHiRes() < until;)
+            {
+                pump();
+                juce::Thread::sleep (5);
+            }
+        };
+
+        check (app->startAgents(), "the control socket listens");
+        pump();
+        {
+            bool listed = false;
+
+            for (const auto& l : taw::agents::running())
+                listed = listed || (l.pid == taw::safety::thisProcess() && l.port == app->agentServer->port() && juce::File (l.session) == dir);
+
+            check (listed, "agents/<pid>.json says where, with the session");
+        }
+
+        // The bridge finds it by the session's folder, as --session does.
+        taw::agents::Bridge bridge (dir.getFullPathName(), {});
+        int rpcId = 0;
+        auto rpc = [&] (taw::agents::Bridge& b, const juce::String& line)
+        {
+            auto f = std::async (std::launch::async, [&b, line] { return b.handle (line); });
+
+            while (f.wait_for (std::chrono::milliseconds (1)) != std::future_status::ready)
+                pump();
+
+            pump();
+            const auto out = f.get();
+            return out.isEmpty() ? juce::var() : juce::JSON::parse (out);
+        };
+        auto method = [&] (const juce::String& name, const juce::String& params)
+        { return rpc (bridge, "{\"jsonrpc\":\"2.0\",\"id\":" + juce::String (++rpcId) + ",\"method\":\"" + name + "\",\"params\":" + params + "}"); };
+
+        struct Reply
+        {
+            bool error = true;
+            juce::String text;
+            juce::var data;
+        };
+
+        auto tool = [&] (const juce::String& name, const juce::String& arguments)
+        {
+            const auto r = method ("tools/call", "{\"name\":\"" + name + "\",\"arguments\":" + arguments + "}");
+            Reply out;
+            out.error = r["result"]["isError"];
+            out.text = r["result"]["content"][0]["text"].toString();
+            const auto json = out.text.startsWithChar ('{') ? out.text : out.text.fromFirstOccurrenceOf ("\n", false, false);
+            out.data = json.startsWithChar ('{') ? juce::JSON::parse (json) : juce::var();
+            std::printf ("       %-12s %-40s %s\n", name.toRawUTF8(), arguments.substring (0, 40).toRawUTF8(),
+                         (out.error ? out.text : out.text.upToFirstOccurrenceOf ("\n", false, false)).substring (0, 110).toRawUTF8());
+            return out;
+        };
+
+        // MCP itself.
+        {
+            const auto r = method ("initialize", R"({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"mcptest","version":"1"}})");
+            check (r["result"]["protocolVersion"].toString() == "2025-06-18" && r["result"]["serverInfo"]["name"].toString() == "taw"
+                       && r["result"]["capabilities"]["tools"].isObject(),
+                   "initialize: version, capabilities, serverInfo");
+            check (bridge.handle (R"({"jsonrpc":"2.0","method":"notifications/initialized"})").isEmpty(), "a notification gets no answer");
+            const auto list = method ("tools/list", "{}")["result"]["tools"];
+            juce::StringArray names;
+
+            for (const auto& t : *list.getArray())
+                if (t["inputSchema"]["type"].toString() == "object")
+                    names.add (t["name"].toString());
+
+            check (names.size() == 9 && names.contains ("get_session") && names.contains ("run_command") && names.contains ("write_hits"),
+                   "tools/list: " + names.joinIntoString (", "));
+            check (method ("ping", "{}")["result"].isObject(), "ping");
+            check ((int) rpc (bridge, "this isn't json")["error"]["code"] == -32700, "garbage: a parse error");
+            check ((int) method ("resources/list", "{}")["error"]["code"] == -32601, "an unknown method: -32601");
+            check ((int) method ("tools/call", R"({"name":"make_it_good","arguments":{}})")["error"]["code"] == -32602, "an unknown tool");
+        }
+
+        // Reading.
+        {
+            const auto r = tool ("get_session", "{}");
+            const auto tracks = r.data["tracks"];
+            check (! r.error && juce::approximatelyEqual ((double) r.data["bpm"], s.bpm()) && tracks.size() == 1 && tracks[0]["name"].toString() == "Vox"
+                       && tracks[0]["locked"].toString().contains ("cursor") && r.data["focused"].toString() == "1",
+                   "get_session: tempo, the track, the user's cursor on it");
+        }
+
+        // Tracks, notes, hits.
+        {
+            const auto r = tool ("add_track", R"({"kind":"instrument","name":"Bass"})");
+            check (! r.error && r.data["track"].toString() == "2" && s.numTracks() == 2 && taw::Session::isInstrumentTrack (s.track (1))
+                       && ! (bool) s.track (1)[taw::ids::armed] && app->focused == 0,
+                   "add_track: an instrument track, not armed, the cursor left on Vox");
+            check (app->message.startsWith ("mcptest: "), "the status line says who: " + app->message);
+            check (app->um()->getUndoDescription() == "mcptest: add instrument track Bass", "one undo step, named for the agent: " + app->um()->getUndoDescription());
+        }
+        {
+            const auto r = tool ("write_notes", R"({"track":"2","beat":0,"notes":[{"beat":0,"length":1,"pitch":48},{"beat":1,"length":1,"pitch":52},{"beat":2,"length":1,"pitch":55,"vel":90},{"beat":3,"length":1,"pitch":60}]})");
+            const auto clips = taw::Session::midiClips (s.track (1));
+            check (! r.error && clips.size() == 1 && juce::approximatelyEqual ((double) clips[0][taw::ids::len], 4.0) && taw::Session::placedNotes (s.track (1)).size() == 4,
+                   "write_notes: a new one-bar clip with 4 notes");
+            const auto more = tool ("write_notes", R"({"track":"Bass","clip":0,"notes":[{"beat":6,"length":1,"pitch":67}]})");
+            const auto grown = taw::Session::midiClips (s.track (1));
+            check (! more.error && grown.size() == 1 && (double) grown[0][taw::ids::len] >= 7.0 && taw::Session::placedNotes (s.track (1)).size() == 5,
+                   "write_notes into clip 0 (by name): it grows to take the note");
+            const auto bad = tool ("write_notes", R"({"track":"2","notes":[{"beat":0,"length":1,"pitch":200}]})");
+            check (bad.error && bad.text.startsWith ("[invalid]") && taw::Session::placedNotes (s.track (1)).size() == 5, "a pitch of 200 is refused, nothing written");
+        }
+        {
+            const auto r = tool ("add_track", R"({"kind":"sample","name":"Hat"})");
+            check (! r.error && s.numTracks() == 3 && taw::Session::isSampleTrack (s.track (2)), "add_track: a sample track");
+            const auto hits = tool ("write_hits", R"({"track":"3","beat":0,"hits":[{"beat":0},{"beat":0.5,"vel":0.4},{"beat":1},{"beat":1.5,"vel":0.4},{"beat":2},{"beat":2.5,"vel":0.4},{"beat":3},{"beat":3.5,"vel":0.4}]})");
+            check (! hits.error && taw::Session::hitClips (s.track (2)).size() == 1 && taw::Session::placedHits (s.track (2)).size() == 8, "write_hits: eighths in a new clip");
+            const auto read = tool ("get_track", R"({"track":"3"})");
+            check (read.data["clips"][0]["hits"].size() == 8 && juce::approximatelyEqual ((double) read.data["clips"][0]["hits"][1]["vel"], 0.4), "get_track: the hits, with velocities");
+            const auto summary = tool ("get_session", "{}");
+            check ((int) summary.data["tracks"][1]["clips"][0]["note_count"] == 5, "get_session: note counts without include_notes");
+        }
+
+        // ctrl+z takes an agent's edit back; ctrl+y puts it back.
+        {
+            const auto undone = app->undoEdit();
+            app->pumpBackgroundWork();
+            check (undone.ok && taw::Session::hitClips (s.track (2)).empty(), "ctrl+z: " + undone.message);
+            const auto redone = app->redoEdit();
+            app->pumpBackgroundWork();
+            check (redone.ok && taw::Session::placedHits (s.track (2)).size() == 8, "ctrl+y: " + redone.message);
+            wait (700); // the user's undo counts as their edit: let it age
+        }
+
+        // The passthrough.
+        {
+            const auto cursor = app->cursor;
+            const auto r = tool ("run_command", R"({"command":"2 v -6"})");
+            check (! r.error && juce::approximatelyEqual ((double) s.track (1)[taw::ids::gainDb], -6.0) && app->cursor == cursor && app->focused == 0,
+                   "run_command 2 v -6: done, the cursor and focus as they were");
+            check (app->um()->getUndoDescription() == "mcptest: 2 v -6", "...one undo step: " + app->um()->getUndoDescription());
+            const auto mine = tool ("run_command", R"({"command":"v -3"})");
+            check (mine.error && mine.text.startsWith ("[hands-off]") && juce::approximatelyEqual ((double) s.track (0)[taw::ids::gainDb], 0.0),
+                   "run_command v -3 (no track: the focused one) refused, Vox as it was");
+            check (app->um()->getUndoDescription() == "mcptest: 2 v -6", "...and rolled back without a trace");
+
+            for (const auto* line : { "save", "undo", "play", "@5", "2", "b" })
+            {
+                const auto no = tool ("run_command", juce::String (R"({"command":")") + line + "\"}");
+                check (no.error && no.text.startsWith ("[invalid]"), juce::String ("run_command ") + line + " is the user's");
+            }
+
+            const auto bpm = tool ("run_command", R"({"command":"bpm 96"})");
+            check (! bpm.error && juce::approximatelyEqual (s.bpm(), 96.0), "run_command bpm 96");
+        }
+
+        // The focused track.
+        {
+            app->focusTrack (1);
+            const auto r = tool ("write_notes", R"({"track":"2","beat":8,"notes":[{"beat":0,"length":1,"pitch":50}]})");
+            check (r.error && r.text.startsWith ("[hands-off]") && taw::Session::midiClips (s.track (1)).size() == 1, "write_notes on the focused track refused, nothing written");
+            const auto gone = tool ("remove_track", R"({"track":"2"})");
+            check (gone.error && s.numTracks() == 3, "remove_track of the focused track refused");
+            app->focusTrack (0);
+        }
+
+        // The time selection: bar 1, from the ruler (every track).
+        {
+            app->topLane = taw::App::TopLane::ruler;
+            app->timeAnchor = 0;
+            app->timeHead = (juce::int64) std::llround (s.samplesPerBar());
+            const auto in = tool ("write_hits", R"({"track":"3","clip":0,"hits":[{"beat":0.25}]})");
+            check (in.error && in.text.contains ("selection") && taw::Session::placedHits (s.track (2)).size() == 8, "write_hits into a clip in the selection refused");
+            const auto out = tool ("write_hits", R"({"track":"3","beat":8,"hits":[{"beat":0},{"beat":2}]})");
+            check (! out.error && taw::Session::hitClips (s.track (2)).size() == 2, "write_hits at bar 3, outside it: fine");
+            const auto lost = tool ("get_session", "{}");
+            check (lost.data["selection"]["tracks"].size() == 3, "get_session: the selection and its tracks");
+            const auto m1 = tool ("add_marker", R"({"beat":2,"name":"In it"})");
+            const auto m2 = tool ("add_marker", R"({"beat":16,"name":"Bridge"})");
+            check (m1.error && ! m2.error, "a marker inside the selection refused, one after it made");
+            app->timeAnchor = app->timeHead = -1;
+            app->topLane = taw::App::TopLane::none;
+        }
+
+        // What the user just changed.
+        {
+            app->execute ("3 m");
+            app->pumpBackgroundWork();
+            const auto r = tool ("write_hits", R"({"track":"3","clip":1,"hits":[{"beat":1}]})");
+            check (r.error && r.text.contains ("changed"), "write_hits on a track the user just muted refused");
+            wait (700);
+            const auto later = tool ("write_hits", R"({"track":"3","clip":1,"hits":[{"beat":1}]})");
+            check (! later.error, "...and fine a moment later");
+        }
+
+        // Playing.
+        {
+            app->engine.play (0);
+            const auto r = tool ("add_track", R"({"kind":"audio","name":"Gtr"})");
+            check (r.error && r.text.startsWith ("[playing]") && s.numTracks() == 3, "add_track while playing refused");
+            const auto read = tool ("get_session", "{}");
+            check (! read.error && (bool) read.data["playing"], "get_session while playing");
+            app->engine.stop();
+        }
+
+        // A sample track with a sound: answered once the import is in.
+        {
+            const auto r = tool ("add_track", "{\"kind\":\"sample\",\"name\":\"Tick\",\"sample\":" + juce::JSON::toString (tick.getFullPathName()) + "}");
+            const auto t = s.track (s.numTracks() - 1);
+            check (! r.error && s.numTracks() == 4 && taw::Session::isSampleTrack (t) && t[taw::ids::name].toString() == "Tick" && t[taw::ids::sample].toString().isNotEmpty(),
+                   "add_track sample with a file: imported, named");
+            check (app->um()->getUndoDescription().startsWith ("mcptest: add sample track"), "...one undo step: " + app->um()->getUndoDescription());
+        }
+
+        // Clips and tracks away.
+        {
+            const auto r = tool ("remove_clip", R"({"track":"3","clip":1})");
+            check (! r.error && taw::Session::hitClips (s.track (2)).size() == 1, "remove_clip");
+            const auto gone = tool ("remove_track", R"({"track":"3"})");
+            check (! gone.error && s.numTracks() == 3 && s.track (1)[taw::ids::name].toString() == "Bass" && app->focused == 0, "remove_track: Hat gone, the cursor still on Vox");
+        }
+
+        // Agents never save.
+        check (dir.getChildFile ("session.json").loadFileAsString() == sessionJson && dir.getChildFile ("unsaved").getChildFile ("session.json").existsAsFile(),
+               "session.json untouched; the edits are in unsaved\\");
+        check (app->unsaved, "the session says unsaved");
+
+        // Strangers and rubbish.
+        {
+            taw::agents::Bridge stranger ({}, "stranger");
+            stranger.target (app->agentServer->port(), "not the token");
+            auto f = std::async (std::launch::async, [&] { return stranger.call ("get_session", juce::var (new juce::DynamicObject())); });
+
+            while (f.wait_for (std::chrono::milliseconds (1)) != std::future_status::ready)
+                pump();
+
+            const auto a = f.get();
+            check (! a.ok && a.text.contains ("token"), "the wrong token: " + a.text);
+
+            juce::StreamingSocket raw;
+
+            if (raw.connect ("127.0.0.1", app->agentServer->port(), 1000))
+            {
+                const char junk[] = "GET / HTTP/1.1\r\n\r\n\xff\xfe nonsense";
+                raw.write (junk, (int) sizeof (junk));
+            }
+
+            wait (100);
+            raw.close();
+
+            struct Raw final : juce::InterprocessConnection
+            {
+                Raw() : juce::InterprocessConnection (false, 0x74617761) {}
+                ~Raw() override { disconnect(); }
+                void connectionMade() override {}
+                void connectionLost() override {}
+                void messageReceived (const juce::MemoryBlock& m) override { got = m.toString(); }
+                juce::String got;
+            } unwelcome;
+
+            if (unwelcome.connectToSocket ("127.0.0.1", app->agentServer->port(), 1000))
+            {
+                unwelcome.sendMessage (juce::MemoryBlock ("{not json", 9));
+                const juce::String call = R"({"type":"call","id":1,"tool":"remove_track","args":{"track":"1"}})";
+                unwelcome.sendMessage (juce::MemoryBlock (call.toRawUTF8(), call.getNumBytesAsUTF8()));
+            }
+
+            wait (200);
+            check (unwelcome.got.contains ("say hello first") && s.numTracks() == 3, "a call without hello refused");
+            unwelcome.disconnect();
+            wait (50);
+            const auto still = tool ("get_session", "{}");
+            check (! still.error && still.data["tracks"].size() == 3, "garbage on the socket: taw carries on");
+        }
+
+        // taw going away and coming back (a new port and token): the bridge finds it again.
+        {
+            app->agentServer.reset();
+            const auto none = tool ("get_session", "{}");
+            check (none.error && none.text.contains ("[no-session]"), "taw gone: " + none.text);
+            app->startAgents();
+            pump();
+            const auto back = tool ("get_session", "{}");
+            check (! back.error, "taw back: the bridge finds it again");
+        }
+
+        app.reset();
+        std::printf ("%s\n", failures == 0 ? "all ok" : "FAILURES");
+        return failures;
+    }
+
+    // taw --serve <session> [seconds]   the session open headless with its control socket, for
+    // trying taw --mcp from a shell (pipe JSON-RPC into it). Edits go to unsaved\, as with a
+    // person's taw; nothing is saved. 60 s unless told.
+    if (args[0] == "--serve" && args.size() >= 2)
+    {
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+
+        if (! taw::Session::existsIn (dir))
+        {
+            std::printf ("no session in %s\n", dir.getFullPathName().toRawUTF8());
+            return 1;
+        }
+
+        auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        app->interactive = true;
+
+        if (app->session == nullptr || ! app->startAgents())
+        {
+            std::printf ("couldn't serve: %s\n", app->message.toRawUTF8());
+            return 1;
+        }
+
+        const auto seconds = args.size() >= 3 ? args[2].getIntValue() : 60;
+        std::printf ("serving %s on port %d for %d s\n", dir.getFullPathName().toRawUTF8(), app->agentServer->port(), seconds);
+        std::fflush (stdout);
+        juce::String shown;
+
+        for (const auto until = juce::Time::getMillisecondCounterHiRes() + seconds * 1000.0; juce::Time::getMillisecondCounterHiRes() < until;)
+        {
+            app->pollAgents();
+            app->pumpBackgroundWork();
+
+            if (app->message != shown)
+            {
+                shown = app->message;
+                std::printf ("  %s\n", shown.toRawUTF8());
+                std::fflush (stdout);
+            }
+
+            juce::Thread::sleep (5);
+        }
+
+        return 0;
     }
 
     // taw --exec <session-dir> "<command>" ...   run command lines against a session without the

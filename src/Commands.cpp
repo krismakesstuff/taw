@@ -205,6 +205,19 @@ juce::String explainCommand (const juce::String& line, int numTracks)
            + " | verb " + p.verb.quoted() + " | args " + p.args.joinIntoString ("|").quoted();
 }
 
+CommandShape commandShape (const juce::String& line, const TrackNumbering& numbers)
+{
+    Parsed p;
+    CommandShape s;
+    s.error = parse (line, numbers, p);
+    s.verb = p.verb;
+    s.hasSelector = p.hasSelector;
+    s.mix = p.mix;
+    s.tracks = p.tracks;
+    s.args = p.args;
+    return s;
+}
+
 Result App::gotoPosition (const juce::String& specIn)
 {
     juce::int64 pos = 0;

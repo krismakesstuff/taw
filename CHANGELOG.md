@@ -30,3 +30,7 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
   through, `alt+d` changes it. The hub comes first among devices, and taw's own app devices
   aren't offered to sessions.
 - Keycast: a window showing the keys you press, for screen recordings.
+- Agents in the open session: `taw --mcp` is an MCP server (Claude Code: `claude mcp add taw --
+  taw --mcp`) that reads and edits the session open in a running taw, live: tracks, MIDI notes,
+  hits, markers and any command line, each one undo step, never on the track you're on, inside
+  your selection, what you just changed, or while playing. Agents never save.

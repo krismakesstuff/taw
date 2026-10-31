@@ -32,5 +32,9 @@ The first public release: an early proof of concept, for Windows and macOS (Appl
 - Keycast: a window showing the keys you press, for screen recordings.
 - Agents in the open session: `taw --mcp` is an MCP server (Claude Code: `claude mcp add taw --
   taw --mcp`) that reads and edits the session open in a running taw, live: tracks, MIDI notes,
-  hits, markers and any command line, each one undo step, never on the track you're on, inside
-  your selection, what you just changed, or while playing. Agents never save.
+  hits, markers, automation (volume, pan, mute, sends, plugin parameters) and any command line,
+  each one undo step. Never while playing or on what you just changed, and not on the track
+  you're on or inside your selection until you've been away from the keys for 10 s. What an agent
+  changes flashes violet; the title line shows who's connected and what their last edit did.
+  Agents can list, make and open sessions (over an open one, taw asks you first). Agents never
+  save.

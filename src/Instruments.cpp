@@ -616,8 +616,10 @@ Result App::loadInstrument (int index, const juce::PluginDescription& desc)
     focusTrack (index);
     rebuildGraph();
 
-    // Its window opens straight away, to pick a sound (not for scripts: taw --exec has no screen).
-    const bool opened = interactive && toggleEditor (index).ok;
+    // Its window opens straight away, to pick a sound (not for scripts: taw --exec has no screen,
+    // nor for an agent: the user didn't ask for it, and a plugin's own dialog, like a login, would
+    // hold taw while they're in the terminal).
+    const bool opened = interactive && ! agentEditing && toggleEditor (index).ok;
     const auto window = opened ? L" \x00b7 its window is open (ed closes it)" : L" \x00b7 ed opens its window";
 
     auto msg = "track " + trackLabel (index) + " plays " + desc.name;

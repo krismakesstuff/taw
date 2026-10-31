@@ -79,9 +79,9 @@ struct Touches final : juce::ValueTree::Listener
             list.push_back ({ t, {}, false, id });
     }
 
-    void valueTreeChildAdded (juce::ValueTree& p, juce::ValueTree& c) override { list.push_back ({ p, c, false }); }
-    void valueTreeChildRemoved (juce::ValueTree& p, juce::ValueTree& c, int) override { list.push_back ({ p, c, true }); }
-    void valueTreeChildOrderChanged (juce::ValueTree& p, int, int) override { list.push_back ({ p, {}, false }); }
+    void valueTreeChildAdded (juce::ValueTree& p, juce::ValueTree& c) override { list.push_back ({ p, c, false, {} }); }
+    void valueTreeChildRemoved (juce::ValueTree& p, juce::ValueTree& c, int) override { list.push_back ({ p, c, true, {} }); }
+    void valueTreeChildOrderChanged (juce::ValueTree& p, int, int) override { list.push_back ({ p, {}, false, {} }); }
 
     juce::ValueTree root;
     std::vector<Touch> list;

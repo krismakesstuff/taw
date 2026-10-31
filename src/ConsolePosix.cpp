@@ -1,5 +1,6 @@
 ﻿#include "Console.h"
 #include "Safety.h"
+#include "Session.h"
 
 #if defined(__APPLE__)
 #include "MacFocus.h"
@@ -12,6 +13,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <fcntl.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -340,6 +342,31 @@ bool Console::open()
 
     opened = true;
     edgeGlyphs = true; // Menlo, SF Mono and the usual terminal fonts have them
+
+    // Whatever lands on stderr (a plugin's chatter, the Objective-C runtime's warnings about
+    // classes loaded twice) would be written over the screen: it goes to taw-stderr.log in the
+    // config folder until taw leaves, kept to the last run or so (over 1 MB, it starts over).
+    if (isatty (STDERR_FILENO))
+    {
+        const auto log = configFolder().getChildFile ("taw-stderr.log");
+        log.getParentDirectory().createDirectory();
+        const int flags = O_WRONLY | O_CREAT | O_APPEND | (log.getSize() > 1024 * 1024 ? O_TRUNC : 0);
+
+        if (const int fd = ::open (log.getFullPathName().toRawUTF8(), flags, 0644); fd >= 0)
+        {
+            std::fflush (stderr);
+            savedStderr = dup (STDERR_FILENO);
+
+            if (savedStderr >= 0 && dup2 (fd, STDERR_FILENO) < 0)
+            {
+                close (savedStderr);
+                savedStderr = -1;
+            }
+
+            close (fd);
+        }
+    }
+
     writeAll (enter, std::strlen (enter));
     return true;
 }
@@ -351,18 +378,116 @@ Console::~Console()
 
     writeAll (leave, std::strlen (leave));
     tcsetattr (STDIN_FILENO, TCSAFLUSH, &oldMode);
+
+    if (savedStderr >= 0)
+    {
+        std::fflush (stderr);
+        dup2 (savedStderr, STDERR_FILENO);
+        close (savedStderr);
+    }
 }
 
-void Console::reclaimKeyboard (const std::vector<void*>&, void*) {}
+// A Mac, as on Windows: a click in a plugin window brings taw to the front, and once the mouse is
+// done the keyboard goes back to the terminal, unless the window's title was double-clicked
+// (then it keeps it until it closes or the terminal comes to the front).
+void Console::reclaimKeyboard ([[maybe_unused]] const std::vector<void*>& pluginWindows, [[maybe_unused]] void* keeper)
+{
+#if defined(__APPLE__)
+    if (! opened)
+        return;
+
+    if (held_by != nullptr)
+    {
+        readySince = 0.0;
+
+        if (std::find (pluginWindows.begin(), pluginWindows.end(), held_by) == pluginWindows.end())
+        {
+            held_by = nullptr;
+            macFocus::log ("keyboard back to taw (window closed)");
+            macFocus::activateTerminal();
+            return;
+        }
+
+        // Coming to the front takes a moment: the terminal in front only counts once taw has been.
+        if (! heldReachedTaw && macFocus::tawInFront())
+        {
+            heldReachedTaw = true;
+            macFocus::log ("taw in front: the plugin window has the keyboard");
+        }
+
+        if (heldReachedTaw ? macFocus::terminalInFront() : juce::Time::getMillisecondCounterHiRes() - heldSince > 2000.0)
+        {
+            macFocus::log (heldReachedTaw ? "keyboard back to taw (the terminal clicked)" : "taw never came to the front: hold dropped");
+            held_by = nullptr;
+        }
+
+        return;
+    }
+
+    const auto front = macFocus::front (pluginWindows, keeper);
+
+    if (front != macFocus::Front::plugin)
+    {
+        if (front != macFocus::Front::notTaw)
+            macFocus::log (front == macFocus::Front::keeper ? "taw's editor window has the keyboard"
+                           : front == macFocus::Front::other ? "a plugin's own window has the keyboard: left alone"
+                           : front == macFocus::Front::menu  ? "a menu is open"
+                                                             : "mouse button down");
+        readySince = 0.0;
+        return;
+    }
+
+    // A moment after the click, so a double-click or a menu that opens on release still works.
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+
+    if (readySince == 0.0)
+    {
+        readySince = now;
+        return;
+    }
+
+    if (now - readySince < 250.0)
+        return;
+
+    readySince = 0.0;
+    macFocus::activateTerminal();
+    macFocus::log ("plugin window clicked: keyboard back to the terminal");
+#endif
+}
+
 void Console::focusTerminal()
 {
+    held_by = nullptr;
+
 #if defined(__APPLE__)
     if (opened)
         macFocus::activateTerminal();
 #endif
 }
-void* Console::keyboardHeldBy() const { return nullptr; }
-void Console::toggleKeyboardHold (void*) {}
+
+void* Console::keyboardHeldBy() const { return held_by; }
+
+// A plugin window's title bar double-clicked: it keeps the keyboard (again: taw has it back).
+void Console::toggleKeyboardHold ([[maybe_unused]] void* window)
+{
+#if defined(__APPLE__)
+    if (! opened || window == nullptr)
+        return;
+
+    if (held_by == window)
+    {
+        macFocus::log ("title double-clicked: keyboard back to taw");
+        focusTerminal();
+        return;
+    }
+
+    held_by = window;
+    heldReachedTaw = false;
+    heldSince = juce::Time::getMillisecondCounterHiRes();
+    macFocus::log ("title double-clicked: the plugin window keeps the keyboard");
+    macFocus::holdKeyboard (window);
+#endif
+}
 
 std::vector<Key> Console::poll()
 {

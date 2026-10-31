@@ -61,7 +61,7 @@ public:
 
     // Plugin windows (their native handles): when one of them has the keyboard and the mouse
     // is done with it, the terminal gets the keyboard back, so keys keep reaching taw while you
-    // click and drag in a plugin. Windows only; elsewhere it does nothing. Call once a frame.
+    // click and drag in a plugin. Windows and macOS; elsewhere it does nothing. Call once a frame.
     // keeper: one of taw's own windows (the MIDI editor) that keeps the keyboard while it's in
     // front; it's kept on top like the plugin windows.
     void reclaimKeyboard (const std::vector<void*>& pluginWindows, void* keeper = nullptr);
@@ -98,6 +98,11 @@ private:
 #else
     std::string pending; // bytes of a key sequence still arriving
     int pendingPolls = 0;
+    void* held_by = nullptr;     // a plugin window keeping the keyboard (keyboardHeldBy)
+    bool heldReachedTaw = false; // ...and taw has been in front since it took it
+    double heldSince = 0.0;      // when it took it (ms)
+    double readySince = 0.0;     // when a plugin window last had the keyboard and the mouse let go
+    int savedStderr = -1;        // the terminal, while stderr goes to a log (plugins' chatter)
 
 public:
     // Turns terminal input into keys, consuming what it used. An unfinished sequence stays in

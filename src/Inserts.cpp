@@ -135,8 +135,9 @@ Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc
     hosted.push_back ({ node, std::move (plugin), {}, {} });
     rebuildGraph();
 
-    // Like Pro Tools: a new plugin opens its window, in place of any other.
-    if (console.isOpen())
+    // Like Pro Tools: a new plugin opens its window, in place of any other (not when an agent
+    // added it: the user didn't ask for it, and a plugin's own dialog would hold taw).
+    if (console.isOpen() && ! agentEditing)
         toggleInsertEditor (index, slot);
 
     return Result::good (insertOwnerName (index) + " insert " + Session::slotName (slot) + ": " + desc.name

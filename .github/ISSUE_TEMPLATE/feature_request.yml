@@ -1,5 +1,5 @@
 name: Feature idea
-description: Suggest a feature, command or key. Please open one of these before building a feature.
+description: Suggest a feature, command or key.
 labels: [idea]
 body:
   - type: textarea
@@ -14,9 +14,3 @@ body:
     attributes:
       label: Your idea
       description: How it might work in taw. If it's a command or key, how you'd type it.
-  - type: checkboxes
-    id: build
-    attributes:
-      label: Building it
-      options:
-        - label: I'd like to build this myself (wait for a yes on this issue first, and see CONTRIBUTING.md and CLA.md).

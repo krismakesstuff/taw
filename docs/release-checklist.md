@@ -10,11 +10,13 @@ What's left before taw goes public and ships its first downloads. Tick items off
       repository commits as `Kris Crawford <11crawfordk@gmail.com>` (set in the repo's own git
       config, so other repositories keep their address).
 
+- [x] **Contributions:** issues only, no outside pull requests for now, so no CLA. Releases may
+      be paid downloads of the same AGPL code; no closed edition. Bring a CLA back (and have a
+      lawyer read it) before taking pull requests.
+
 ## Before the repository goes public
 
-- [ ] **Have a lawyer read [CLA.md](../CLA.md)** and the revenue wording in
-      [CONTRIBUTING.md](../CONTRIBUTING.md), especially the licence to relicense (section 2) and
-      the discretionary revenue sharing (section 6). Do this before the first outside pull request.
+- [ ] **Trademark:** look into registering "taw" (the README asks forks for their own name).
 - [x] **Contact email** in [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md): 11crawfordk@gmail.com.
 - [ ] **Make the repository public:** Settings → General → Danger Zone → Change visibility.
 
@@ -22,8 +24,6 @@ What's left before taw goes public and ships its first downloads. Tick items off
 
 - [ ] **Private vulnerability reporting:** Settings → Code security → Private vulnerability
       reporting ([SECURITY.md](../SECURITY.md) points there).
-- [ ] **CLA signatures branch:** create `cla-signatures` from `main`; the CLA bot stores
-      signatures there.
 - [ ] **Publish branch:** once the release setup is merged, `git push origin main:publish`.
 - [ ] **Protect `publish`:** Settings → Branches (or Rules): only the maintainer pushes, no force
       pushes, no deletion.

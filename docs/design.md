@@ -27,8 +27,8 @@ being worked out.
 - **ASIO** via the Steinberg ASIO SDK 2.3.4, used under its GPLv3 option. WASAPI and
   DirectSound are also available.
 - **License: AGPLv3** (required by JUCE's open-source licence; compatible with the ASIO
-  SDK's GPLv3). Contributions come in under a contributor licence agreement (`CLA.md`), so a
-  commercial edition stays possible.
+  SDK's GPLv3). Releases may be sold as paid downloads of the same AGPL code; there's no closed
+  edition. Outside pull requests aren't taken yet (issues only), so there's no CLA.
 - **Target terminal: Windows `cmd` (conhost)** first. Rendering uses VT sequences and only
   glyphs that Consolas has (block elements, box drawing). Input uses the Win32 console API,
   which reports modifiers reliably (Shift/Ctrl+arrows).

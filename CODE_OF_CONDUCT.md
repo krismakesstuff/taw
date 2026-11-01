@@ -56,8 +56,8 @@ Examples of representing our community include using an official e-mail address,
 posting via an official social media account, or acting as an appointed
 representative at an online or offline event.
 
-For taw, it applies to the person behind every contribution, including
-contributions written with the help of AI tools (see CONTRIBUTING.md).
+For taw, it applies to the person behind every issue and comment, including
+ones written with the help of AI tools.
 
 ## Enforcement
 

@@ -18,15 +18,15 @@ What's left before taw goes public and ships its first downloads. Tick items off
 
 - [ ] **Trademark:** look into registering "taw" (the README asks forks for their own name).
 - [x] **Contact email** in [CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md): 11crawfordk@gmail.com.
-- [ ] **Make the repository public:** Settings → General → Danger Zone → Change visibility.
+- [x] **Make the repository public:** Settings → General → Danger Zone → Change visibility.
 
 ## GitHub settings
 
-- [ ] **Private vulnerability reporting:** Settings → Code security → Private vulnerability
+- [x] **Private vulnerability reporting:** Settings → Code security → Private vulnerability
       reporting ([SECURITY.md](../SECURITY.md) points there).
-- [ ] **Publish branch:** once the release setup is merged, `git push origin main:publish`.
-- [ ] **Protect `publish`:** Settings → Branches (or Rules): only the maintainer pushes, no force
-      pushes, no deletion.
+- [x] **Publish branch:** once the release setup is merged, `git push origin main:publish`.
+- [x] **Protect `main` and `publish`:** the ruleset "main and publish" (Settings → Rules): no
+      force pushes, no deletion, for anyone. Only collaborators can push, and there are none.
 
 ## First release
 
@@ -45,7 +45,7 @@ See [releasing.md](releasing.md) for the steps.
         was built against).
   - [ ] Keycast: clicking or dragging its window leaves the keyboard with the terminal, and
         `taw --keycasttest` passes.
-- [ ] Date the version's heading in [CHANGELOG.md](../CHANGELOG.md).
+- [x] Date the version's heading in [CHANGELOG.md](../CHANGELOG.md).
 - [ ] Push `publish`, look over the draft release, publish it.
 
 ## Later

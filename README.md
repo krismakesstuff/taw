@@ -174,6 +174,33 @@ from the first track gets you there, where the arrows step a frame (ctrl a secon
 scrub) and clicking or dragging along it scrubs the picture. On macOS video needs Homebrew's
 ffmpeg (`brew install ffmpeg`) when taw is built.
 
+## Agents
+
+taw is also an MCP server, so an AI agent (Claude Code, or any MCP client) can work in the
+session you have open, live, while you watch and play. Register it once:
+
+```
+claude mcp add --scope user taw -- <path to>/taw --mcp
+```
+
+Then ask: "add a bass track with a two-bar line under the chorus", "make a filter sweep on the
+synth into bar 17", "which tracks have no output?". The agent reads the session (tracks, clips,
+notes, hits, markers, automation and plugin parameters) and edits it: tracks, MIDI notes, hits,
+markers, automation and any command you could type. It can list, make and open sessions too.
+
+It works around you, not over you:
+
+- **Each edit is one undo step**, named for the agent, so `ctrl+z` takes it back.
+- **Nothing while playing.** An agent's edits wait until you stop, and the transport shows
+  that one is waiting.
+- **Hands off what you're working on:** the track you're on, your selection and what you just
+  changed, until you've been away from the keys for 10 seconds.
+- **You see it happen:** what an agent changes flashes violet, and the title line shows who's
+  connected and what their last edit did. A tempo change, or switching sessions, asks you first.
+- **Agents never save.** `ctrl+s` is yours.
+
+`agents off` shuts them out (`agents on` lets them back in); the setting is kept for next time.
+
 ## Roadmap
 
 Next up, roughly in order:

@@ -5,8 +5,9 @@ and driven by a small command language that people and agents share.
 
 Early proof of concept. See [docs/design.md](docs/design.md) for the design and what's planned.
 
-**Platforms:** Windows (cmd / Windows Terminal, ASIO) and macOS (Terminal, CoreAudio; in
-progress). Linux will follow; the engine, sessions and command language are platform-neutral.
+**Platforms:** Windows (cmd / Windows Terminal, ASIO) and macOS (Apple Silicon; Terminal,
+CoreAudio, Audio Units). Linux will follow; the engine, sessions and command language are
+platform-neutral.
 
 ## Download
 
@@ -115,8 +116,25 @@ instrument tracks), and `snap` quantizes. Every MIDI input is opened and armed i
 tracks hear all of them; `midi` shows them, switches ones you don't use off, and shows what
 each is sending. Plugin settings are saved next to the session in `plugins/`.
 
+To edit notes, double-click a MIDI clip (or `shift+E` on the track): the MIDI editor opens in a
+window over the terminal, for the mouse. Drag notes to move them, drag an edge to change the
+length, double-click to draw one, right-click to delete; the lane below sets velocity or draws a
+controller. `edit new` makes an empty clip to draw into. Audio clips open the same way in the
+audio editor, for placing the selection and clip edges down to the sample.
+
 Plugins run inside taw for now, so a plugin that crashes takes taw with it (the session is
 saved on the way down). Running them in their own process is planned.
+
+## Kits
+
+A sample track plays one sample; a kit gathers sample tracks onto a bus, each on a pad, so you
+can play, mix and move them as one while each sound keeps its own track, hits and inserts.
+`kit` makes one, `pad 3 <file>` puts a sample on pad 3, and `3 kit drums` moves track 3 into
+kit Drums. Arm the kit (`shift+R`) and play it from a pad controller, or `ctrl+k` turns the
+keyboard into a 4×4 pad grid laid out like an MPC's (`z x c v` up to `1 2 3 4`).
+`ctrl+space` records what you play as hits. `2.3 choke 1` puts pads in a choke group, so the
+closed hat cuts off the open one. In the sample browser (`ctrl+B`), what you audition goes onto
+the lit pad.
 
 ## Effects, buses and sends
 
@@ -160,12 +178,10 @@ ffmpeg (`brew install ffmpeg`) when taw is built.
 
 Next up, roughly in order:
 
-- **Sample groups:** gather sample tracks into a kit you can program, mix and move as one,
-  while each sound keeps its own track.
-- **Note editing:** change single notes in the piano roll (recording comes first; this follows).
 - **Plugins out of process and CLAP:** each plugin in its own process, so a crashing plugin is
   bypassed instead of taking the session down; CLAP alongside VST3.
-- **Cross-platform:** macOS (in progress), then Linux.
+- **Linux.**
+- **Intel Macs.**
 
 ## Contributing
 

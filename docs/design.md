@@ -179,7 +179,7 @@ editor on an instrument track, the audio editor on an audio track, on its clip a
 else the nearest one. Shift+E again, or the close button, closes it; one is open at a time.
 `edit new` makes an empty MIDI clip to draw into (over the time selection, else the bar the
 cursor is in). Both sit over the terminal like the plugin windows, keep the keyboard while
-they're in front (Esc hands it back) and pass on the keys they don't use. Windows only so far.
+they're in front (Esc hands it back) and pass on the keys they don't use.
 
 ### The audio editor
 

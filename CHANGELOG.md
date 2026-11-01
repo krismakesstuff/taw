@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.2.0] - unreleased
+## [0.2.0] - 2026-11-01
 
 The first public release: an early proof of concept, for Windows and macOS (Apple Silicon).
 (0.1.0 was the first playable milestone, never released.)

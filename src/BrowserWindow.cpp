@@ -67,6 +67,8 @@ struct BrowserWindow::Panel final : juce::Component, private juce::Timer
         padButton.onClick = [this] { app.browserToPad = padButton.getToggleState(); };
         likeButton.setTooltip ("the samples that sound most like the chosen pad's sound (or the chosen sample); again: all of them");
         likeButton.onClick = [this] { app.say (app.browserLikeThis()); sync(); };
+        guideButton.setTooltip ("the browser's keys and mouse (?)");
+        guideButton.onClick = [this] { app.browserGuide = ! app.browserGuide; repaint(); };
 
         for (auto* b : { &hoverButton, &timeButton, &padButton })
         {
@@ -75,10 +77,13 @@ struct BrowserWindow::Panel final : juce::Component, private juce::Timer
             b->setColour (juce::ToggleButton::tickDisabledColourId, c.dim);
         }
 
-        likeButton.setColour (juce::TextButton::buttonColourId, c.panel);
-        likeButton.setColour (juce::TextButton::textColourOffId, c.text);
+        for (auto* b : { &likeButton, &guideButton })
+        {
+            b->setColour (juce::TextButton::buttonColourId, c.panel);
+            b->setColour (juce::TextButton::textColourOffId, c.text);
+        }
 
-        for (auto* comp : std::initializer_list<juce::Component*> { &xBox, &yBox, &level, &hoverButton, &timeButton, &padButton, &likeButton })
+        for (auto* comp : std::initializer_list<juce::Component*> { &xBox, &yBox, &level, &hoverButton, &timeButton, &padButton, &likeButton, &guideButton })
         {
             comp->setWantsKeyboardFocus (false);
             comp->setMouseClickGrabsKeyboardFocus (false);
@@ -102,7 +107,7 @@ private:
     juce::ComboBox xBox, yBox;
     juce::Slider level;
     juce::ToggleButton hoverButton { "hover plays" }, timeButton { "in time" }, padButton { L"audition \x2192 pad" };
-    juce::TextButton likeButton { "like this" };
+    juce::TextButton likeButton { "like this" }, guideButton { "?" };
 
     // What's shown, kept until what decides it changes (the sort is the slow part).
     mutable std::vector<int> shownCache;
@@ -266,6 +271,8 @@ private:
         if (padButton.isVisible())
             padButton.setBounds (place (140, 0));
 
+        guideButton.setBounds (place (30, 0));
+
         barRows = row + 1;
         laidOutPad = padButton.isVisible();
     }
@@ -310,6 +317,9 @@ private:
         paintList (g);
         paintPads (g);
         paintStatus (g);
+
+        if (app.browserGuide)
+            paintGuide (g);
 
         // A sample being dragged to a pad: its name under the pointer.
         if (drag == Drag::sample && dragSample >= 0)
@@ -588,18 +598,87 @@ private:
 
         // The keys on the right, when there's room beside the numbers.
         const auto font = uiFont (12.0f);
-        const juce::String keys = kit() >= 0 ? L"enter: onto the pad \x00b7 shift+enter: a new track \x00b7 tab: next area \x00b7 esc: back to taw"
-                                             : L"enter: onto the track \x00b7 shift+enter: a new track \x00b7 tab: next area \x00b7 esc: back to taw";
+        // Short of room, just the way to the guide.
+        const juce::String keys = kit() >= 0 ? L"enter: onto the pad \x00b7 shift+enter: a new track \x00b7 ? keys and mouse"
+                                             : L"enter: onto the track \x00b7 shift+enter: a new track \x00b7 ? keys and mouse";
         const auto room = (float) area.getWidth() - 20.0f - juce::GlyphArrangement::getStringWidth (font, text) - 30.0f;
 
         g.setColour (c.text);
         g.drawText (text, area.reduced (10, 0), juce::Justification::centredLeft, true);
+        g.setColour (c.dim);
 
         if (juce::GlyphArrangement::getStringWidth (font, keys) <= room)
-        {
-            g.setColour (c.dim);
             g.drawText (keys, area.reduced (10, 0), juce::Justification::centredRight, true);
-        }
+        else if (juce::GlyphArrangement::getStringWidth (font, "? keys") <= room)
+            g.drawText ("? keys", area.reduced (10, 0), juce::Justification::centredRight, true);
+    }
+
+    // The guide (? or the toolbar's ?): what the window shows and how to work it, keys on the
+    // left, the mouse and what the numbers mean on the right, over the map and the list.
+    void paintGuide (juce::Graphics& g)
+    {
+        const auto& c = editorColours();
+        const bool onKit = kit() >= 0;
+
+        using Lines = std::vector<std::pair<juce::String, juce::String>>;
+        const Lines keys {
+            { L"\x2190\x2191\x2192\x2193", L"move on the map (each move plays)" },
+            { L"ctrl+arrows", L"jump a fifth of the map" },
+            { "tab", onKit ? "tabs, map, list, pads" : "tabs, map, list" },
+            { "type", "filter (see right)" },
+            { "space", "play it again" },
+            { L"shift+\x2191\x2193", "audition level" },
+            { L"alt+arrows", "what the map's axes show" },
+            { "enter", onKit ? "onto the lit pad" : "onto the sample track, or a new one" },
+            { "shift+enter", "a new sample track" },
+            { "esc", L"clear the filter, then back to taw" },
+            { "ctrl+B", "close the browser" },
+        };
+        const Lines mouse {
+            { "drag on map", "plays whatever is under it" },
+            { "click", "a tab, a dot, a row: pick it" },
+            { "double-click", onKit ? "(on a kit: a click is enough)" : "load it" },
+            { "drag to a pad", onKit ? "put it on that pad" : "(on a kit)" },
+            { "like this", "the 40 that sound most like it" },
+            { "", "" },
+            { "colours", "the kind (tabs, dots, list)" },
+            { "(by its sound)", "its name didn't say" },
+            { "close dots", "sound alike" },
+            { "filter", L"kick 808  dec<200  bright>1k" },
+            { "", L"pitch>60  len<0.5s  loud>-20" },
+        };
+
+        const auto area = bodyArea().reduced (16);
+        g.setColour (c.bg.withAlpha (0.94f));
+        g.fillRoundedRectangle (area.toFloat(), 8.0f);
+        g.setColour (c.accent.withAlpha (0.7f));
+        g.drawRoundedRectangle (area.toFloat().reduced (0.5f), 8.0f, 1.5f);
+
+        auto inner = area.reduced (18, 12);
+        g.setFont (uiFont (14.0f, true));
+        g.setColour (c.text);
+        g.drawText (L"the sample browser \x00b7 ? or esc closes this", inner.removeFromTop (24), juce::Justification::centredLeft, false);
+        inner.removeFromTop (6);
+
+        const auto column = [&] (juce::Rectangle<int> r, const Lines& lines)
+        {
+            const int keyW = 120, lineH = std::min (22, r.getHeight() / (int) lines.size());
+
+            for (const auto& [key, what] : lines)
+            {
+                auto row = r.removeFromTop (lineH);
+                g.setFont (uiFont (13.0f, true));
+                g.setColour (c.accent);
+                g.drawText (key, row.removeFromLeft (keyW), juce::Justification::centredLeft, true);
+                g.setFont (uiFont (13.0f));
+                g.setColour (c.text);
+                g.drawText (what, row, juce::Justification::centredLeft, true);
+            }
+        };
+
+        const auto left = inner.removeFromLeft (inner.getWidth() / 2);
+        column (left, keys);
+        column (inner.withTrimmedLeft (12), mouse);
     }
 
     //==============================================================================
@@ -624,6 +703,15 @@ private:
     void mouseDown (const juce::MouseEvent& e) override
     {
         grabKeyboardFocus();
+
+        // A click puts the guide away (and does nothing else).
+        if (app.browserGuide)
+        {
+            app.browserGuide = false;
+            repaint();
+            return;
+        }
+
         downAt = dragAt = e.position;
         drag = Drag::none;
         dragSample = mapPicked = -1;
@@ -778,7 +866,7 @@ private:
         juce::String state;
         state << app.browserSample << "|" << app.browserKind << "|" << app.browserFilter << "|" << app.browserLike << "|" << (int) app.browserFocus << "|"
               << app.browserPadNote << "|" << k << "|" << app.browserAxisX << app.browserAxisY << "|" << (app.engine.previewPosition() >= 0 ? 1 : 0)
-              << "|" << (app.library != nullptr ? (int) app.library->samples().size() : -1) << "|" << app.indexDone.load() << "|" << app.auditionDb;
+              << "|" << (app.library != nullptr ? (int) app.library->samples().size() : -1) << "|" << app.indexDone.load() << "|" << app.auditionDb << "|" << (app.browserGuide ? 1 : 0);
 
         if (k >= 0)
             for (auto m : app.kitMembers (k))

@@ -125,6 +125,54 @@ audio editor, for placing the selection and clip edges down to the sample.
 Plugins run inside taw for now, so a plugin that crashes takes taw with it (the session is
 saved on the way down). Running them in their own process is planned.
 
+## Samples
+
+taw keeps an index of your sample folders: it measures every sound once, works out what kind
+of drum it is, and lays them all out on a map where sounds that are alike sit together.
+
+**Add your folders.** `index D:\Samples\Drums` (or type `index` and drop a folder on the
+terminal) measures every WAV, AIFF, FLAC, MP3 and OGG under it, on all cores, while you keep
+working; the message line counts them and says when it's done. Your folders are only read:
+nothing is written next to your samples, and the index lives in taw's config folder. Indexing a
+folder again only measures what's new or changed. `library` lists the folders and how many
+samples each holds, and `index remove <folder>` takes one out.
+
+**What it measures.** For each sample: its length, attack, decay and tail, loudness and peak,
+punch (how far the peak stands above the body), brightness, how noisy or tonal it is, how much
+low end it has, its pitch when there's a clear one, and how many hits are in it (a clap has a
+few). The kind (kick, snare, clap, rim, hihat, open hat, cymbal, tom, perc) comes from the file
+and folder names first ("BD_808.wav", "Kicks/thump.wav"). When the name doesn't say, taw guesses
+from the sound: the kind of the named samples that sound most like it, shown as
+"(by its sound)". When indexing finishes it tells you how often the sound alone agreed with the
+names, which is how far to trust those guesses in your library.
+
+**Browse.** `ctrl+B` opens the browser, a window over the terminal you can work with the keys or
+the mouse; `?` in it shows all its keys.
+
+- The **tabs** across the top are the kinds, with how many of each you have.
+- The **map** shows that kind's samples, one dot each. Dots close together sound alike, so
+  once you find a kick that's nearly right, the ones around it are its cousins. Arrows move
+  to the nearest dot that way and every move plays it; drag across the map to hear whatever is
+  under the pointer. The two menus in the toolbar (or `alt+arrows`) turn the map into a chart
+  of two measurements instead: brightness across and decay up, say, so short dark kicks sit
+  bottom left.
+- The **list** on the right has the same samples by name; the **status line** under them shows
+  the chosen one's numbers.
+- **Typing filters** both: words match file and folder names (`808`, `vinyl`), and measurement
+  terms match the sound: `dec<200` (decay under 200 ms), `bright>1k`, `len<0.5s`, `pitch>60`,
+  `loud>-20`, `punch>15`, `noise<0.3`, `low>-10`. Filter to what you want, then explore the
+  smaller map. `Esc` clears the filter.
+- **like this** shows the 40 samples that sound most like the chosen one, nearest first.
+- **Auditions** play at the browser's own level (`shift+↑↓`, or the slider). While the song
+  plays, each one waits for the next grid step, so you hear it in the groove.
+- **Enter** puts the sample on the track you're on if it's a sample track (it keeps its hits,
+  so with a loop playing you hear each candidate in the pattern), or makes a new sample track;
+  `shift+Enter` always makes a new one. On a kit it goes on the lit pad (below).
+
+From a shell, `taw --library find kind=kick "decay<200" sort=decay` and
+`taw --library like <name>` search the same index (quote terms with `<` or `>`, or the shell
+takes them as redirects), and `taw --index <folder>` builds it without opening taw.
+
 ## Kits
 
 A sample track plays one sample; a kit gathers sample tracks onto a bus, each on a pad, so you
@@ -182,6 +230,10 @@ session you have open, live, while you watch and play. Register it once:
 ```
 claude mcp add --scope user taw -- <path to>/taw --mcp
 ```
+
+Building taw yourself on Windows? Register `build\taw_artefacts\Release\taw-mcp.exe --mcp`
+instead: each build copies taw.exe to taw-mcp.exe, so agent sessions left open never hold the
+taw.exe the next build has to replace.
 
 Then ask: "add a bass track with a two-bar line under the chorus", "make a filter sweep on the
 synth into bar 17", "which tracks have no output?". The agent reads the session (tracks, clips,

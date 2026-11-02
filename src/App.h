@@ -543,6 +543,7 @@ public:
     bool browserHover = false; // the map auditions under the pointer without a click (settings.json)
     bool browserInTime = true; // while playing, an audition waits for the next grid step (settings.json)
     bool browserToPad = true;  // on a kit, what you audition goes onto the chosen pad at once
+    bool browserGuide = false; // ? in the browser: its keys and mouse, over the map
     double auditionDb = -6.0; // the browser's audition voice, its own level (settings.json)
     Result setAuditionDb (double db);
     void browserPick (int sample, bool audition = true, bool toPad = true); // select (and audition, and onto the pad)

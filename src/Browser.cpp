@@ -4,6 +4,7 @@
 // list the same samples one by one; typing filters both. Every move auditions, at the browser's
 // own level, in time with the loop while playing. Enter puts the sample on the kit's chosen pad,
 // or gives the focused sample track that sample (keeping its hits), or makes a new sample track.
+// ? shows a guide to all of it over the map.
 
 #include "App.h"
 
@@ -285,7 +286,7 @@ Result App::focusBrowser()
         return Result::good ("browsing for " + session->track (kit)[ids::name].toString() + " " + padName (browserPadNote)
                              + L" \x00b7 what you audition goes on it \x00b7 click a pad to pick another \x00b7 esc: back to taw");
 
-    return Result::good (juce::String ((int) library->samples().size()) + L" samples \x00b7 tab: tabs, map, list \x00b7 type to filter \x00b7 esc: back to taw");
+    return Result::good (juce::String ((int) library->samples().size()) + L" samples \x00b7 ? keys and mouse \x00b7 type to filter \x00b7 esc: back to taw");
 }
 
 std::vector<juce::String> App::browserKinds() const
@@ -659,6 +660,22 @@ bool App::handleBrowserKey (const Key& k)
 
         return best >= 0;
     };
+
+    // ?: the guide to the keys and mouse, and again (or esc) to put it away. Any other key also
+    // puts it away and does what it does.
+    if (k.code == Key::Char && k.ch == '?')
+    {
+        browserGuide = ! browserGuide;
+        return true;
+    }
+
+    if (browserGuide)
+    {
+        browserGuide = false;
+
+        if (k.code == Key::Escape)
+            return true;
+    }
 
     // alt+arrows: the axes, from anywhere in the browser (left/right x, up/down y).
     if (k.alt && ! k.ctrl && (k.code == Key::Left || k.code == Key::Right || k.code == Key::Up || k.code == Key::Down))

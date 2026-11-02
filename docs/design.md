@@ -914,6 +914,9 @@ taw. It needs the screen: headless, `taw --library` is the way in. The state and
 picture (`:browser shot.png`, or `:browser shot.png 600x500` at another size) and press its keys (`:bkey right`). The docked column it replaced is
 gone. In the window:
 
+- **The guide**: `?` (or the toolbar's `?`) lays the keys, the mouse and what the colours and
+  filter terms mean over the map and list; `?`, `Esc` or a click puts it away, and any other key
+  puts it away and does what it does. The status line ends with "? keys" when there's room.
 - **Kind tabs** across the top, each with its count, in the kind's colour; a click (or `←→` with
   the tabs focused) shows only that kind. `Tab` goes round the tabs, the map, the list and (on a
   kit) the pads; `↑` from the top of the map reaches the tabs.

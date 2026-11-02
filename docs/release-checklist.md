@@ -33,20 +33,20 @@ What's left before taw goes public and ships its first downloads. Tick items off
 See [releasing.md](releasing.md) for the steps.
 
 - [x] Merge the release setup (CI, release workflow, contributing files) into `main`.
-- [ ] **Dry run:** Actions → Release → Run workflow on `main`. It's the first real test of the
+- [x] **Dry run:** Actions → Release → Run workflow on `main`. It's the first real test of the
       Windows and macOS builds. macOS minutes are expensive on a private repository and free on a
       public one.
-- [ ] Fix whatever the dry run turns up.
-- [ ] **Try the zips on real machines:**
-  - [ ] Windows: unzip, run from a terminal, SmartScreen's "Run anyway", video plays.
-  - [ ] macOS: the `xattr` step from the README, then taw runs.
-  - [ ] `taw --install-hub` and the driver install work from the unzipped folder, not the build folder.
-  - [ ] macOS video works with Homebrew's FFmpeg (it has to be the same major version the release
+- [x] Fix whatever the dry run turns up.
+- [x] **Try the zips on real machines:**
+  - [x] Windows: unzip, run from a terminal, SmartScreen's "Run anyway", video plays.
+  - [x] macOS: the `xattr` step from the README, then taw runs.
+  - [x] `taw --install-hub` and the driver install work from the unzipped folder, not the build folder.
+  - [x] macOS video works with Homebrew's FFmpeg (it has to be the same major version the release
         was built against).
-  - [ ] Keycast: clicking or dragging its window leaves the keyboard with the terminal, and
+  - [x] Keycast: clicking or dragging its window leaves the keyboard with the terminal, and
         `taw --keycasttest` passes.
 - [x] Date the version's heading in [CHANGELOG.md](../CHANGELOG.md).
-- [ ] Push `publish`, look over the draft release, publish it.
+- [x] Push `publish`, look over the draft release, publish it.
 
 ## Later
 

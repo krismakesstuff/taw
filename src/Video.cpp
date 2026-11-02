@@ -81,7 +81,7 @@ bool videoAvailable (juce::String& why)
             return juce::String ("video couldn't load Homebrew's FFmpeg: brew reinstall ffmpeg");
 
         return juce::String ("video needs the FFmpeg taw was built with (libavformat ") + juce::String (LIBAVFORMAT_VERSION_MAJOR)
-               + ", installed: " + juce::String (found) + "): rebuild taw";
+               + ", installed: " + juce::String (found) + "): download the latest taw, or rebuild it";
     }();
 
     why = loaded ? juce::String() : missing;

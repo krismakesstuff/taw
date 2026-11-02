@@ -59,7 +59,32 @@ bool videoAvailable (juce::String& why)
         return all;
     }();
 
-    why = loaded ? juce::String() : "video needs FFmpeg: brew install ffmpeg (or rebuild taw if it was upgraded)";
+    // Not loaded: none installed, or Homebrew's is another major version than taw was built for
+    // (its libavformat.N.dylib says which).
+    static const juce::String missing = []
+    {
+        int found = 0;
+
+        for (const auto* dir : { "/opt/homebrew/opt/ffmpeg/lib", "/usr/local/opt/ffmpeg/lib" })
+            for (const auto& f : juce::File (dir).findChildFiles (juce::File::findFiles, false, "libavformat.*.dylib"))
+                if (const auto name = f.getFileName(); name.matchesWildcard ("libavformat.*.dylib", false)
+                                                       && name.fromFirstOccurrenceOf (".", false, false).upToFirstOccurrenceOf (".", false, false).containsOnly ("0123456789"))
+                    found = std::max (found, name.fromFirstOccurrenceOf (".", false, false).getIntValue());
+
+        if (found == 0)
+            return juce::String ("video needs FFmpeg: brew install ffmpeg");
+
+        if (found < LIBAVFORMAT_VERSION_MAJOR)
+            return juce::String ("video needs a newer FFmpeg than the one installed: brew upgrade ffmpeg");
+
+        if (found == LIBAVFORMAT_VERSION_MAJOR)
+            return juce::String ("video couldn't load Homebrew's FFmpeg: brew reinstall ffmpeg");
+
+        return juce::String ("video needs the FFmpeg taw was built with (libavformat ") + juce::String (LIBAVFORMAT_VERSION_MAJOR)
+               + ", installed: " + juce::String (found) + "): rebuild taw";
+    }();
+
+    why = loaded ? juce::String() : missing;
     return loaded;
 #else
     why = "video isn't built for this platform yet";

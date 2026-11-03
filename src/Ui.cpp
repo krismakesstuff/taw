@@ -334,6 +334,7 @@ void Ui::render (App& app)
 void Ui::drawMain (App& app)
 {
     focusFrame.valid = false;
+    scrollBar.valid = false;
 
     drawTitle (app);
     drawInterface (app);
@@ -344,6 +345,7 @@ void Ui::drawMain (App& app)
 
     drawBottom (app);
     drawFocusFrame();
+    drawScrollBar();
     drawTyping (app);
     drawKeysWarning (app);
 
@@ -1191,6 +1193,35 @@ void Ui::drawTimeline (App& app)
         trackY.push_back (y + (track == framedTrack ? 1 : 0));
         y += blockRows (track);
         tracksEnd = y;
+    }
+
+    // What the scroll hides, in rows (lanes, playlists, the height and folded kits all count, as
+    // they do above) and in tracks shown when scrolled to (a folded kit's pads aren't).
+    int rowsAbove = 0, rowsTotal = 0, tracksAbove = 0, tracksBelow = 0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const auto rows = blockRows (i);
+        rowsTotal += rows;
+
+        if (i < app.trackScroll)
+            rowsAbove += rows, tracksAbove += rows > 0 ? 1 : 0;
+        else if (i >= app.trackScroll + visible)
+            tracksBelow += rows > 0 ? 1 : 0;
+    }
+
+    // The bar: in the border after the timeline, a thumb as long as the share of rows in view,
+    // in half rows. It keeps off an end while there's more past it, so a glance says which way.
+    if (const int barRows = tracksBottom - tracksTop, shownRows = std::min (tracksEnd, tracksBottom) - tracksTop;
+        ! fill && barRows >= 2 && rowsTotal > shownRows && rowsTotal > 0)
+    {
+        const int halves = barRows * 2;
+        const bool more = rowsTotal - rowsAbove - shownRows > 0;
+        int len = std::max (2, (int) std::lround ((double) halves * shownRows / rowsTotal));
+        int from = (int) std::lround ((double) halves * rowsAbove / rowsTotal);
+        len = std::min (len, halves - (rowsAbove > 0 ? 1 : 0) - (more ? 1 : 0));
+        from = juce::jlimit (rowsAbove > 0 ? 1 : 0, halves - len - (more ? 1 : 0), from);
+        scrollBar = { meterX - 1, tracksTop, tracksBottom, from, from + len, true };
     }
 
     // Where things were drawn, for the mouse: which track (and lane) each row is.
@@ -2251,9 +2282,22 @@ void Ui::drawTimeline (App& app)
             canvas.text (laneX + 1, y, "track " + numbers.label (app.focused) + " of " + juce::String ((int) numbers.byNumber.size()) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
                          colour::faint);
         else if (ch == 0 && n > visible)
+        {
+            // How many are out of sight each way, as an arrow and a count: (up 2 down 5).
+            juce::StringArray hidden;
+
+            if (tracksAbove > 0)
+                hidden.add (juce::String (L"\x2191") + juce::String (tracksAbove));
+
+            if (tracksBelow > 0)
+                hidden.add (juce::String (L"\x2193") + juce::String (tracksBelow));
+
             canvas.text (laneX + 1, y, "tracks " + numbers.label (app.trackScroll) + "-" + numbers.label (std::min (n, app.trackScroll + visible) - 1)
-                                           + " of " + juce::String ((int) numbers.byNumber.size()) + L" \x00b7 \x2191\x2193 to scroll",
-                         colour::faint);
+                                           + " of " + juce::String ((int) numbers.byNumber.size())
+                                           + (hidden.isEmpty() ? juce::String() : " (" + hidden.joinIntoString (" ") + ")")
+                                           + L" \x00b7 \x2191\x2193 to scroll",
+                         colour::faint, -1, false, laneW - 1);
+        }
 
         const auto& m = app.masterMeters[(size_t) ch];
         drawMeter (meterX + 6, y, 5, m.level, colour::meterBg);
@@ -2303,6 +2347,27 @@ void Ui::drawFocusFrame()
 
     if (f.title.isNotEmpty())
         canvas.text (f.x0 + 2, f.y0, " " + f.title + " ", f.colour, -1, true, f.x1 - f.x0 - 3);
+}
+
+// The track list's scroll bar: a light rail down the border, the thumb in half blocks over it.
+void Ui::drawScrollBar()
+{
+    const auto& b = scrollBar;
+
+    if (! b.valid || b.x < 0 || b.x >= canvas.width() || b.y1 > canvas.height())
+        return;
+
+    for (int y = b.y0; y < b.y1; ++y)
+    {
+        const int top = (y - b.y0) * 2;
+        const bool upper = top >= b.from && top < b.to, lower = top + 1 >= b.from && top + 1 < b.to;
+        auto& cell = canvas.at (b.x, y);
+
+        if (upper || lower)
+            canvas.put (b.x, y, upper && lower ? L'\x2588' : upper ? L'\x2580' : L'\x2584', colour::dim, cell.bg);
+        else if (cell.ch == L' ')
+            canvas.put (b.x, y, L'\x2502', colour::faint, cell.bg);
+    }
 }
 
 // Text in the command line changes what keys do (space and letters type instead of playing),

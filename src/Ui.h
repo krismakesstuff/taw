@@ -125,6 +125,17 @@ private:
     };
     FocusFrame focusFrame;
     void drawFocusFrame();
+
+    // The track list's scroll bar, when not every track fits: in the border between the
+    // timeline and the meters (rows y0 to y1, exclusive), its thumb in half rows from y0's top
+    // (from, to: exclusive). Drawn after the focus frame, whose edges cross that border.
+    struct ScrollBar
+    {
+        int x = 0, y0 = 0, y1 = 0, from = 0, to = 0;
+        bool valid = false;
+    };
+    ScrollBar scrollBar;
+    void drawScrollBar();
     void drawTyping (App&); // text in the command line: it has the keys, so it's lit
     void drawKeysWarning (App&); // a shortcut typed in keys mode: the way out, lit for a moment
     void drawHelp (App&);

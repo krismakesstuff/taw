@@ -127,10 +127,21 @@ struct AgentTools
 {
     App& app;
     const agents::Call& call;
+    App* live = nullptr; // set: app is a closed session's background copy, in this taw
 
     using Answer = agents::Answer;
     Session& session() const { return *app.session; }
     double spb() const { return session().samplesPerBeat(); }
+
+    // A background copy loads plugins on the message thread, which the open session's audio
+    // doesn't need but its screen does: calls that load one wait while taw plays or records.
+    std::optional<Answer> pluginsWait (const juce::String& what) const
+    {
+        if (live == nullptr || ! (live->engine.isRolling() || live->recording))
+            return {};
+
+        return Answer::fail ("playing", what + " in " + session().name() + L" (not open) loads plugins, which waits until taw stops \x00b7 try again then (other edits to it work now)");
+    }
 
     // What's the user's, noted before an edit --------------------------------------
     struct Locks
@@ -169,8 +180,9 @@ struct AgentTools
     {
         Locks l;
 
-        // Away from the keys for a while: the cursor and selection are fair game.
-        if (app.userIdle())
+        // Away from the keys for a while: the cursor and selection are fair game. A closed
+        // session has neither.
+        if (app.background || app.userIdle())
             return l;
 
         if (app.focused >= 0 && app.focused < session().numTracks())
@@ -396,7 +408,7 @@ struct AgentTools
     std::optional<Answer> cantEdit() const
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         if (app.engine.isRolling() || app.recording)
             return Answer::fail ("playing", juce::String (app.recording ? "taw is recording" : "taw is playing") + L" \x00b7 try again when it stops");
@@ -812,7 +824,7 @@ struct AgentTools
     Answer getParameters() const
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         int index = -1;
         juce::ValueTree owner;
@@ -820,6 +832,9 @@ struct AgentTools
 
         if (! automationOwnerFor (arg ("track"), index, owner, error))
             return Answer::fail ("invalid", error);
+
+        if (auto wait = pluginsWait ("get_parameters"))
+            return *wait;
 
         const auto search = arg ("search").toString().trim().toLowerCase();
         juce::Array<juce::var> list;
@@ -851,7 +866,7 @@ struct AgentTools
     Answer writeAutomation()
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         int index = -1;
         juce::ValueTree owner;
@@ -859,6 +874,11 @@ struct AgentTools
 
         if (! automationOwnerFor (arg ("track"), index, owner, error))
             return Answer::fail ("invalid", error);
+
+        if (const auto asked = arg ("param").toString().trim().toLowerCase();
+            ! juce::StringArray { "vol", "volume", "pan", "mute" }.contains (asked) && ! asked.startsWith ("send"))
+            if (auto wait = pluginsWait ("a plugin parameter's automation"))
+                return *wait;
 
         const auto param = paramFor (owner, index < 0, arg ("param").toString(), error);
 
@@ -944,7 +964,7 @@ struct AgentTools
     Answer getSession() const
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         const auto l = locks();
         const auto& s = session().tree();
@@ -959,10 +979,25 @@ struct AgentTools
         o->setProperty ("playing", app.engine.isRolling());
         o->setProperty ("recording", app.recording);
         o->setProperty ("unsaved", app.unsaved);
-        o->setProperty ("cursor_beat", tidy ((double) app.cursor / spb()));
-        o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (session().track (app.focused)[ids::uid]) : juce::var ("mix"));
+
+        // A closed session: nobody's cursor in it, and edits go to its unsaved changes.
+        if (live != nullptr)
+        {
+            o->setProperty ("open", false);
+            o->setProperty ("note", "not open in taw: edits go into its unsaved changes (never session.json); the user sees them when they open it, "
+                                    "and the tools work on it live from then on");
+            o->setProperty ("cursor_beat", juce::var());
+            o->setProperty ("focused", juce::var());
+        }
+        else
+        {
+            o->setProperty ("open", true);
+            o->setProperty ("cursor_beat", tidy ((double) app.cursor / spb()));
+            o->setProperty ("focused", app.focused < session().numTracks() ? juce::var (session().track (app.focused)[ids::uid]) : juce::var ("mix"));
+        }
+
         o->setProperty ("tempo_request", tempoRequest());
-        o->setProperty ("session_request", sessionRequest());
+        o->setProperty ("session_request", live != nullptr ? juce::var() : sessionRequest());
         o->setProperty ("mix_automation", describeAutomation (session().tree(), (bool) arg ("include_notes")));
 
         if (! l.range.isEmpty())
@@ -1000,7 +1035,7 @@ struct AgentTools
     Answer getTrack() const
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         juce::String error;
         const auto t = findTrack (arg ("track"), error);
@@ -1011,7 +1046,7 @@ struct AgentTools
     Answer runCommand()
     {
         if (app.session == nullptr)
-            return Answer::fail ("no-session", "no session is open in taw");
+            return Answer::fail ("no-session", "no session is open in taw (give session, from list_sessions, to work on one that isn't open)");
 
         const auto line = arg ("command").toString().trim();
 
@@ -1038,6 +1073,10 @@ struct AgentTools
 
         if ((shape.verb == "inst" || shape.verb == "fx" || shape.verb == "ins") && shape.args.isEmpty())
             return Answer::fail ("invalid", shape.verb + " alone opens a picker for the user: name the plugin (" + shape.verb + " vital)");
+
+        if (shape.verb == "inst" || shape.verb == "fx" || shape.verb == "ins")
+            if (auto wait = pluginsWait (shape.verb.quoted()))
+                return *wait;
 
         // The tempo may move audio against the beats: set_tempo asks the user when it would.
         if (shape.verb == "bpm")
@@ -1074,6 +1113,10 @@ struct AgentTools
 
         if (kind == "sample" && sample.isNotEmpty() && ! juce::File (sample).existsAsFile())
             return Answer::fail ("invalid", "no file " + sample);
+
+        if (kind == "instrument" && plugin.isNotEmpty() && app.session != nullptr)
+            if (auto wait = pluginsWait ("an instrument track with a plugin"))
+                return *wait;
 
         std::vector<juce::ValueTree> before;
 
@@ -1335,6 +1378,16 @@ struct AgentTools
 
     juce::var tempoRequest() const
     {
+        // A closed session's: kept in the open taw, asked when the user opens it.
+        if (live != nullptr)
+        {
+            for (const auto& p : live->pendingTempo)
+                if (p.folder == session().folder())
+                    return object ({ { "status", "waiting for the user to open the session" }, { "agent", p.ask.agent }, { "from", p.ask.from }, { "to", p.ask.to } });
+
+            return {};
+        }
+
         if (const auto& ask = app.tempoAsk)
             return object ({ { "status", "waiting for the user" }, { "agent", ask->agent }, { "from", ask->from }, { "to", ask->to } });
 
@@ -1379,6 +1432,19 @@ struct AgentTools
 
         if (const auto secs = app.recentEdits.recent (session().tree()); secs >= 0.0)
             return Answer::fail ("hands-off", "the user changed the session's settings " + juce::String (secs, 1) + " s ago (try again in a few seconds)");
+
+        // A closed session can't ask: the open taw keeps the request (the latest wins) and the
+        // tempo box comes up when the user opens it (App::attachSession).
+        if (live != nullptr)
+        {
+            const auto folder = session().folder();
+            auto& pending = live->pendingTempo;
+            pending.erase (std::remove_if (pending.begin(), pending.end(), [&] (const auto& p) { return p.folder == folder; }), pending.end());
+            pending.push_back ({ folder, App::TempoAsk { call.agent, now, bpm } });
+            return Answer::fail ("needs-user", session().name() + " has audio clips and isn't open, so taw will ask the user what to do with them (" + bpmText (now) + L" \x2192 "
+                                                   + bpmText (bpm) + L" bpm) when they open it \x00b7 until then the tempo stays " + bpmText (now)
+                                                   + "; call again after (tempo_request in get_session says where it is)");
+        }
 
         app.tempoAsk = App::TempoAsk { call.agent, now, bpm };
         return Answer::fail ("needs-user", "the session has audio clips, so taw is asking the user what to do with them (" + bpmText (now) + L" \x2192 "
@@ -1498,7 +1564,8 @@ struct AgentTools
         for (const auto& dir : knownSessions())
             sessions.add (object ({ { "name", dir.getFileName() }, { "folder", dir.getFullPathName() },
                                     { "saved", dir.getChildFile ("session.json").getLastModificationTime().toISO8601 (true) },
-                                    { "open", dir == open } }));
+                                    { "open", dir == open },
+                                    { "unsaved_changes", dir.getChildFile ("unsaved").isDirectory() } }));
 
         for (const auto& t : this->templates())
             templates.add (t.name);
@@ -1853,6 +1920,7 @@ Result App::agentsCommand (const juce::String& arg)
     if (! agentsOn)
     {
         agentServer.reset();
+        backgroundSessions.clear(); // closed sessions' copies: their edits stay in their unsaved folders
         tempoAsk.reset();
         sessionAsk.reset();
         return Result::good (L"agents off \x00b7 taw --mcp can't reach this taw (agents on lets them in)");
@@ -1882,9 +1950,257 @@ bool App::startAgents()
     return true;
 }
 
+namespace
+{
+// The tools that work on a session, and so take `session`.
+bool sessionScoped (const juce::String& tool)
+{
+    return tool != "list_sessions" && tool != "new_session" && tool != "open_session";
+}
+
+bool isEditTool (const juce::String& tool) { return ! tool.startsWith ("get_") && ! tool.startsWith ("list_"); }
+} // namespace
+
 agents::Answer App::agentCall (const agents::Call& call)
 {
-    return AgentTools { *this, call }.run();
+    AgentTools here { *this, call };
+    const auto asked = call.args["session"].toString().trim();
+
+    if (asked.isEmpty() || ! sessionScoped (call.tool))
+        return here.run();
+
+    // The open session, by its name or folder: as without the argument.
+    if (session != nullptr
+        && (asked.equalsIgnoreCase (session->folder().getFileName()) || (juce::File::isAbsolutePath (asked) && juce::File (asked) == session->folder())))
+        return here.run();
+
+    // Exactly that one: a part of a name could pick the wrong session to change.
+    juce::File folder;
+    const auto known = here.knownSessions();
+
+    if (juce::File::isAbsolutePath (asked))
+        folder = Session::existsIn (juce::File (asked)) ? juce::File (asked) : juce::File();
+    else
+        for (const auto& dir : known)
+            if (dir.getFileName().equalsIgnoreCase (asked))
+            {
+                folder = dir;
+                break;
+            }
+
+    if (folder == juce::File())
+    {
+        juce::StringArray like;
+
+        for (const auto& dir : known)
+            if (dir.getFileName().containsIgnoreCase (asked) && like.size() < 5)
+                like.add (dir.getFileName().quoted());
+
+        return agents::Answer::fail ("invalid", "no session called " + asked.quoted()
+                                                    + (like.isEmpty() ? juce::String (" (list_sessions lists them)") : " (its exact name or folder: " + like.joinIntoString (", ") + "?)"));
+    }
+
+    if (session != nullptr && folder == session->folder())
+        return here.run();
+
+    if (folder == openWhenHandedOver)
+        return agents::Answer::fail ("busy", L"the user is opening " + folder.getFileName() + L" \x00b7 call again in a moment (it'll be the open session)");
+
+    juce::String error;
+    auto* copy = backgroundFor (folder, error);
+
+    if (copy == nullptr)
+        return agents::Answer::fail ("failed", error);
+
+    auto answer = AgentTools { *copy, call, this }.run();
+
+    for (auto& b : backgroundSessions)
+        if (b.app.get() == copy)
+            noteBackgroundCall (b, call, answer);
+
+    return answer;
+}
+
+// After a call on a closed session's copy: its edits to unsaved\ (and who made them), and the
+// status line says so.
+void App::noteBackgroundCall (BackgroundSession& b, const agents::Call& call, const agents::Answer& answer)
+{
+    auto& copy = *b.app;
+    b.lastUsed = juce::Time::getMillisecondCounterHiRes();
+
+    if (answer.ok && answer.code != "waiting" && isEditTool (call.tool))
+        b.agents.addIfNotAlreadyThere (call.agent);
+
+    if (copy.treeDirty && copy.session != nullptr)
+    {
+        copy.treeDirty = false;
+        copy.savePluginStates();
+        copy.persist();
+
+        if (! b.agents.isEmpty())
+        {
+            juce::Array<juce::var> who;
+
+            for (const auto& a : b.agents)
+                who.add (a);
+
+            auto* o = new juce::DynamicObject();
+            o->setProperty ("agents", who);
+            o->setProperty ("when", juce::Time::getCurrentTime().toISO8601 (true));
+            copy.session->workFolder().getChildFile ("agent-edits.json").replaceWithText (juce::JSON::toString (juce::var (o)));
+        }
+    }
+
+    if (answer.ok && answer.code != "waiting" && isEditTool (call.tool) && copy.session != nullptr)
+        say (Result::good (call.agent + ", in " + copy.session->name() + ": " + answer.text));
+}
+
+App* App::backgroundFor (const juce::File& folder, juce::String& error)
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+
+    for (auto& b : backgroundSessions)
+        if (b.app->session != nullptr && b.app->session->folder() == folder)
+        {
+            b.lastUsed = now;
+            return b.app.get();
+        }
+
+    // Room for it: the copy used least recently goes (unless it's mid-call).
+    while (backgroundSessions.size() >= maxBackground)
+    {
+        auto oldest = backgroundSessions.end();
+
+        for (auto it = backgroundSessions.begin(); it != backgroundSessions.end(); ++it)
+            if (! it->app->agentWaiting.has_value() && it->app->import == nullptr && (oldest == backgroundSessions.end() || it->lastUsed < oldest->lastUsed))
+                oldest = it;
+
+        if (oldest == backgroundSessions.end())
+        {
+            error = "agents are busy in " + juce::String ((int) backgroundSessions.size()) + L" closed sessions already \x00b7 try again in a moment";
+            return nullptr;
+        }
+
+        backgroundSessions.erase (oldest);
+    }
+
+    auto copy = std::make_unique<App> (folder, juce::File(), juce::String(), juce::String(), true);
+
+    if (copy->session == nullptr)
+    {
+        error = copy->message.isNotEmpty() ? copy->message : "couldn't read " + folder.getFullPathName();
+        return nullptr;
+    }
+
+    copy->liveApp = this;
+    copy->sessionsFolder = sessionsFolder;
+    copy->newSessionParent = newSessionParent;
+    BackgroundSession b { std::move (copy), now, {} };
+
+    // Agents that edited it before (a copy let go since): still theirs.
+    if (const auto before = juce::JSON::parse (folder.getChildFile ("unsaved").getChildFile ("agent-edits.json"))["agents"]; before.isArray())
+        for (const auto& a : *before.getArray())
+            b.agents.addIfNotAlreadyThere (a.toString());
+
+    backgroundSessions.push_back (std::move (b));
+    return backgroundSessions.back().app.get();
+}
+
+bool App::backgroundBusy (const juce::File& folder) const
+{
+    for (const auto& b : backgroundSessions)
+        if (b.app->session != nullptr && b.app->session->folder() == folder)
+            return b.app->agentWaiting.has_value() || b.app->import != nullptr;
+
+    return false;
+}
+
+void App::pollBackgroundSessions()
+{
+    const auto now = juce::Time::getMillisecondCounterHiRes();
+
+    // A call waiting for its import: answered once it's in.
+    for (auto& b : backgroundSessions)
+        if (b.app->agentWaiting.has_value())
+        {
+            const auto call = *b.app->agentWaiting;
+            const auto done = AgentTools { *b.app, call, this }.finishImport();
+
+            if (! done.has_value())
+                continue;
+
+            b.app->agentWaiting.reset();
+            noteBackgroundCall (b, call, *done);
+            noteAgentCall (call, *done);
+
+            if (agentServer != nullptr)
+                agentServer->answer (call, *done);
+        }
+
+    // The user opened one mid-call: now the call's done, it opens (with the hand-over).
+    if (openWhenHandedOver != juce::File() && ! backgroundBusy (openWhenHandedOver))
+    {
+        const auto dir = std::exchange (openWhenHandedOver, juce::File());
+
+        if (session == nullptr && opening == nullptr && closing == nullptr)
+            startOpening (dir);
+    }
+
+    // Idle ones go: their edits are in unsaved\ already; plugin states too, and the lock goes.
+    backgroundSessions.erase (std::remove_if (backgroundSessions.begin(), backgroundSessions.end(), [&] (const BackgroundSession& b)
+                                              { return ! b.app->agentWaiting.has_value() && b.app->import == nullptr
+                                                       && now - b.lastUsed > backgroundIdle * 1000.0; }),
+                              backgroundSessions.end());
+}
+
+std::unique_ptr<Session> App::giveUpSession()
+{
+    if (session == nullptr)
+        return {};
+
+    // Its plugins' states and its tree to unsaved\, where the open taw loads them from.
+    if (hasUnsavedChanges())
+    {
+        savePluginStates();
+        persist();
+    }
+
+    pluginQueue.clear();
+
+    for (auto& in : hosted)
+        if (in.slot != nullptr)
+            in.slot->closeEditor();
+
+    hosted.clear();
+    engine.setGraph (std::make_unique<Graph>()); // nothing of it held here
+    session->tree().removeListener (this);
+
+    if (unsaved)
+        session->recovered = true; // unsaved changes to whoever attaches it
+
+    unsaved = false;
+    return std::move (session);
+}
+
+std::unique_ptr<Session> App::loadSession (const juce::File& dir, juce::String& error)
+{
+    for (auto it = backgroundSessions.begin(); it != backgroundSessions.end(); ++it)
+        if (it->app->session != nullptr && it->app->session->folder() == dir)
+        {
+            const auto agents = it->agents;
+            auto s = it->app->giveUpSession();
+            backgroundSessions.erase (it);
+
+            if (s == nullptr)
+                break;
+
+            if (s->recovered && ! agents.isEmpty())
+                s->loadNote = L"opened with " + agents.joinIntoString (", ") + L"'s changes from while it was closed, not saved yet \x00b7 ctrl+s keeps them, ctrl+z takes them back";
+
+            return s;
+        }
+
+    return Session::load (dir, error);
 }
 
 void App::noteAgentCall (const agents::Call& call, const agents::Answer& answer)
@@ -1968,6 +2284,8 @@ void App::pollAgents()
     }
     else if (! recentEdits.watching (session->tree()))
         recentEdits.watch (session->tree());
+
+    pollBackgroundSessions(); // closed sessions agents are editing
 
     // A call waiting for its import goes first; the others queue behind it.
     if (agentWaiting.has_value())

@@ -324,7 +324,7 @@ Not built yet, and open:
 
 ## Closed sessions (branch `mcp-closed-sessions`)
 
-Status (2026-11-02): planned here, then built on the branch (see "As built" below).
+Status (2026-11-02): built on the branch (see "As built" at the end of this section).
 
 Agents can read and edit a session that isn't the one open in taw: while the user is on the
 session screen auditioning bounces, or working in another session.
@@ -457,4 +457,36 @@ refused); a save writing it all to `session.json`.
 
 ### As built
 
-(Filled in below once built.)
+- `App.h/.cpp`: `App (..., bool inBackground)` makes the copy (`background`: no emergency save,
+  no settings written, not remembered as recent, no run marker or hub name; `interactive` from
+  the start). `attachSession` raises a `pendingTempo` request as the tempo box (unless the
+  tempo is there already). `startOpening` waits for a busy copy (`openWhenHandedOver`) and
+  reads through `loadSession`; `createSession` (a typed name that's an existing session) does
+  too, refusing while a copy is mid-call.
+- `AgentEdits.cpp`: `App::agentCall` routes by `session` (exactly a folder or a name: a part of
+  a name is refused with the matches, since it could pick the wrong session to change);
+  `backgroundFor`, `backgroundBusy`, `pollBackgroundSessions` (from `pollAgents`: imports
+  answered, a waiting open, idle copies let go), `noteBackgroundCall` (the copy's tree and
+  plugin states to `unsaved\` after each call that changed it, `agent-edits.json`, the status
+  line), `giveUpSession` and `loadSession` (the hand-over). `AgentTools` has `live` (the taw a
+  copy is in): no locks, `get_session`'s `open`/`note`, the pending tempo, `pluginsWait`.
+  `list_sessions` gives each session's `unsaved_changes`.
+- `Agents.cpp`: `toolList` adds `session` to every session tool's schema in one place; the
+  bridge's instructions say how to use it. `Session::load` names the agents from
+  `agent-edits.json` in its note.
+- Tested: `taw --mcptest` 167 checks (49 new), all ok; `--keycasttest`, `--counttest`,
+  `--livetest`, `--cliptest`, `--paralleltest`, `--bouncetest`, `--duptracktest` unchanged.
+
+Open:
+
+- **Undo after an idle unload** is gone (the edits stay, as unsaved changes). If agents work in
+  long gaps, `backgroundIdle` could grow, at the cost of holding the lock longer.
+- **A copy is a whole `App`**: its engine starts its disk thread and render helpers though
+  nothing plays. Cheap enough for three; an engine that starts them only with a device would
+  make it nothing.
+- **Plugin loads still block the screen** for as long as the plugin takes (refused while
+  playing). Loading them on another thread is a bigger change, for everyone's plugins.
+- The tempo request isn't on disk: quitting taw before opening the session forgets it (the
+  agent's next `set_tempo` asks again).
+- `--savetest` crashes after "right stays in the area" on this machine, with and without these
+  changes (it isn't in CI): worth a look on its own.

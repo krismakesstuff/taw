@@ -368,6 +368,30 @@ juce::var toolList()
     "session": { "type": "string", "description": "Its folder (a full path) or its name." } }, "required": ["session"] }
 }
 ])JSON");
+
+    // Every tool that works on a session can work on one that isn't open (docs/plan-taw-mcp.md,
+    // "Closed sessions"): the same optional argument on each.
+    static const bool withSession = []
+    {
+        for (const auto& t : *tools.getArray())
+        {
+            const auto name = t["name"].toString();
+
+            if (name == "list_sessions" || name == "new_session" || name == "open_session")
+                continue;
+
+            if (auto* props = t["inputSchema"]["properties"].getDynamicObject())
+                props->setProperty ("session", object ({ { "type", "string" },
+                                                         { "description", "Another session than the open one: its folder (a full path) or its name as list_sessions gives it. "
+                                                                          "Left out: the session open in taw. A session that isn't open is edited in the background: its edits go into "
+                                                                          "its unsaved changes (never session.json) for the user to keep or drop when they open it; no track is locked "
+                                                                          "there (nobody's cursor is in it), and when the user opens it the work carries on live, under the usual rules." } }));
+        }
+
+        return true;
+    }();
+
+    juce::ignoreUnused (withSession);
     return tools;
 }
 
@@ -581,7 +605,11 @@ juce::String Bridge::handle (const juce::String& line)
                                   "beats from the session start; tracks go by the ids get_session gives (\"t3\"), which never change. "
                                   "write_automation draws volume, pan, mute, sends and plugin parameters (get_parameters finds them). A tempo "
                                   "change on a session with audio, or switching sessions, waits for the user (needs-user): don't press them, "
-                                  "call again later." } }));
+                                  "call again later. To work on a session that isn't open (the user is on the session screen, or in another "
+                                  "session), give its name or folder from list_sessions as session on any of these tools: no need to open it. "
+                                  "Those edits wait in its unsaved changes for the user, who sees them when they open it (and can take them "
+                                  "back with ctrl+z); if they open it while you work, carry on with the same session argument, now under the "
+                                  "live rules." } }));
     }
 
     if (notification)

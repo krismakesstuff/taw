@@ -50,11 +50,34 @@ void MeterState::update (float peak, double now, double dt)
 }
 
 //==============================================================================
-App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::String templateName)
+App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::String templateName, bool inBackground)
     : newSessionName (std::move (newName)),
       newSessionParent (std::move (newParent)),
       pendingTemplate (std::move (templateName))
 {
+    // A closed session an agent edits: everything it writes goes to unsaved\, from the first
+    // write (taking a recovered take on load included).
+    background = inBackground;
+    interactive = inBackground;
+
+    if (background)
+    {
+        loadSettings();
+        lastInputAt = -1.0e12; // nobody at its keys
+
+        if (openDir != juce::File())
+        {
+            juce::String error;
+
+            if (auto s = Session::load (openDir, error))
+                attachSession (std::move (s));
+            else
+                say (Result::fail (error));
+        }
+
+        return;
+    }
+
     configFolder().createDirectory();
     timing::mark ("taw starting");
     loadSettings();
@@ -96,6 +119,8 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
 
 App::~App()
 {
+    backgroundSessions.clear(); // closed sessions agents were editing: their edits stay in unsaved\
+
     if (indexThread.joinable())
         indexThread.join(); // an index half written would be measured again anyway
 
@@ -104,6 +129,10 @@ App::~App()
     stopBounce();
     backgroundBounces.clear(); // quitting anyway: an unfinished last-saved is dropped (the old one stays)
     releaseSession();
+
+    if (background)
+        return; // the emergency save and the settings are the live taw's
+
     safety::setEmergencySave (nullptr, nullptr);
 
     if (keycast.wasShown())
@@ -823,8 +852,11 @@ Result App::createSession (const Template& t)
     juce::String error;
     std::unique_ptr<Session> s;
 
+    if (Session::existsIn (dir) && backgroundBusy (dir))
+        return Result::fail (L"an agent is mid-edit in " + dir.getFileName() + L" \x00b7 try again in a moment");
+
     if (Session::existsIn (dir))
-        s = Session::load (dir, error);
+        s = loadSession (dir, error);
     else
         s = Session::create (dir, t.tree, newRate, error); // the device follows when it opens
 
@@ -843,11 +875,28 @@ void App::attachSession (std::unique_ptr<Session> s)
 {
     session = std::move (s);
     session->tree().addListener (this);
-    rememberSession (session->folder());
-    safety::markRunning (session->folder());
+
+    // A background copy isn't open as far as the user, the crash report or the hub know.
+    if (! background)
+    {
+        rememberSession (session->folder());
+        safety::markRunning (session->folder());
 #if TAW_HUB
-    hub::setClientName (session->name(), session->folder().getFullPathName()); // who this taw is to the hub
+        hub::setClientName (session->name(), session->folder().getFullPathName()); // who this taw is to the hub
 #endif
+
+        // An agent asked for a new tempo while it was closed: the box asks now.
+        for (auto it = pendingTempo.begin(); it != pendingTempo.end(); ++it)
+            if (it->folder == session->folder())
+            {
+                if (! juce::approximatelyEqual (it->ask.to, session->bpm())) // not there already
+                    tempoAsk = it->ask;
+
+                pendingTempo.erase (it);
+                break;
+            }
+    }
+
     focused = 0;
     topLane = TopLane::none;
     selectedMarker = {};
@@ -3323,6 +3372,9 @@ void App::loadSettings()
 
 void App::saveSettings() const
 {
+    if (background)
+        return; // a closed session's copy: the settings are the live taw's
+
     auto* o = new juce::DynamicObject();
     o->setProperty ("theme", theme);
     o->setProperty ("io", ioVisible);
@@ -4490,8 +4542,17 @@ void App::startOpening (const juce::File& dir)
 {
     juce::String error;
     stopBounce(); // the session screen's player
+
+    // An agent is mid-call in it (an import): opened as soon as that's in (pollBackgroundSessions).
+    if (backgroundBusy (dir))
+    {
+        openWhenHandedOver = dir;
+        say (Result::good (L"finishing an agent's edit to " + dir.getFileName() + L", then opening it\x2026"));
+        return;
+    }
+
     timing::mark ("opening " + dir.getFullPathName());
-    auto s = Session::load (dir, error);
+    auto s = loadSession (dir, error);
     timing::mark ("session.json read");
 
     if (s == nullptr)

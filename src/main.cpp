@@ -2115,6 +2115,231 @@ int main (int argc, char** argv)
             settle();
             check (! made.error && app->session != nullptr && app->session->name().startsWith ("screen idea"), "new_session on the session screen: made and opened at once");
             check (tool ("run_command", R"({"command":"import D:\\x.als"})").text.startsWith ("[invalid]"), "run_command can't import a Live set (it closes the session)");
+
+            // Closed sessions (docs/plan-taw-mcp.md, "Closed sessions"): edited in a background
+            // copy inside this taw, into their unsaved\, handed over when the user opens one.
+            const auto songA = scratch.getChildFile ("song a");
+            const auto songB = scratch.getChildFile ("song b");
+            {
+                juce::String error;
+                taw::Session::create (songA, {}, 44100.0, error);
+                taw::Session::create (songB, {}, 44100.0, error);
+            }
+            const auto bJson = songB.getChildFile ("session.json").loadFileAsString();
+            const auto bUnsaved = songB.getChildFile ("unsaved").getChildFile ("session.json");
+            auto bTree = [&] { return taw::varToTree (juce::JSON::parse (bUnsaved)); };
+            auto trackNames = [] (const juce::ValueTree& t)
+            {
+                juce::StringArray names;
+
+                for (const auto& c : t)
+                    if (c.hasType (taw::ids::TRACK))
+                        names.add (c[taw::ids::name].toString());
+
+                return names.joinIntoString (",");
+            };
+            auto trackNamed = [] (const juce::ValueTree& t, const juce::String& name)
+            {
+                for (const auto& c : t)
+                    if (c.hasType (taw::ids::TRACK) && c[taw::ids::name].toString() == name)
+                        return c;
+
+                return juce::ValueTree();
+            };
+            const juce::String B = R"("session":"song b")";
+
+            {
+                const auto toolsNow = method ("tools/list", "{}")["result"]["tools"];
+                bool every = true, notListing = true;
+
+                for (const auto& t : *toolsNow.getArray())
+                {
+                    const bool has = t["inputSchema"]["properties"].hasProperty ("session");
+                    const auto name = t["name"].toString();
+
+                    if (name == "list_sessions" || name == "new_session")
+                        notListing = notListing && ! has;
+                    else if (name != "open_session")
+                        every = every && has;
+                }
+
+                check (every && notListing, "tools/list: every session tool takes session (list_sessions and new_session don't)");
+            }
+
+            // From the session screen.
+            app->closeSession();
+            settle();
+            check (app->session == nullptr, "closed: the session screen again");
+            {
+                const auto read = tool ("get_session", "{" + B + "}");
+                check (! read.error && read.data["name"].toString() == "song b" && ! (bool) read.data["open"] && read.data["tracks"].size() == 0 && read.data["focused"].isVoid(),
+                       "get_session on a closed session: read, not open, nobody's cursor in it");
+                check (app->session == nullptr && app->backgroundSessions.size() == 1, "...taw still on the session screen, one background copy");
+                check (tool ("get_session", R"({"session":"no such song"})").text.startsWith ("[invalid]"), "an unknown session refused");
+                const auto partial = tool ("get_session", R"({"session":"song"})");
+                check (partial.text.startsWith ("[invalid]") && partial.text.contains ("song a") && partial.text.contains ("song b"),
+                       "part of a name refused (it could be the wrong one), the matches offered");
+            }
+
+            const auto keys = tool ("add_track", "{" + B + R"(,"kind":"instrument","name":"Keys"})");
+            const auto keysId = keys.data["track"].toString();
+            check (! keys.error && keysId == "t1", "add_track on it: " + keys.text);
+            check (! tool ("write_notes", "{" + B + ",\"track\":\"" + keysId + R"(","beat":0,"notes":[{"beat":0,"length":2,"pitch":60},{"beat":2,"length":2,"pitch":64}]})").error,
+                   "write_notes on it");
+            check (! tool ("add_marker", "{" + B + R"(,"beat":8,"name":"Verse"})").error, "add_marker on it");
+            const auto vol = tool ("run_command", "{" + B + R"(,"command":"1 v -3"})");
+            check (! vol.error, "run_command on it: " + vol.text);
+            {
+                auto* copy = app->backgroundSessions.empty() ? nullptr : app->backgroundSessions.front().app.get();
+                check (copy != nullptr && copy->um()->getUndoDescription() == "mcptest: 1 v -3" && copy->um()->canUndo(),
+                       "one undo step each, in the copy: " + (copy != nullptr ? copy->um()->getUndoDescription() : juce::String()));
+                check (songB.getChildFile ("session.json").loadFileAsString() == bJson, "song b's session.json untouched");
+                const auto t = bTree();
+                const auto track = trackNamed (t, "Keys");
+                check (trackNames (t) == "Keys" && taw::Session::placedNotes (track).size() == 2 && std::abs ((double) track[taw::ids::gainDb] + 3.0) < 0.01
+                           && t.getChildWithName (taw::ids::MARKER).isValid(),
+                       "its unsaved\\session.json has them: the track, its notes, its volume, the marker");
+                check (songB.getChildFile ("unsaved").getChildFile ("agent-edits.json").loadFileAsString().contains ("mcptest"), "...and unsaved\\agent-edits.json says whose");
+                const auto back = tool ("get_track", "{" + B + ",\"track\":\"" + keysId + "\"}");
+                check (! back.error && back.data["clips"][0]["notes"].size() == 2 && ! back.data.hasProperty ("locked"), "get_track reads them back, nothing locked");
+            }
+
+            // Session A open, B edited.
+            check (! tool ("open_session", "{\"session\":" + quoted (songA) + "}").error, "open_session song a");
+            settle();
+            check (app->session != nullptr && app->session->folder() == songA, "song a open");
+            {
+                const auto aUndo = app->um()->getUndoDescription();
+                const auto hat = tool ("add_track", "{" + B + R"(,"kind":"sample","name":"Hat"})");
+                const auto hatId = hat.data["track"].toString();
+                const auto hits = tool ("write_hits", "{" + B + ",\"track\":\"" + hatId + R"(","beat":0,"hits":[{"beat":0},{"beat":1},{"beat":2},{"beat":3}]})");
+                check (! hat.error && ! hits.error && hatId == "t2", "with song a open: a sample track and its hits on song b");
+                const auto withFile = tool ("add_track", "{" + B + R"(,"kind":"sample","name":"Tick","sample":)" + quoted (tick) + "}");
+                check (! withFile.error && withFile.data["track"].toString() == "t3", "a sample track with a file on song b, answered once its import is in: " + withFile.text);
+                check (app->message.contains ("in song b"), "the status line says where: " + app->message);
+                check (app->session->numTracks() == 0 && ! app->unsaved && app->um()->getUndoDescription() == aUndo,
+                       "song a untouched: no tracks, nothing unsaved, its undo history as it was");
+                const auto here = tool ("get_session", "{}");
+                check (! here.error && here.data["name"].toString() == "song a" && (bool) here.data["open"], "get_session without session: song a, open");
+                check (tool ("get_session", R"({"session":"song a"})").data["name"].toString() == "song a", "...and naming song a: the same");
+                const auto t = bTree();
+                check (trackNames (t) == "Keys,Hat,Tick" && taw::Session::placedHits (trackNamed (t, "Hat")).size() == 4 && trackNamed (t, "Tick")[taw::ids::sample].toString().isNotEmpty(),
+                       "song b's unsaved\\ has Keys, Hat (4 hits) and Tick (its sample): " + trackNames (t));
+
+                app->engine.play (0);
+                check (! tool ("add_marker", "{" + B + R"(,"beat":16,"name":"Chorus"})").error, "song a playing: edits to song b still go in (nothing of it can be heard)");
+                check (tool ("get_parameters", "{" + B + R"(,"track":"t1"})").text.startsWith ("[playing]"), "...but not one that would load plugins");
+                app->engine.stop();
+                pump();
+
+                const auto listed = tool ("list_sessions", "{}");
+                bool marked = false;
+
+                for (const auto& entry : *listed.data["sessions"].getArray())
+                    marked = marked || (entry["name"].toString() == "song b" && (bool) entry["unsaved_changes"]);
+
+                check (marked, "list_sessions: song b has unsaved changes");
+            }
+
+            // The tempo on a closed session with audio: waits for the user to open it.
+            {
+                const auto imported = tool ("run_command", "{" + B + ",\"command\":" + juce::JSON::toString ("import \"" + tick.getFullPathName() + "\"") + "}");
+                check (! imported.error, "run_command import on song b (an audio clip): " + imported.text);
+                const auto bpmB = (double) bTree()[taw::ids::bpm];
+                const auto tempo = tool ("set_tempo", "{" + B + R"(,"bpm":140})");
+                check (tempo.text.startsWith ("[needs-user]") && app->pendingTempo.size() == 1 && ! app->tempoAsk.has_value() && juce::approximatelyEqual ((double) bTree()[taw::ids::bpm], bpmB),
+                       "set_tempo 140 on song b with audio: waits for the user to open it, nothing changed");
+                check (tool ("get_session", "{" + B + "}").data["tempo_request"]["status"].toString().contains ("open"), "get_session: its tempo_request waits for the open");
+            }
+
+            // Idle: the copy goes, the edits stay; named again, it's read from unsaved\.
+            {
+                app->backgroundIdle = 0.0;
+                wait (30);
+                check (app->backgroundSessions.empty() && ! songB.getChildFile (".taw-lock").exists() && bUnsaved.existsAsFile(),
+                       "idle: the copy let go, its lock gone, its edits kept in unsaved\\");
+                app->backgroundIdle = 120.0;
+                const auto back = tool ("get_session", "{" + B + "}");
+                check (! back.error && back.data["tracks"].size() == 4 && (bool) back.data["unsaved"] && songB.getChildFile (".taw-lock").exists(),
+                       "named again: a new copy built on unsaved\\ (4 tracks, unsaved, locked again)");
+            }
+
+            // The hand-over: the user opens song b while an agent's call on it is under way.
+            {
+                app->closeSession();
+                settle();
+                const auto line = "{\"jsonrpc\":\"2.0\",\"id\":" + juce::String (++rpcId) + R"(,"method":"tools/call","params":{"name":"add_track","arguments":{)" + B
+                                  + R"(,"kind":"sample","name":"Shaker","sample":)" + quoted (tick) + "}}}";
+                auto f = std::async (std::launch::async, [&bridge, line] { return bridge.handle (line); });
+                taw::App* copy = nullptr;
+
+                for (int i = 0; i < 20000 && (copy == nullptr || ! app->backgroundBusy (songB)); ++i)
+                {
+                    app->pollAgents();
+                    copy = app->backgroundSessions.empty() ? nullptr : app->backgroundSessions.front().app.get();
+                    juce::Thread::sleep (1);
+                }
+
+                check (copy != nullptr && app->backgroundBusy (songB), "an agent mid-call on song b (a sample importing)");
+                app->startOpening (songB); // the user, on the session screen
+                check (app->session == nullptr && app->openWhenHandedOver == songB, "the user opens it: the open waits for the call");
+
+                while (f.wait_for (std::chrono::milliseconds (1)) != std::future_status::ready)
+                    pump();
+
+                const auto reply = juce::JSON::parse (f.get());
+
+                for (int i = 0; i < 2000 && app->session == nullptr; ++i)
+                    pump();
+
+                settle();
+                check (! (bool) reply["result"]["isError"], "the call finishes: " + reply["result"]["content"][0]["text"].toString().upToFirstOccurrenceOf ("\n", false, false));
+                check (app->session != nullptr && app->session->folder() == songB && app->backgroundSessions.empty(), "then song b opens: the copy handed over");
+            }
+
+            if (app->session != nullptr && app->session->folder() == songB)
+            {
+                auto& b = *app->session;
+                const auto keysTrack = b.track (b.trackById (keysId));
+                check (trackNames (b.tree()) == "Keys,Hat,Tick,tick,Shaker" && taw::Session::placedNotes (keysTrack).size() == 2,
+                       "with every agent edit in it: " + trackNames (b.tree()));
+                check (app->unsaved && app->hasUnsavedChanges() && b.loadNote.contains ("mcptest"), "as unsaved changes, said whose: " + b.loadNote);
+                check (app->um()->getUndoDescription().startsWith ("mcptest: add sample track"), "the agent's edits are undo steps here: " + app->um()->getUndoDescription());
+                check (app->tempoAsk.has_value() && juce::approximatelyEqual (app->tempoAsk->to, 140.0) && app->pendingTempo.empty(),
+                       "the tempo box is up with the agent's 140");
+                const auto bpmBefore = b.bpm();
+                press ('t');
+                check (juce::approximatelyEqual (b.bpm(), 140.0), "t: 140, the audio kept where it is in time");
+
+                app->undoEdit(); // the tempo
+                const auto undone = app->undoEdit();
+                app->pumpBackgroundWork();
+                check (undone.ok && b.numTracks() == 4 && juce::approximatelyEqual (b.bpm(), bpmBefore), "ctrl+z twice: the tempo, then the agent's Shaker: " + undone.message);
+                app->redoEdit();
+                app->redoEdit();
+                app->pumpBackgroundWork();
+                check (b.numTracks() == 5 && juce::approximatelyEqual (b.bpm(), 140.0), "ctrl+y twice: back");
+                wait (700); // the user's undo and redo were their edits: let them age
+
+                // The agent carries on, naming song b as before: live now, the usual rules.
+                app->lastInputAt = juce::Time::getMillisecondCounterHiRes();
+                app->focusTrack (b.trackById (keysId));
+                const auto locked = tool ("write_notes", "{" + B + ",\"track\":\"" + keysId + R"(","clip":0,"notes":[{"beat":1,"length":1,"pitch":67}]})");
+                check (locked.text.startsWith ("[hands-off]") && taw::Session::placedNotes (keysTrack).size() == 2, "the agent carries on with session song b: live, the user's focused track locked");
+                app->engine.play (0);
+                check (tool ("add_marker", "{" + B + R"(,"beat":24,"name":"Out"})").text.startsWith ("[playing]"), "...refused while it plays");
+                app->engine.stop();
+                pump();
+                const auto hat = b.track (b.trackById ("t2"));
+                const auto onHat = tool ("write_hits", "{" + B + R"(,"track":"t2","clip":0,"hits":[{"beat":0.5}]})");
+                check (! onHat.error && taw::Session::placedHits (hat).size() == 5 && app->um()->getUndoDescription().startsWith ("mcptest: write"),
+                       "...and elsewhere goes in, live, one undo step");
+                check (tool ("get_session", "{" + B + "}").data["open"], "get_session naming it: open");
+                check (songB.getChildFile ("session.json").loadFileAsString() == bJson, "song b's session.json still untouched");
+                const auto saved = app->saveSession();
+                const auto onDisk = taw::varToTree (juce::JSON::parse (songB.getChildFile ("session.json")));
+                check (saved.ok && trackNames (onDisk) == "Keys,Hat,Tick,tick,Shaker" && ! songB.getChildFile ("unsaved").exists(), "ctrl+s: all of it in session.json, unsaved\\ gone");
+            }
         }
 
         app.reset();

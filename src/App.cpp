@@ -119,7 +119,7 @@ App::App (juce::File openDir, juce::File newParent, juce::String newName, juce::
 
 App::~App()
 {
-    backgroundSessions.clear(); // closed sessions agents were editing: their edits stay in unsaved\
+    backgroundSessions.clear(); // closed sessions agents were editing: their edits stay in unsaved\ (the folder)
 
     if (indexThread.joinable())
         indexThread.join(); // an index half written would be measured again anyway

@@ -88,7 +88,12 @@ Front front (const std::vector<void*>& views, void* keeper)
 {
     @autoreleasepool
     {
-        if (! NSApp.isActive)
+        // NSApp.isActive can stay true after the keyboard went back to the terminal: clicks in
+        // other apps then read as clicks in a plugin window, and each one handed the keyboard
+        // back to the terminal. What macOS has in front settles it.
+        auto* frontApp = [NSWorkspace sharedWorkspace].frontmostApplication;
+
+        if (! NSApp.isActive || frontApp == nil || frontApp.processIdentifier != getpid())
             return Front::notTaw;
 
         auto* key = NSApp.keyWindow;
@@ -106,8 +111,10 @@ Front front (const std::vector<void*>& views, void* keeper)
             if (w.isVisible && w.level >= NSPopUpMenuWindowLevel)
                 return Front::menu;
 
+        // Nothing takes the keys: a plugin window's click, if one is open. With none open there's
+        // nothing to give the keyboard back from.
         if (key == nil)
-            return Front::plugin; // nothing takes the keys anyway
+            return views.empty() ? Front::notTaw : Front::plugin;
 
         for (auto* v : views)
             if (v != nullptr && ((NSView*) v).window == key)

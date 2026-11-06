@@ -174,6 +174,12 @@ if (WIN32)
     add_custom_command(TARGET taw POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different ${ffmpeg_SOURCE_DIR}/LICENSE $<TARGET_FILE_DIR:taw>/FFMPEG-LICENSE.txt)
     target_compile_definitions(taw PRIVATE TAW_VIDEO=1)
+
+    # taw-mcp.exe, the copy agents run (taw-mcp.exe --mcp), so their bridges never hold taw.exe.
+    add_custom_command(TARGET taw POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -DFROM=$<TARGET_FILE:taw> -DTO=$<TARGET_FILE_DIR:taw>/taw-mcp.exe
+                -P ${CMAKE_SOURCE_DIR}/cmake/CopyBridge.cmake
+        VERBATIM)
 endif()
 
 if (APPLE)

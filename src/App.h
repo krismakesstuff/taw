@@ -135,7 +135,9 @@ class App final : private juce::ValueTree::Listener
 public:
     // openDir: an existing session to open (may be empty). Otherwise a new session is created
     // under newParent, named newName, from templateName; empty fields are asked for.
-    App (juce::File openDir, juce::File newParent, juce::String newName, juce::String templateName);
+    // inBackground: a closed session an agent is editing, inside the running taw (backgroundFor):
+    // no screen, no device, nothing app-wide written, its edits saved to unsaved\.
+    App (juce::File openDir, juce::File newParent, juce::String newName, juce::String templateName, bool inBackground = false);
     ~App() override;
 
     int run();
@@ -211,6 +213,35 @@ public:
     std::optional<TempoOutcome> tempoOutcome; // the last answer, for the agent to read
     void answerTempoAsk (TempoChoice);
     bool handleTempoAskKey (const Key&);
+
+    // Closed sessions (docs/plan-taw-mcp.md, "Closed sessions"): a tool given another session
+    // than the open one runs on a background copy of it here, a headless App of its own (no
+    // device, no screen, no user: hands-off doesn't apply), its edits saved to that session's
+    // unsaved\ and never to session.json. Plugins load only for calls that need them. Opening
+    // the session hands the copy's Session (tree, undo history, lock) over to this taw.
+    bool background = false; // this App is such a copy
+    App* liveApp = nullptr;  // ...and the taw it's in
+    struct BackgroundSession
+    {
+        std::unique_ptr<App> app;
+        double lastUsed = 0.0;     // ms
+        juce::StringArray agents;  // who changed it, for the note when it's opened
+    };
+    std::vector<BackgroundSession> backgroundSessions;
+    double backgroundIdle = 120.0; // seconds unused before a copy is let go (its edits stay in unsaved\)
+    size_t maxBackground = 3;
+    App* backgroundFor (const juce::File& folder, juce::String& error); // loads it the first time
+    bool backgroundBusy (const juce::File& folder) const;                // a call of its still running (an import)
+    void pollBackgroundSessions();                                       // imports answered, idle copies let go, a waiting open
+    void noteBackgroundCall (BackgroundSession&, const agents::Call&, const agents::Answer&); // its edits to unsaved\, said
+    // The session in a folder, for opening it here: the background copy's, handed over, if
+    // there is one; else read from disk.
+    std::unique_ptr<Session> loadSession (const juce::File& dir, juce::String& error);
+    std::unique_ptr<Session> giveUpSession(); // a background copy: its edits written, its Session out
+    juce::File openWhenHandedOver;            // the user opened it mid-call: opened once the call's done
+    // A tempo change on a closed session with audio clips: the box comes up when it's opened.
+    struct PendingTempo { juce::File folder; TempoAsk ask; };
+    std::vector<PendingTempo> pendingTempo;
 
     // An agent's new_session / open_session: on the session screen it happens at once; over an
     // open session a box asks (save and switch, switch without saving, or stay). The agent
@@ -543,6 +574,7 @@ public:
     bool browserHover = false; // the map auditions under the pointer without a click (settings.json)
     bool browserInTime = true; // while playing, an audition waits for the next grid step (settings.json)
     bool browserToPad = true;  // on a kit, what you audition goes onto the chosen pad at once
+    bool browserGuide = false; // ? in the browser: its keys and mouse, over the map
     double auditionDb = -6.0; // the browser's audition voice, its own level (settings.json)
     Result setAuditionDb (double db);
     void browserPick (int sample, bool audition = true, bool toPad = true); // select (and audition, and onto the pad)

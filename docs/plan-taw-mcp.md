@@ -321,3 +321,172 @@ Not built yet, and open:
 - **macOS:** nothing Windows-only, but not yet built or run there.
 - **Firewall:** the socket is on 127.0.0.1 only, which Windows doesn't usually ask about; if it
   does, allow it (or deny: nothing outside the machine needs it).
+
+## Closed sessions (branch `mcp-closed-sessions`)
+
+Status (2026-11-02): built on the branch (see "As built" at the end of this section).
+
+Agents can read and edit a session that isn't the one open in taw: while the user is on the
+session screen auditioning bounces, or working in another session.
+
+### Decided by the user
+
+1. **Edits go into the session's `unsaved\` work folder**, the saving model's own: nothing is
+   written to `session.json`. When the user opens the session they see the agent's edits as
+   unsaved changes; ctrl+s keeps them, closing without saving drops them. An `unsaved\` folder
+   that's already there (the user's own changes, left by closing the window or a crash) is built
+   on: the session is read from it, as an open would.
+2. **Opening it hands over live.** If the user opens a session while an agent is editing it in
+   the background, the background edits finish, taw opens the session with them in it, and the
+   agent carries on against the live session under the usual rules (the focused track and the
+   time selection locked, refused while playing, and so on).
+
+### The argument
+
+Every session-scoped tool (`get_session`, `get_track`, `add_track`, `remove_track`,
+`write_notes`, `write_hits`, `remove_clip`, `add_marker`, `set_tempo`, `run_command`,
+`get_parameters`, `write_automation`) takes an optional `session`: a folder (full path) or a
+name as `list_sessions` gives it, found the way `open_session` finds one.
+
+- Left out: the open session, as before (`no-session` with none open).
+- The open session (by name or folder): exactly as before.
+- Another session: a **background copy** of it in the running taw (below). Not found: `invalid`.
+- The open session while it's opening or closing: `busy`, as before.
+
+### The background copy
+
+A second, headless `App` in the same process, made for the session the first time an agent
+names it (`App::backgroundFor`), and kept in the running taw's `backgroundSessions`. Chosen
+over a separate process because it runs exactly the code the open session runs (commands,
+kits, routing, automation, plugins), and handing it over is moving one object.
+
+- **No audio, no screen, no user.** It never opens an audio device (its engine has none: the
+  device is only opened by `run()`), never builds a playback graph, opens no windows, MIDI
+  inputs or socket, and writes nothing app-wide: not `settings.json`, the recent sessions, the
+  run marker, the hub's client name, nor the crash-time emergency save (a background `App` is
+  made with `background = true`, which skips them).
+- **Its saves go to `unsaved\`** (`interactive = true` from the start, so even its first
+  write, on load, goes there), after every call that changed something; with that,
+  `unsaved\agent-edits.json` names the agents, so an open later says whose changes they are.
+- **It holds the session's lock** (`.taw-lock`, this taw's pid) while it's loaded, as an open
+  session does, so `taw --exec` or another taw can't write over it meanwhile.
+- **Runs on the message thread, one call at a time**, from `pollAgents`, like every call.
+  Nothing it does touches the open session, its engine or its undo history.
+- **Plugins load only when a call needs one:** `get_parameters`, `write_automation` on a
+  plugin parameter, `add_track` with a plugin, and `run_command` verbs that load one (`inst`,
+  `fx`, `ins`). Each loads in the background copy's own host (at the session's rate), never in
+  the live graph; reads like `get_session` load none. Loading a plugin blocks the message
+  thread for as long as the plugin takes (as it does when a person loads one), so while the
+  open session plays or records those calls answer `playing` instead (the rest still work).
+- **Unloaded after 2 minutes idle** (`backgroundIdle`), and at most 3 at a time (the one
+  used least recently goes first): its plugin states written to `unsaved\plugins\` if it
+  changed anything, its lock let go. An agent that comes back gets a fresh copy, read from
+  `unsaved\`. Quitting taw unloads them all the same way.
+
+### The rules in the background
+
+- **Hands-off doesn't apply:** there's no cursor, focus or time selection of the user's in a
+  closed session, and no recent edits of theirs. Reads give no `locked`, and `cursor_beat`,
+  `focused` and `selection` are null. `get_session` says `"open": false`.
+- **Playing:** the open session playing doesn't hold up background edits (they can't be heard),
+  except those that load a plugin (above).
+- **Busy:** an import (a sample file, `import` in `run_command`) runs on its own in the
+  background copy and is answered when it's in, as for the open session; meanwhile other calls
+  to that session say `busy`.
+- **The status line** says what an agent did elsewhere ("claude-code, in Song B: wrote 4 notes
+  …"), so the user knows.
+
+### Undo
+
+The background copy keeps its own undo history, one step per call named for the agent, as
+today. **Handing over moves the whole `Session`** (tree and `UndoManager`) into the open taw, so
+once the user opens it every agent edit made since the copy was loaded is a ctrl+z step. If the
+copy was unloaded (idle) before the user opened it, the edits are still there as unsaved
+changes, but not as undo steps: the history went with the copy. (Keeping histories after
+unloading would mean keeping the trees in memory with the locks held; two minutes covers the
+case that matters, the user opening it while the agent works.)
+
+### Opening it: the hand-over
+
+Every way the user opens a session (`startOpening`: the session screen, `open_session`, a
+switch the box allowed; and a typed name on the template picker) goes through
+`App::loadSession`, which takes the background copy's `Session` if there is one, instead of
+reading the folder again:
+
+1. If the copy is mid-call (an import running), the open waits for it: `openWhenHandedOver`
+   holds the folder, the status line says "finishing claude-code's edit to Song B", and new
+   calls to that session say `busy` until it's open. `pollAgents` answers the import, then
+   opens.
+2. The copy writes its plugin states to `unsaved\plugins\` and its tree to `unsaved\`, lets go
+   of its listener and plugins, and gives up the `Session` (and its lock, which is this taw's
+   anyway). The copy is then deleted.
+3. The open taw attaches it as if it had read it from `unsaved\`: unsaved changes, with a note
+   naming the agents ("opened with claude-code's changes from while it was closed, not saved
+   yet · ctrl+s keeps them, ctrl+z takes them back"). Audio and plugins load as on any open.
+4. The agent's next call naming that session finds it open and gets the live rules.
+
+### Tempo on a closed session
+
+With no audio clips, `set_tempo` goes straight through (MIDI and hits follow the beats). With
+audio clips the user decides, as before, but they can't be asked about a session that isn't
+open, so:
+
+- The call changes nothing and answers `needs-user`: "Song B has audio clips: taw asks the user
+  what to do with them when they open it". The request is kept in the running taw
+  (`pendingTempo`, one per session, the latest wins; not on disk, so it survives the copy
+  being unloaded but not taw quitting).
+- When the user opens that session, the tempo box comes up at once with the agent's request.
+  From then on it's the open session's flow: calling `set_tempo` again hears the choice.
+- `get_session` on the closed session shows it as `tempo_request: { status: "waiting for the
+  user to open the session" }`.
+
+The alternative, applying it with the audio kept in time (the safe choice), was turned down: it
+decides for the user, which is what the box is there to avoid.
+
+### Tests (`--mcptest`, added)
+
+From the session screen: read and edit a closed session (tracks, notes, a marker, the
+passthrough), its `session.json` untouched and `unsaved\` holding the edits, one undo step each
+in the copy, no `locked`; with session A open, edit session B (sample track, hits, an import
+answered when it's in), A untouched (its tracks, unsaved flag and undo history), reads without
+`session` still A's; the tempo on B with audio waiting for the user; unloading after idle (the
+lock gone, `unsaved\` kept) and loading again from `unsaved\`; the hand-over while an import is
+under way (the open waits, then opens B with every edit, unsaved, the agent's steps on ctrl+z,
+the tempo box up); the agent carrying on against the live B (the focused track locked, playing
+refused); a save writing it all to `session.json`.
+
+### As built
+
+- `App.h/.cpp`: `App (..., bool inBackground)` makes the copy (`background`: no emergency save,
+  no settings written, not remembered as recent, no run marker or hub name; `interactive` from
+  the start). `attachSession` raises a `pendingTempo` request as the tempo box (unless the
+  tempo is there already). `startOpening` waits for a busy copy (`openWhenHandedOver`) and
+  reads through `loadSession`; `createSession` (a typed name that's an existing session) does
+  too, refusing while a copy is mid-call.
+- `AgentEdits.cpp`: `App::agentCall` routes by `session` (exactly a folder or a name: a part of
+  a name is refused with the matches, since it could pick the wrong session to change);
+  `backgroundFor`, `backgroundBusy`, `pollBackgroundSessions` (from `pollAgents`: imports
+  answered, a waiting open, idle copies let go), `noteBackgroundCall` (the copy's tree and
+  plugin states to `unsaved\` after each call that changed it, `agent-edits.json`, the status
+  line), `giveUpSession` and `loadSession` (the hand-over). `AgentTools` has `live` (the taw a
+  copy is in): no locks, `get_session`'s `open`/`note`, the pending tempo, `pluginsWait`.
+  `list_sessions` gives each session's `unsaved_changes`.
+- `Agents.cpp`: `toolList` adds `session` to every session tool's schema in one place; the
+  bridge's instructions say how to use it. `Session::load` names the agents from
+  `agent-edits.json` in its note.
+- Tested: `taw --mcptest` 167 checks (49 new), all ok; `--keycasttest`, `--counttest`,
+  `--livetest`, `--cliptest`, `--paralleltest`, `--bouncetest`, `--duptracktest` unchanged.
+
+Open:
+
+- **Undo after an idle unload** is gone (the edits stay, as unsaved changes). If agents work in
+  long gaps, `backgroundIdle` could grow, at the cost of holding the lock longer.
+- **A copy is a whole `App`**: its engine starts its disk thread and render helpers though
+  nothing plays. Cheap enough for three; an engine that starts them only with a device would
+  make it nothing.
+- **Plugin loads still block the screen** for as long as the plugin takes (refused while
+  playing). Loading them on another thread is a bigger change, for everyone's plugins.
+- The tempo request isn't on disk: quitting taw before opening the session forgets it (the
+  agent's next `set_tempo` asks again).
+- `--savetest` crashes after "right stays in the area" on this machine, with and without these
+  changes (it isn't in CI): worth a look on its own.

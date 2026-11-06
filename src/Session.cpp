@@ -285,8 +285,21 @@ std::unique_ptr<Session> Session::load (const juce::File& dir, juce::String& err
             error.clear();
         }
 
-        note = L"opened the changes you hadn't saved (from " + (workFile.existsAsFile() ? workFile : work).getLastModificationTime().formatted ("%d %b %H:%M")
-               + L") \x00b7 save keeps them, closing without saving drops them";
+        const auto when = (workFile.existsAsFile() ? workFile : work).getLastModificationTime().formatted ("%d %b %H:%M");
+
+        // Agents edited it while it was closed (App::backgroundFor): say whose they are.
+        if (const auto agents = juce::JSON::parse (work.getChildFile ("agent-edits.json"))["agents"]; agents.size() > 0)
+        {
+            juce::StringArray who;
+
+            for (const auto& a : *agents.getArray())
+                who.add (a.toString());
+
+            note = L"opened the changes not saved yet (from " + when + ", with " + who.joinIntoString (", ")
+                   + L"'s edits made while it was closed) \x00b7 save keeps them, closing without saving drops them";
+        }
+        else
+            note = L"opened the changes you hadn't saved (from " + when + L") \x00b7 save keeps them, closing without saving drops them";
     }
 
     if (! tree.isValid())

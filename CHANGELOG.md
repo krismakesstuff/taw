@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- The sample browser has a guide to its keys and mouse: `?` in it, or the toolbar's `?` button.
+- The README explains the sample library: indexing folders, what's measured, and browsing.
+
 ## [0.2.0] - 2026-11-01
 
 The first public release: an early proof of concept, for Windows and macOS (Apple Silicon).

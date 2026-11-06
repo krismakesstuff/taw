@@ -1299,6 +1299,16 @@ there yet is made, if the drive or folder it would go in is. It's kept in `setti
 (`sessionsFolder`), so a client's drive stays the place until you change it; plain `taw` starts
 there, and says so if the drive has been unplugged (then it's wherever taw was started).
 
+**Commands with no session.** `:` on the session screen opens a command line of its own (a
+session's name can't have a `:`, so typing still names a new session). It runs the commands that
+need no session: `help` (or `?`), `index <folder>` (and `index remove`; a folder can be dropped
+after `index `), `library`, `scan` / `scan retry`, `agents on|off`, `hub`, `keycast`,
+`dark` / `light` / `grey`, `dev` (as `alt+d`) and `q`. Anything else says it needs a session
+open and does nothing. `enter` runs it; `esc`, or `backspace` with nothing typed, closes it.
+The plugin scan steps here too, so `scan` finishes without opening a session.
+`:help` shows a page of the screen's own keys and commands, not a session's; `?` or `esc`
+closes it. `esc` or `ctrl+q` quits from anywhere on the screen.
+
 **Slow drivers.** Opening the audio device can take seconds, and changing its sample rate
 (opening a 48 kHz session with the device at 44.1) takes an SSL 12 about six, then as long
 again when the driver asks to be restarted; its MIDI ports wait the whole time. So: a box says

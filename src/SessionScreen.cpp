@@ -322,4 +322,45 @@ bool App::handleFolderEditKey (const Key& k)
 
     return true;
 }
+
+// ":" on the session screen: a line of the commands that need no session. While it's open it
+// takes every key; enter runs it, esc (or backspace with nothing typed) closes it.
+bool App::handleScreenCommandKey (const Key& k)
+{
+    if (! screenCommandOpen)
+    {
+        if (k.code == Key::Char && k.ch == ':' && ! k.ctrl && ! k.alt)
+        {
+            screenCommandOpen = true;
+            screenCommand.clear();
+            return true;
+        }
+
+        return false;
+    }
+
+    if (k.code == Key::Escape || (k.code == Key::Backspace && screenCommand.isEmpty()))
+    {
+        screenCommandOpen = false;
+    }
+    else if (k.code == Key::Enter)
+    {
+        const auto line = screenCommand.trim();
+        screenCommandOpen = false;
+        screenCommand.clear();
+
+        if (line.isNotEmpty())
+            say (executeAppLevel (line));
+    }
+    else if (k.code == Key::Backspace)
+    {
+        screenCommand = screenCommand.dropLastCharacters (1);
+    }
+    else if (k.code == Key::Char && ! k.ctrl && ! k.alt && k.ch >= 32)
+    {
+        screenCommand += juce::String::charToString ((juce::juce_wchar) k.ch);
+    }
+
+    return true;
+}
 } // namespace taw

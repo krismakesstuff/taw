@@ -243,6 +243,8 @@ void App::savePluginStates()
 
 void App::pollPlugins()
 {
+    pollPluginScan();
+
     if (session == nullptr)
         return;
 
@@ -334,7 +336,11 @@ void App::pollPlugins()
         lastStateSave = now;
         savePluginStates();
     }
+}
 
+// Scanning goes on with no session too (scan on the session screen).
+void App::pollPluginScan()
+{
     if (plugins.isScanning())
     {
         if (plugins.scanStep())
@@ -346,9 +352,12 @@ void App::pollPlugins()
         else
         {
             // Tracks whose plugin wasn't found get another go.
-            hosted.erase (std::remove_if (hosted.begin(), hosted.end(), [] (const auto& in) { return in.slot == nullptr; }),
-                               hosted.end());
-            rebuildGraph();
+            if (session != nullptr)
+            {
+                hosted.erase (std::remove_if (hosted.begin(), hosted.end(), [] (const auto& in) { return in.slot == nullptr; }),
+                             hosted.end());
+                rebuildGraph();
+            }
 
             const auto n = (int) plugins.instruments().size();
             const auto fx = (int) plugins.effects().size();
@@ -359,7 +368,7 @@ void App::pollPlugins()
             if (const auto& failed = plugins.failedLastScan(); ! failed.isEmpty())
                 msg << L" \x00b7 skipped " << failed.size() << " that crashed or hung (" << failed.joinIntoString (", ")
                     << L") \x00b7 scan retry tries them again";
-            else if (! pluginPickerVisible)
+            else if (session != nullptr && ! pluginPickerVisible) // on the session screen there are no tracks to load one on
                 msg << L" \x00b7 inst <name> loads one, inst alone lists them";
 
             say (Result::good (msg));

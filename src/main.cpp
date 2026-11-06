@@ -1213,6 +1213,157 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --screencmdtest <session> <scratch>   the session screen's command line (":"): it opens
+    // without touching the new session's name, runs the commands that need no session (theme,
+    // index, library), says which ones need one, and esc or backspace closes it. Run it with
+    // TAW_CONFIG pointing somewhere scratch: the theme and the library are written there.
+    if (args[0] == "--screencmdtest" && args.size() >= 3)
+    {
+        const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+        const auto scratch = juce::File::getCurrentWorkingDirectory().getChildFile (args[2]);
+        const auto dir = scratch.getChildFile (source.getFileName());
+        scratch.deleteRecursively();
+        scratch.createDirectory();
+        source.copyDirectoryTo (dir);
+        dir.getChildFile (".taw-lock").deleteFile();
+        dir.getChildFile ("unsaved").deleteRecursively();
+
+        int failures = 0;
+        auto check = [&] (bool ok, const char* what)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        auto app = std::make_unique<taw::App> (dir, juce::File(), juce::String(), juce::String());
+        app->interactive = true;
+
+        while (app->hasBackgroundWork())
+            app->pumpBackgroundWork();
+
+        app->requestClose (false);
+
+        while (app->closing != nullptr)
+            app->stepClosing();
+
+        check (app->session == nullptr, "on the session screen");
+
+        auto press = [&] (taw::Key::Code code, wchar_t ch = 0)
+        {
+            taw::Key k;
+            k.code = code;
+            k.ch = ch;
+            app->pressKey (k);
+        };
+        auto type = [&] (const juce::String& s)
+        {
+            for (auto c : s)
+                press (taw::Key::Char, (wchar_t) c);
+        };
+        auto run = [&] (const juce::String& line)
+        {
+            type (":" + line);
+            press (taw::Key::Enter);
+            return app->message;
+        };
+
+        // Typing still names a new session; ":" opens the line and leaves the name be.
+        type ("big");
+        check (app->newSessionName == "big", "typing names a new session");
+        type (":");
+        check (app->screenCommandOpen && app->newSessionName == "big", ": opens the command line, the name stays");
+        check (app->screenText (120, 30).contains ("index <folder>"), "the line shows what it takes");
+        std::printf ("%s", app->screenText (120, 30).toRawUTF8());
+        type ("dar");
+        press (taw::Key::Escape);
+        check (! app->screenCommandOpen && app->theme != "dar" && app->newSessionName == "big", "esc closes it, nothing run");
+        type (":");
+        press (taw::Key::Backspace);
+        check (! app->screenCommandOpen, "backspace with nothing typed closes it");
+        app->newSessionName.clear();
+
+        // A setting for every session.
+        const auto themeBefore = app->theme;
+        run ("light");
+        check (app->theme == "light" && ! app->messageIsError && ! app->screenCommandOpen, ":light sets the theme, the line closes");
+        run ("dark");
+        check (app->theme == "dark", ":dark");
+
+        // The sample library: index a folder (as typed, or dropped after "index "), then library.
+        const auto samples = scratch.getChildFile ("Some Samples");
+        samples.createDirectory();
+        {
+            juce::WavAudioFormat wav;
+            std::unique_ptr<juce::OutputStream> stream = samples.getChildFile ("kick.wav").createOutputStream();
+
+            if (auto w = wav.createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (16)))
+            {
+                juce::AudioBuffer<float> b (1, 4410);
+                for (int i = 0; i < b.getNumSamples(); ++i)
+                    b.setSample (0, i, std::sin ((float) i * 0.1f) * (1.0f - (float) i / (float) b.getNumSamples()));
+                w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+            }
+        }
+
+        std::printf ("       %s\n", run ("index " + samples.getFullPathName().replace (" ", "\\ ")).toRawUTF8());
+        check (! app->messageIsError, ":index <folder> starts indexing with no session");
+
+        for (int i = 0; i < 500 && app->isIndexing(); ++i)
+        {
+            app->pollIndexing();
+            juce::Thread::sleep (10);
+        }
+
+        app->pollIndexing();
+        std::printf ("       %s\n", app->message.toRawUTF8());
+        const auto lib = run ("library");
+        std::printf ("       %s\n", lib.toRawUTF8());
+        check (! app->messageIsError && lib.contains ("Some Samples"), ":library lists the folder");
+
+        // A session's command: says so, and does nothing.
+        const auto said = run ("3 v -6");
+        std::printf ("       %s\n", said.toRawUTF8());
+        check (app->messageIsError && said.contains ("needs a session open"), "a session command says it needs a session");
+        check (app->session == nullptr && app->newSessionName.isEmpty(), "still on the session screen, no name typed");
+
+        // help: the help box over the screen; its pages turn, and esc closes it.
+        run ("help");
+        {
+            const auto screen = app->screenText (120, 30);
+            std::printf ("%s", screen.toRawUTF8());
+            check (app->helpVisible && screen.contains ("RECENT SESSIONS") && screen.contains (":index f"), ":help opens the session screen's help");
+            check (! screen.contains ("next grid line") && ! screen.contains ("TRACKS"), "none of a session's pages");
+        }
+        press (taw::Key::Right);
+        check (app->helpVisible, "arrows don't close it");
+        type ("x");
+        check (app->newSessionName.isEmpty(), "typing doesn't reach the name behind it");
+        press (taw::Key::Escape);
+        check (! app->helpVisible && app->session == nullptr && ! app->quitting(), "esc closes it, taw stays");
+        run ("?");
+        check (app->helpVisible, ":? opens it too");
+        type ("?");
+        check (! app->helpVisible, "? closes it");
+
+        // ctrl+q quits from the screen, with the command line open too.
+        type (":ind");
+        {
+            taw::Key k;
+            k.code = taw::Key::Char;
+            k.ch = 'q';
+            k.ctrl = true;
+            app->pressKey (k);
+        }
+        check (app->quitting() && ! app->screenCommandOpen && app->newSessionName.isEmpty(), "ctrl+q quits, from the command line too");
+
+        app->theme = themeBefore;
+        app->saveSettings();
+        app.reset();
+        scratch.deleteRecursively();
+        std::printf ("%s\n", failures == 0 ? "ok" : "FAILED");
+        return failures == 0 ? 0 : 1;
+    }
+
     if (args[0] == "--savetest" && args.size() >= 3)
     {
         const auto source = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);

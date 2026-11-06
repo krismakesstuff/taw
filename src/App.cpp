@@ -3660,7 +3660,7 @@ void App::handleKey (const Key& k)
 
     // After the key's done its job: if the command line has text, the key was typing.
     if (k.code != Key::Mouse)
-        keycast.press (k, commandLine.isNotEmpty());
+        keycast.press (k, commandLine.isNotEmpty() || screenCommandOpen);
 }
 
 void App::dispatchKey (const Key& k)
@@ -4606,11 +4606,15 @@ void App::handleTemplatePickerKey (const Key& k)
 {
     const auto numRecent = (int) recent.size();
 
-    // Quitting was waiting on a bounce: esc again quits now (the bounce is dropped), any
-    // other key means stay.
+    // ctrl+q quits, as it does in a session, from anywhere on the screen (the folder's line
+    // and the command line included).
+    const bool ctrlQ = k.code == Key::Char && k.ctrl && ! k.alt && (k.ch == 'q' || k.ch == 'Q');
+
+    // Quitting was waiting on a bounce: esc (or ctrl+q) again quits now (the bounce is
+    // dropped), any other key means stay.
     if (std::exchange (quitAfterBounces, false))
     {
-        if (k.code == Key::Escape)
+        if (k.code == Key::Escape || ctrlQ)
         {
             quitRequested = true;
             return;
@@ -4619,10 +4623,31 @@ void App::handleTemplatePickerKey (const Key& k)
         say (Result::good (L"staying \x00b7 the bounce carries on"));
     }
 
+    if (ctrlQ)
+    {
+        editingFolder = screenCommandOpen = false;
+        stopBounce();
+        quit();
+        return;
+    }
+
+    // ":help": the screen's own help page takes the keys until ? or esc closes it.
+    if (helpVisible)
+    {
+        if (k.code == Key::Escape || (k.code == Key::Char && k.ch == '?' && ! k.ctrl && ! k.alt))
+            helpVisible = false;
+
+        return;
+    }
+
     const auto numTemplates = (int) templates.size();
 
     // The sessions folder: typed, or picked in Windows' dialog.
     if (handleFolderEditKey (k))
+        return;
+
+    // ":" opens the screen's command line (a session name can't have one).
+    if (handleScreenCommandKey (k))
         return;
 
     if (k.code == Key::Char && k.ctrl && ! k.alt && (k.ch == 'o' || k.ch == 'l'))

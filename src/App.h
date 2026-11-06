@@ -153,6 +153,9 @@ public:
     // Commands ----------------------------------------------------------------
     // One line of the command language. Used by the command line now and by agents later.
     Result execute (const juce::String& line);
+    // The commands that need no session (settings for every session, the sample library,
+    // plugins, agents, the hub): what the session screen's command line runs.
+    Result executeAppLevel (const juce::String& line);
 
     // Agents in the open session (AgentEdits.cpp, docs/plan-taw-mcp.md): taw listens on a local
     // socket for taw --mcp, and runs the agents' tool calls here, on the message thread, one at a
@@ -428,6 +431,11 @@ public:
     juce::String folderEdit;
     bool folderEditFresh = false; // the path shown is the old one: typing replaces it
     bool handleFolderEditKey (const Key&);
+    // The session screen's command line: ":" opens it, enter runs it (executeAppLevel), esc
+    // (or backspace past its start) closes it. Typing elsewhere on the screen names a new session.
+    bool screenCommandOpen = false;
+    juce::String screenCommand;
+    bool handleScreenCommandKey (const Key&);
     void handleBouncesKey (const Key&); // the bounces area's own keys (play, seek, open, reveal)
     // The bounce playing on the session screen: decoded on a thread, then played by the
     // engine's preview voice from any point.
@@ -784,6 +792,7 @@ public:
         else if (closing == nullptr)
             quitRequested = true;
     }
+    bool quitting() const { return quitRequested; } // for the tests
     Result closeSession(); // close (asking about unsaved changes), back to the session screen
     // decided: the close already saved or dropped the changes. Otherwise (headless, or the
     // window closed on taw) it saves: to session.json headless, to unsaved\ with a person.
@@ -1005,6 +1014,7 @@ private:
     void savePluginStates();
     void writePluginState (Hosted&);
     void pollPlugins(); // closed editor windows, device changes, periodic state saves
+    void pollPluginScan(); // a scan's next step (with or without a session)
     void dropPlugin (const juce::ValueTree& node); // its state saved, its window closed
     void addInserts (TrackPlay&, const juce::ValueTree& track, bool offline);
     void followWindow (int track, int slot); // a plugin window is open: show this insert's instead

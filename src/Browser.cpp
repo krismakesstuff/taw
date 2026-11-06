@@ -1036,6 +1036,8 @@ void App::pollIndexing()
             browserSample = i;
 
     browserKind = juce::jlimit (0, (int) browserKinds().size() - 1, browserKind);
-    say (Result::good (indexSummary));
+
+    // On the session screen (":index") there's no browser to open yet.
+    say (Result::good (session != nullptr ? indexSummary : indexSummary.replace (juce::String (L" \x00b7 ctrl+B browses"), juce::String())));
 }
 } // namespace taw

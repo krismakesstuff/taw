@@ -752,6 +752,48 @@ Result App::setLoop (const juce::String& argIn)
     return Result::fail ("loop [on|off]");
 }
 
+// The session screen's command line: the commands that work with no session open. In a session
+// these same verbs go through execute, below.
+Result App::executeAppLevel (const juce::String& line)
+{
+    const auto trimmed = line.trim();
+    const auto needsSession = Result::fail (trimmed + L" needs a session open \x00b7 here: help, index, library, scan, agents, hub, keycast, dark|light|grey, dev, q");
+    Parsed p;
+
+    // A track number ("3 v -6") fails to parse with no tracks: that's a session's command too.
+    if (parse (trimmed, numbering(), p).isNotEmpty() || p.hasSelector || p.mix)
+        return needsSession;
+
+    const auto& v = p.verb;
+
+    if (v == "help" || v == "?")   { helpVisible = true; return Result::good(); } // the screen's own page (Ui::drawHelp)
+    if (v == "index")              return startIndexing (splitPaths (p.rest));
+    if (v == "library")            return describeLibrary();
+    if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
+    if (v == "agents")             return agentsCommand (p.args[0]);
+    if (v == "hub")                return hubCommand (p.rest.trim());
+    if (v == "keycast")            return keycastCommand (p.rest.trim());
+    if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
+
+    if (v == "light" || v == "dark" || v == "grey" || v == "gray")
+    {
+        theme = v == "gray" ? juce::String ("grey") : v;
+        saveSettings();
+        return Result::good (theme + " theme");
+    }
+
+    // As alt+d: the device the bounces play through, and back here after.
+    if (v == "dev")
+    {
+        stopBounce();
+        openDevicePicker();
+        devicePickerFromSessions = true;
+        return Result::good();
+    }
+
+    return needsSession;
+}
+
 Result App::execute (const juce::String& line)
 {
     if (session == nullptr)

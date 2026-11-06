@@ -4,6 +4,13 @@
 
 - The sample browser has a guide to its keys and mouse: `?` in it, or the toolbar's `?` button.
 - The README explains the sample library: indexing folders, what's measured, and browsing.
+- The session screen has a command line: `:` opens it, for what needs no session (`index`,
+  `library`, `scan`, `agents`, `hub`, `keycast`, the theme, `dev`, `q`); `:help` shows the
+  screen's own keys and commands. `ctrl+q` quits there, as `esc` does.
+- The help shows the keys in yellow and what they do in plain text.
+- macOS: once taw handed the keyboard back to the terminal, clicks in other apps could read as
+  clicks in a plugin window, so every app you clicked lost the keyboard to the terminal until
+  the session closed.
 
 ## [0.2.0] - 2026-11-01
 

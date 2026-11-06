@@ -227,7 +227,12 @@ juce::String Ui::snapshot (App& app, int w, int h)
     canvas.resize (w, h);
 
     if (app.mode == Mode::TemplatePicker)
+    {
         drawTemplatePicker (app);
+
+        if (app.helpVisible)
+            drawHelp (app);
+    }
     else
     {
         drawMain (app);
@@ -285,6 +290,8 @@ void Ui::render (App& app)
 
         if (app.opening != nullptr)
             drawOpening (app);
+        else if (app.helpVisible)
+            drawHelp (app);
     }
     else
     {
@@ -2592,7 +2599,7 @@ void Ui::drawBottom (App& app)
 void Ui::drawHelp (App& app)
 {
     // Pages of two columns of sections, each line "what it does   keys", so it fits a small
-    // screen (80 x 24): the action in yellow, what you press or type in plain text. The tabs run
+    // screen (80 x 24): the action in plain text, what you press or type in yellow. The tabs run
     // along the top; a page's note spans the box under both columns.
     struct Entry { const wchar_t* action; const wchar_t* keys; };
     struct Section { const wchar_t* title; std::vector<Entry> entries; };
@@ -2793,8 +2800,47 @@ void Ui::drawHelp (App& app)
 #endif
     };
 
+    // On the session screen (":help"), only what works there: one page of its own.
+    static const std::vector<Page> screenPages = {
+        { L"SESSIONS",
+          { { L"NEW SESSION", {
+                { L"name it", L"type" },
+                { L"cursor (ctrl: a word)", L"\x2190 \x2192" },
+                { L"choose a template", L"\x2191 \x2193" },
+                { L"create it", L"enter" } } },
+            { L"RECENT SESSIONS", {
+                { L"choose one", L"\x2191 \x2193" },
+                { L"open it", L"enter" } } },
+            { L"BOUNCES", {
+                { L"play / stop", L"enter  space" },
+                { L"back / ahead 5 s (30 s)", L"(alt) \x2190 \x2192" },
+                { L"from the start", L"home" },
+                { L"open its session", L"o" },
+                { L"show the file", L"r" } } } },
+          { { L"THE SCREEN", {
+                { L"next / previous area", L"tab shift+tab" },
+                { L"sessions folder: pick", L"ctrl+o" },
+                { L"sessions folder: type", L"ctrl+l" },
+                { L"audio device", L"alt+d  :dev" },
+#if TAW_HUB
+                { L"the hub", L"alt+h  :hub" },
+#endif
+                { L"quit", L"esc  ctrl+q" } } },
+            { L"COMMANDS  (: opens the line)", {
+                { L"add a sample folder", L":index f" },
+                { L"folders and samples", L":library" },
+                { L"scan plugins (again)", L":scan (retry)" },
+                { L"agents (MCP) on / off", L":agents on" },
+                { L"show keys pressed", L":keycast" },
+                { L"theme: dark light grey", L":light" },
+                { L"this help", L":help  :?" } } } },
+          L"Everything else needs a session: open or create one, then ? shows the rest." },
+    };
+
     static_assert (App::helpPages == 9, "one page per tab");
-    const auto& page = pages[(size_t) juce::jlimit (0, (int) pages.size() - 1, app.helpPage)];
+    const bool onScreen = app.mode == Mode::TemplatePicker;
+    const auto& shown = onScreen ? screenPages : pages;
+    const auto& page = shown[(size_t) juce::jlimit (0, (int) shown.size() - 1, onScreen ? 0 : app.helpPage)];
 
     // A column's lines: each section's title and entries, a blank line between sections.
     auto lines = [] (const std::vector<Section>& column)
@@ -2810,7 +2856,7 @@ void Ui::drawHelp (App& app)
     // The box is as tall as the tallest page, so turning pages doesn't make it jump.
     int tallest = 0;
 
-    for (const auto& p : pages)
+    for (const auto& p : shown)
         tallest = std::max (tallest, std::max (lines (p.left), lines (p.right)) + (p.note != nullptr ? 2 : 0));
 
     constexpr int actionW = 24, colW = 38; // action width, width of each half (the keys get the rest)
@@ -2824,10 +2870,10 @@ void Ui::drawHelp (App& app)
     // Tabs: the page you're on lit.
     int x = x0 + 2;
 
-    for (int i = 0; i < (int) pages.size(); ++i)
+    for (int i = 0; i < (int) shown.size(); ++i)
     {
-        const bool on = i == app.helpPage;
-        const auto label = juce::String (" ") + pages[(size_t) i].name + " ";
+        const bool on = i == (onScreen ? 0 : app.helpPage);
+        const auto label = juce::String (" ") + shown[(size_t) i].name + " ";
 
         if (x + label.length() > x0 + boxW - 2)
             break;
@@ -2852,8 +2898,8 @@ void Ui::drawHelp (App& app)
             for (const auto& e : s.entries)
                 if (y < bottom)
                 {
-                    canvas.text (px, y, e.action, colour::meterYellow, bg, false, actionW - 1);
-                    canvas.text (px + actionW, y++, e.keys, colour::text, bg, false, colW - actionW - 1);
+                    canvas.text (px, y, e.action, colour::text, bg, false, actionW - 1);
+                    canvas.text (px + actionW, y++, e.keys, colour::meterYellow, bg, false, colW - actionW - 1);
                 }
         }
     };
@@ -2864,7 +2910,9 @@ void Ui::drawHelp (App& app)
     if (page.note != nullptr)
         canvas.text (x0 + 2, std::min (bottom - 1, top + std::max (lines (page.left), lines (page.right)) + 1), page.note, colour::dim, bg, false, boxW - 4);
 
-    canvas.text (x0 + 2, y0 + boxH - 1, L"\x2190\x2192 or tab: pages \x00b7 1-" + juce::String (App::helpPages) + L" jumps \x00b7 ? or esc closes",
+    canvas.text (x0 + 2, y0 + boxH - 1,
+                 onScreen ? juce::String (L"? or esc closes")
+                          : L"\x2190\x2192 or tab: pages \x00b7 1-" + juce::String (App::helpPages) + L" jumps \x00b7 ? or esc closes",
                  colour::faint, bg, false, boxW - 4);
 }
 
@@ -3947,17 +3995,32 @@ void Ui::drawTemplatePicker (App& app)
         canvas.text (x + 1 + barW, h - 3, pct, colour::marker, -1, true);
 
         if (app.quitAfterBounces)
-            canvas.text (1, h - 2, L"taw quits when it's done \x00b7 esc quits now (the bounce is dropped) \x00b7 any other key stays", colour::text, -1, false, w - 2);
+            canvas.text (1, h - 2, L"taw quits when it's done \x00b7 esc or ctrl+q quits now (the bounce is dropped) \x00b7 any other key stays", colour::text, -1, false, w - 2);
     }
     else if (app.message.isNotEmpty())
     {
         canvas.text (1, h - 3, app.message, app.messageIsError ? colour::error : colour::ok, -1, false, w - 2);
     }
 
+    // ":" the command line, as in a session; only the commands that need no session work here.
+    if (app.screenCommandOpen)
+    {
+        auto x = canvas.text (1, h - 2, ": ", colour::accent, -1, true);
+        x = canvas.text (x, h - 2, app.screenCommand, colour::text, -1, false, w - 4);
+        canvas.put (x, h - 2, L' ', -1, colour::text);
+
+        if (app.screenCommand.isEmpty())
+            canvas.text (x + 2, h - 2, L"help \x00b7 index <folder> \x00b7 library \x00b7 scan \x00b7 agents on|off \x00b7 hub \x00b7 keycast \x00b7 dark|light|grey \x00b7 dev \x00b7 q",
+                         colour::faint, -1, false, w - x - 3);
+
+        canvas.text (1, h - 1, L"enter runs it \x00b7 esc closes \x00b7 a folder can be dropped after index", colour::dim, -1, false, w - 2);
+        return;
+    }
+
 #if TAW_HUB
-    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device \x00b7 alt+h hub");
+    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device \x00b7 alt+h hub \x00b7 : commands");
 #else
-    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device");
+    const juce::String areas (L"tab \x2190\x2192 area \x00b7 alt+d device \x00b7 : commands");
 #endif
     const bool bouncePlaying = app.bouncePlaySeconds() >= 0.0;
     const auto hint = app.pickArea == Area::bounces

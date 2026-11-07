@@ -582,7 +582,7 @@ juce::String App::describeIoCell (int track, int cell) const
         const auto problem = insertProblem (insert);
         return label + " insert " + slot + ": " + insert[ids::pluginName].toString()
                + (problem.isNotEmpty() ? L" \x2014 " + problem : (bool) insert[ids::bypass] ? juce::String (" (bypassed)") : juce::String())
-               + L" \x00b7 | opens it \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes";
+               + L" \x00b7 | opens it \x00b7 M bypass \x00b7 shift+\x2190\x2192 moves \x00b7 del removes (" + routingPrefix (track) + " ins " + slot.toLowerCase() + " x)";
     }
 
     const auto send = Session::send (t, cell - ioFirstSend);
@@ -594,7 +594,7 @@ juce::String App::describeIoCell (int track, int cell) const
     const bool missing = session->findBus (send[ids::to]) < 0;
     return label + " send " + slot + L" \x2192 " + (missing ? juce::String ("a bus that's gone") : busName (send[ids::to])) + " "
            + levelText (send[ids::db]) + " dB " + ((bool) send[ids::pre] ? "pre" : "post") + ((bool) send[ids::mute] ? " (off)" : "")
-           + L" \x00b7 [ ] level \x00b7 M off \x00b7 P pre/post \x00b7 del removes";
+           + L" \x00b7 [ ] level \x00b7 M off \x00b7 P pre/post \x00b7 del removes (" + routingPrefix (track) + " send " + slot.toLowerCase() + " x)";
 }
 
 juce::String App::describeSends (int track) const
@@ -648,6 +648,8 @@ Result App::setOutput (const std::vector<int>& tracks, const juce::String& where
 // send verb                  a send to Verb (the slot already going there, else the first free)
 // send b verb | send b 6     slot B to Verb / to bus track 6
 // send b -12 | pre | post | off | on | x      level, before or after the fader, mute, remove
+// send verb x | send x                         remove (or off / on) the one going to Verb, or
+//                                              the only one ("del", "remove" too)
 Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& argsIn)
 {
     auto args = argsIn;
@@ -682,13 +684,35 @@ Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& a
             pre = lower;
         else if (lower == "on" || lower == "off")
             onOff = lower;
-        else if (lower == "x" || lower == "del")
+        else if (lower == "x" || lower == "del" || lower == "remove")
             remove = true;
         else
             words.add (a);
     }
 
     const auto query = words.joinIntoString (" ");
+    const bool changing = remove || onOff.isNotEmpty() || pre.isNotEmpty() || hasLevel; // a send that's there, if none is named
+    const bool existing = remove || onOff.isNotEmpty(); // only ever a send that's there (a level to a new bus makes one)
+
+    // Changing one with no slot or bus named: the only send there.
+    if (query.isEmpty() && slot < 0 && changing)
+    {
+        const auto track = session->track (tracks.front());
+        std::vector<int> there;
+
+        for (int k = 0; k < Session::numSends; ++k)
+            if (Session::send (track, k).isValid())
+                there.push_back (k);
+
+        if (there.empty())
+            return Result::fail ("track " + trackLabel (tracks.front()) + " has no sends");
+
+        if (there.size() > 1)
+            return Result::fail (L"which send? " + describeSends (tracks.front()).fromFirstOccurrenceOf (juce::String (L"sends "), false, false)
+                                 + L" \x00b7 e.g. " + trackLabel (tracks.front()) + " send " + Session::slotName (there.back()).toLowerCase() + " x");
+
+        slot = there.front();
+    }
 
     if (query.isEmpty() && slot < 0)
         return Result::fail (L"send to which bus? 2 send verb \x00b7 or a slot: 2 send b -6");
@@ -720,15 +744,24 @@ Result App::editSend (const std::vector<int>& tracks, const juce::StringArray& a
             if (! Session::send (track, k).isValid())
                 s = k;
 
+        // Removing (or changing) the send to a bus there's none to: say so, don't make one.
+        if (slot < 0 && existing && busId > 0 && (s < 0 || ! Session::send (track, s).isValid()))
+            return Result::fail ("track " + trackLabel (t) + " has no send to " + busName (busId) + L" \x00b7 " + trackLabel (t) + " send lists them");
+
         if (s < 0)
-            return Result::fail ("track " + trackLabel (t) + L"'s sends are all used \x2014 2 send e verb replaces E");
+            return Result::fail ("track " + trackLabel (t) + L"'s sends are all used \x2014 " + trackLabel (t) + " send e verb replaces E, "
+                                 + trackLabel (t) + " send e x removes it");
 
         if (remove)
         {
-            if (const auto send = Session::send (track, s); send.isValid())
-                track.removeChild (send, um());
+            const auto send = Session::send (track, s);
 
-            done.add ("track " + trackLabel (t) + " send " + Session::slotName (s) + " removed");
+            if (! send.isValid())
+                return Result::fail ("track " + trackLabel (t) + " send " + Session::slotName (s) + " is empty");
+
+            const auto to = busName (send[ids::to]);
+            track.removeChild (send, um());
+            done.add ("track " + trackLabel (t) + " send " + Session::slotName (s) + L" \x2192 " + to + L" removed \x00b7 ctrl+z brings it back");
             continue;
         }
 

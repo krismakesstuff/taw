@@ -531,21 +531,25 @@ TRACK { …, out? }                    # the busId it plays into; absent = the m
 | Command | Meaning |
 |---|---|
 | `ins` / `ins cla-2a` | the effects picker for the focused track's first free insert / the best match by name (like `inst`) |
-| `2 fx valhalla` | an effect in the first free insert (`2 fx` alone: the effects picker) |
-| `2 fx b valhalla` | into insert B (replacing what's there) |
-| `2 fx b` | open or close insert B's window (empty: the picker for B) |
-| `2 fx b off` / `on` / `x` / `2 fx b>d` | bypass, back on, remove, swap B and D |
+| `2 ins valhalla` | an effect in the first free insert (`2 ins` alone: the effects picker, and the message line lists what's in the slots) |
+| `2 ins b valhalla` | into insert B (replacing what's there) |
+| `2 ins b` | open or close insert B's window (empty: the picker for B) |
+| `2 ins b x` / `2 ins l3 x` / `2 ins x` | remove insert B / the one whose name matches / the only one (`del` and `remove` work as `x` does); with several and none named, it says which are there |
+| `2 ins b off` / `on` (by name or the only one too) / `2 ins b>d` | bypass, back on, swap B and D |
 | `bus Verb` / `add bus Verb` | new bus track (no input, no clips, nothing to arm) |
 | `2 send verb` | a send to Verb: the slot already going there, else the first free one; a name no bus has makes the bus |
 | `2 send b verb` / `2 send b 6` | slot B to Verb / to bus track 6 |
 | `2 send b -12` / `pre` / `post` / `off` / `on` / `x` | level (a sign or 0: `-12`, `+3`, `0`, `-inf`), before or after the fader, off, remove |
+| `2 send verb x` / `2 send x` | remove the send going to Verb / the only send (`off` and `on` the same ways); a bus it doesn't send to says so rather than making one |
 | `2 send` | list track 2's inserts, output and sends |
 | `2 out drums` / `2 > drums` / `2 out mix` | where the track goes after its fader; `2 out` alone opens the picker |
 | `\` | into the routing column on the focused track (see below) |
 | `io` | show or hide the routing column (on by default; kept in `settings.json`) |
 
-`fx` starts with a key that's a hotkey on an empty line (`f`), so typed it needs a track
-number (`2 fx`); `ins` works on the focused track, as `inst` does.
+Inserts are `ins` and sends `send`, named for where they sit in the routing (an effect can be
+either). `fx` is the old name for `ins` and still works. Removing reads the same for both: the
+slot, the name (an insert's plugin, a send's bus) or nothing when there's only one, then `x`.
+On the routing column (`\`) it's `del` on the cell, and `M` bypasses an insert or mutes a send.
 
 The effects picker lists what fits the track: where a plugin comes as "X Mono", "X Mono/Stereo"
 and "X Stereo" (Waves), a mono track sees the Mono and Mono/Stereo ones, a stereo track the
@@ -594,8 +598,8 @@ Stereo one. Typed names pick the same way.
   what you hear, so holding them back would only make you late. (What was already in a delay
   still comes out.) Their own plugins' latency, and a latent plugin on a bus they send to, still
   count.
-- **The mix bus has inserts too** (A to E, `INSERT`s on the `SESSION`): `mix fx limiter`,
-  `mix fx b`, `mix fx b off` and the rest work as `2 fx` does, and on the Mix row `\` steps
+- **The mix bus has inserts too** (A to E, `INSERT`s on the `SESSION`): `mix ins limiter`,
+  `mix ins b`, `mix ins b off`, `mix ins l3 x` and the rest work as `2 ins` does, and on the Mix row `\` steps
   into its slots (one row, inserts only) and `|` opens one. They run after the mix volume, as
   on a Pro Tools master fader, so a fade-out goes into the limiter rather than coming after
   it (`mixInserts`, shared by playback and bounces). Their latency adds to the mix's after the

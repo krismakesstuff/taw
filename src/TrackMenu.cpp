@@ -293,7 +293,7 @@ std::vector<App::TrackMenuItem> App::trackMenuItems()
                            } });
 
     if (one)
-        items.push_back ({ 'e', "Add an effect", sel + " fx <name>", [this, first]
+        items.push_back ({ 'e', "Add an effect", sel + " ins <name>", [this, first]
                            {
                                const auto t = session->track (first);
 

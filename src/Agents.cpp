@@ -262,7 +262,7 @@ juce::var toolList()
 },
 {
   "name": "run_command",
-  "description": "Run one line of taw's command language, as the user would type it in taw: e.g. \"2 v -6\" (volume), \"2 n Bass\" (rename), \"3 m\" (mute), \"bpm 92\", \"sig 3/4\", \"4 pat /16 x.x.x.x.\" (a step pattern over the time selection or a bar), \"2 out Verb\", \"bus Verb\", \"2 send a Verb -12\", \"3 fx b cla-2a\", \"add inst vital\". Tracks by their number as on screen (get_session's number, not id). \"bpm\" goes through set_tempo's rules. One undo step. Not allowed: save, close, quit, play, stop, record, undo/redo, bounce, moving the cursor (@), focusing, the clipboard, and anything that opens a window. A command with no track number acts on the user's focused track, which is locked: always give the track number.",
+  "description": "Run one line of taw's command language, as the user would type it in taw: e.g. \"2 v -6\" (volume), \"2 n Bass\" (rename), \"3 m\" (mute), \"bpm 92\", \"sig 3/4\", \"4 pat /16 x.x.x.x.\" (a step pattern over the time selection or a bar), \"2 out Verb\", \"bus Verb\", \"2 send a Verb -12\", \"3 ins b cla-2a\", \"3 ins b x\" (remove an insert; \"3 send verb x\" a send), \"add inst vital\". Tracks by their number as on screen (get_session's number, not id). \"bpm\" goes through set_tempo's rules. One undo step. Not allowed: save, close, quit, play, stop, record, undo/redo, bounce, moving the cursor (@), focusing, the clipboard, and anything that opens a window. A command with no track number acts on the user's focused track, which is locked: always give the track number.",
   "inputSchema": { "type": "object", "properties": {
     "command": { "type": "string" } }, "required": ["command"] }
 },

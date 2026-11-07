@@ -8,6 +8,10 @@
   `library`, `scan`, `agents`, `hub`, `keycast`, the theme, `dev`, `q`); `:help` shows the
   screen's own keys and commands. `ctrl+q` quits there, as `esc` does.
 - The help shows the keys in yellow and what they do in plain text.
+- Inserts are `ins` everywhere (help, messages, docs; `fx` still works). Removing an insert or a
+  send reads the same: by slot, by name (`2 ins l3 x`, `2 send verb x`) or the only one
+  (`2 ins x`); `del` and `remove` work as `x`. `2 ins` alone lists what's in the slots under
+  the picker, and the messages name the command that removes or bypasses.
 - The track list scrolls by rows: a track with many lanes, or an open kit, shows as far as it
   fits instead of leaving the view empty. The scroll bar is always there: grey with everything
   in view, else an accent thumb as long as the share in view; the Mix row says which tracks and

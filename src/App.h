@@ -667,6 +667,11 @@ public:
     // functions take -1 for the mix too.
     int ioTrack() const { return mixFocused() ? -1 : focused; }
     juce::String insertOwnerName (int track) const; // "track 2", "the mix"
+    juce::String routingPrefix (int track) const { return track < 0 ? juce::String ("mix") : trackLabel (track); } // "2", "mix": as typed before ins / send
+    juce::String describeInserts (int track) const; // "A L3 · B NX (bypassed)", or "" with none
+    // The inserts a removal or bypass means: the slot named, else the ones whose names match the
+    // words, else the only one there. Empty, with why in error, when it can't tell.
+    std::vector<int> insertsMeant (int track, int slot, const juce::String& words, juce::String& error) const;
 
     // The bus picker: where the output or a send goes. Type to filter (a new name makes a bus).
     struct BusChoice

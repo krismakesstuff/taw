@@ -189,9 +189,11 @@ the lit pad.
 Every track has five insert slots for effect plugins and five sends. `bus Verb` adds a bus
 track; `2 send verb` sends track 2 to it (post-fader at -6 dB; `2 send a -12 pre` sets one up),
 and naming a bus that doesn't exist yet creates it, then opens the effects picker for it, so you
-can search for its reverb straight away. `3 fx valhalla` puts an effect on track 3
+can search for its reverb straight away. `3 ins valhalla` puts an effect on track 3
 (on a bus, that's your reverb return); `2 out drums` sends a whole track into a bus. The mix
-bus has five inserts too, after its fader: `mix fx limiter`, or `\` on the Mix row.
+bus has five inserts too, after its fader: `mix ins limiter`, or `\` on the Mix row. Taking one
+out reads the same for an insert or a send: `3 ins b x` (or by name, `3 ins valhalla x`),
+`2 send verb x`, or `del` on it in the routing column.
 
 The routing column sits left of the timeline, as in Pro Tools: inserts on a track's first row,
 sends and the output on its second (the R I S M flags sit under the track's name, and the

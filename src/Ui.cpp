@@ -2794,18 +2794,21 @@ void Ui::drawHelp (App& app)
                 { L"find plugins / MIDI ins", L"scan  midi" },
                 { L"latent plugins sit out", L"lowlat" },
                 { L"...over 256 samples", L"lowlat 256" } } } },
-          { { L"EFFECTS", {
+          { { L"INSERTS", {
                 { L"effect picker / by name", L"ins  ins cla" },
-                { L"its window / remove it", L"2 fx b  b x" },
-                { L"bypass; b>d swaps", L"2 fx b off" },
-                { L"effect on the mix bus", L"mix fx lim" } } },
+                { L"its window; b>d swaps", L"2 ins b" },
+                { L"remove (or by name)", L"2 ins b x" },
+                { L"bypass / back on", L"2 ins b off" },
+                { L"on the mix bus", L"mix ins lim" } } },
             { L"ROUTING", {
                 { L"routing column / hide", L"\\   io" },
                 { L"new bus track", L"bus Verb" },
                 { L"send; new name: new bus", L"2 send verb" },
-                { L"level, pre/post, off, x", L"2 send b -6" },
+                { L"level, pre/post, off", L"2 send b -6" },
+                { L"remove (or by bus)", L"2 send verb x" },
                 { L"output to a bus", L"2 out drums" },
-                { L"Mix inserts, post-fader", L"\\ on Mix" } } } } },
+                { L"Mix inserts, post-fader", L"\\ on Mix" } } } },
+          L"On an insert or send (\\ gets there): del removes it, M bypasses or mutes it." },
 
         { L"AUTO",
           { { L"LANES", {

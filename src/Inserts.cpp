@@ -97,6 +97,56 @@ juce::String App::insertOwnerName (int track) const
     return track < 0 ? juce::String ("the mix") : "track " + trackLabel (track);
 }
 
+juce::String App::describeInserts (int track) const
+{
+    juce::StringArray parts;
+
+    for (int s = 0; s < Session::numSends; ++s)
+        if (const auto insert = Session::insert (automationOwner (track), s); insert.isValid())
+            parts.add (Session::slotName (s) + " " + insert[ids::pluginName].toString() + ((bool) insert[ids::bypass] ? " (bypassed)" : ""));
+
+    return parts.joinIntoString (juce::String (L" \x00b7 "));
+}
+
+std::vector<int> App::insertsMeant (int track, int slot, const juce::String& words, juce::String& error) const
+{
+    const auto owner = automationOwner (track);
+    const auto prefix = routingPrefix (track);
+    std::vector<int> all, matching;
+
+    for (int s = 0; s < Session::numSends; ++s)
+        if (const auto insert = Session::insert (owner, s); insert.isValid())
+        {
+            all.push_back (s);
+
+            const auto name = insert[ids::pluginName].toString().toLowerCase();
+            bool every = words.isNotEmpty();
+
+            for (const auto& w : juce::StringArray::fromTokens (words.toLowerCase(), " ", ""))
+                every = every && name.contains (w);
+
+            if (every)
+                matching.push_back (s);
+        }
+
+    if (slot >= 0)
+    {
+        if (std::find (all.begin(), all.end(), slot) == all.end())
+            error = insertOwnerName (track) + " insert " + Session::slotName (slot) + " is empty";
+
+        return error.isEmpty() ? std::vector<int> { slot } : std::vector<int>();
+    }
+
+    if (all.empty())
+        error = insertOwnerName (track) + " has no inserts";
+    else if (words.isNotEmpty() && matching.empty())
+        error = "no insert on " + insertOwnerName (track) + " matches " + words.quoted() + L" \x00b7 " + describeInserts (track);
+    else if (words.isEmpty() && all.size() > 1)
+        error = L"which insert? " + describeInserts (track) + L" \x00b7 e.g. " + prefix + " ins " + Session::slotName (all.back()).toLowerCase() + " x";
+
+    return error.isNotEmpty() ? std::vector<int>() : words.isNotEmpty() ? matching : all;
+}
+
 Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc)
 {
     if (session == nullptr || index < -1 || index >= session->numTracks())
@@ -140,8 +190,9 @@ Result App::loadEffect (int index, int slot, const juce::PluginDescription& desc
     if (console.isOpen() && ! agentEditing)
         toggleInsertEditor (index, slot);
 
+    const auto cmd = routingPrefix (index) + " ins " + Session::slotName (slot).toLowerCase();
     return Result::good (insertOwnerName (index) + " insert " + Session::slotName (slot) + ": " + desc.name
-                         + L" \x00b7 | on it opens its window \x00b7 M bypasses \x00b7 shift+\x2190\x2192 moves it");
+                         + L" \x00b7 " + cmd + L" x removes it \x00b7 " + cmd + " off bypasses it");
 }
 
 Result App::removeInsert (int index, int slot)
@@ -285,15 +336,17 @@ Result App::toggleBypass (int index, int slot)
     return Result::good ("insert " + Session::slotName (slot) + " " + node[ids::pluginName].toString() + ((bool) node[ids::bypass] ? " bypassed" : " on"));
 }
 
-// fx                 the effects picker, for the first free slot
-// fx valhalla        into the first free slot
-// fx b | fx b valhalla | fx b x | fx b off | fx b on | fx b>d
-//                    open/close slot B's window (empty: the picker), load into it, remove it,
-//                    bypass it, or swap it with D
+// ins                the effects picker, for the first free slot (and what's in the slots)
+// ins valhalla       into the first free slot
+// ins b | ins b valhalla | ins b>d
+//                    open/close slot B's window (empty: the picker), load into it, swap with D
+// ins b x | ins l3 x | ins x      remove it: by slot, by name, or the only one ("del",
+// ins b off | ins l3 on           "remove" too); bypass it or back on, the same ways
+// (fx: the old name, still understood.)
 Result App::editInserts (const std::vector<int>& tracks, const juce::StringArray& argsIn)
 {
     if (tracks.empty())
-        return Result::fail (L"fx works on a track \x2014 \x2193 to one, or 2 fx");
+        return Result::fail (L"ins works on a track \x2014 \x2193 to one, or 2 ins");
 
     auto args = argsIn;
     const auto joined = args.joinIntoString ("").removeCharacters (" ").toLowerCase();
@@ -314,27 +367,58 @@ Result App::editInserts (const std::vector<int>& tracks, const juce::StringArray
     if (slot >= 0)
         args.remove (0);
 
-    const auto rest = args.joinIntoString (" ").trim();
     const auto first = tracks.front();
 
-    if (slot >= 0 && (rest == "x" || rest == "del"))
+    // Removing or bypassing: the word anywhere, the insert by slot, name, or as the only one.
+    bool remove = false;
+    juce::String onOff;
+    juce::StringArray words;
+
+    for (const auto& a : args)
+    {
+        const auto lower = a.toLowerCase();
+
+        if (lower == "x" || lower == "del" || lower == "remove")
+            remove = true;
+        else if (lower == "off" || lower == "on")
+            onOff = lower;
+        else
+            words.add (a);
+    }
+
+    if (remove || onOff.isNotEmpty())
     {
         Result last;
+        juce::StringArray done;
 
         for (auto t : tracks)
-            last = removeInsert (t, slot);
+        {
+            juce::String error;
+            const auto meant = insertsMeant (t, slot, words.joinIntoString (" "), error);
 
-        return last;
+            if (meant.empty())
+                return Result::fail (error);
+
+            for (auto s : meant)
+            {
+                if (remove)
+                {
+                    if (last = removeInsert (t, s); ! last.ok)
+                        return last;
+
+                    continue;
+                }
+
+                auto node = Session::insert (automationOwner (t), s);
+                node.setProperty (ids::bypass, onOff == "off", um());
+                done.add (insertOwnerName (t) + " insert " + Session::slotName (s) + " " + node[ids::pluginName].toString() + (onOff == "off" ? " bypassed" : " on"));
+            }
+        }
+
+        return remove ? last : Result::good (done.joinIntoString (juce::String (L" \x00b7 ")));
     }
 
-    if (slot >= 0 && (rest == "off" || rest == "on"))
-    {
-        for (auto t : tracks)
-            if (auto node = Session::insert (automationOwner (t), slot); node.isValid())
-                node.setProperty (ids::bypass, rest == "off", um());
-
-        return Result::good ((first < 0 ? juce::String ("the mix") : trackList (tracks)) + " insert " + Session::slotName (slot) + (rest == "off" ? " bypassed" : " on"));
-    }
+    const auto rest = args.joinIntoString (" ").trim();
 
     // No slot: the first free one (on the first track named).
     if (slot < 0)
@@ -344,7 +428,8 @@ Result App::editInserts (const std::vector<int>& tracks, const juce::StringArray
                 slot = s;
 
         if (slot < 0)
-            return Result::fail (insertOwnerName (first) + L"'s inserts are all used \x2014 2 fx e <name> replaces E");
+            return Result::fail (insertOwnerName (first) + L"'s inserts are all used: " + describeInserts (first)
+                                 + L" \x00b7 " + routingPrefix (first) + " ins e <name> replaces E, " + routingPrefix (first) + " ins e x removes it");
     }
     else if (rest.isEmpty())
     {
@@ -355,16 +440,24 @@ Result App::editInserts (const std::vector<int>& tracks, const juce::StringArray
     if (rest.isEmpty())
     {
         openPluginPicker (first, slot);
-        return Result::good (plugins.hasScanned() ? juce::String() : juce::String (L"scanning plugins (first time)\x2026"));
+
+        if (! plugins.hasScanned())
+            return Result::good (juce::String (L"scanning plugins (first time)\x2026"));
+
+        // What's there already, and how it comes out, under the picker.
+        if (const auto there = describeInserts (first); there.isNotEmpty())
+            return Result::good (insertOwnerName (first) + " inserts " + there + L" \x00b7 " + routingPrefix (first) + " ins <slot or name> x removes one");
+
+        return Result::good();
     }
 
     if (! plugins.hasScanned())
-        return Result::fail (L"no plugins scanned yet \x2014 type scan (takes a moment), then 2 fx " + rest);
+        return Result::fail (L"no plugins scanned yet \x2014 type scan (takes a moment), then " + routingPrefix (first) + " ins " + rest);
 
     const auto desc = plugins.findEffect (rest, ! trackIsStereo (automationOwner (first)));
 
     if (! desc)
-        return Result::fail ("no effect matches " + rest.quoted() + L" \x00b7 2 fx alone lists them \x00b7 scan finds new ones");
+        return Result::fail ("no effect matches " + rest.quoted() + L" \x00b7 " + routingPrefix (first) + L" ins alone lists them \x00b7 scan finds new ones");
 
     Result last;
 

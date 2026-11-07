@@ -869,7 +869,7 @@ public:
     static juce::String datedName (const juce::String& name); // name plus today's date, unless it ends in one
 
     juce::int64 cursor = 0, playStart = 0, viewStart = 0;
-    int focused = 0, trackScroll = 0, zoomLevel = 0;
+    int focused = 0, rowScroll = 0, zoomLevel = 0; // rowScroll: rows of the track list scrolled out of sight above
     juce::int64 timeAnchor = -1; // where a shift-selection in time started
     juce::int64 timeHead = -1;   // its moving end
     int trackAnchor = -1;        // where a shift-selection of tracks started

@@ -140,7 +140,7 @@ void Canvas::resize (int newW, int newH)
 
 void Canvas::put (int x, int y, wchar_t ch, int fg, int bg, bool bold)
 {
-    if (x >= 0 && y >= 0 && x < w && y < h)
+    if (x >= 0 && y >= std::max (0, clipTop) && x < w && y < std::min (h, clipBottom))
         at (x, y) = { ch, fg, bg, bold };
 }
 
@@ -1163,82 +1163,96 @@ void Ui::drawTimeline (App& app)
         return rowsPerTrack + (int) lanesOf (track).size() * laneRows + (int) playlistsOf (track).size() * rowsPerTrack + (track == framedTrack ? 2 : 0);
     };
 
-    // How many tracks fit from scroll on (at least one, cut short if it must be).
-    auto fitFrom = [&] (int scroll)
-    {
-        int used = 0, count = 0;
-
-        for (int i = scroll; i < n; ++i)
-        {
-            const auto rows = blockRows (i);
-
-            if (count > 0 && used + rows > tracksBottom - tracksTop)
-                break;
-
-            used += rows;
-            ++count;
-        }
-
-        return std::max (1, count);
-    };
-
-    const int focusRow = std::min (app.focused, n - 1); // the mix row lives below the list
-
-    if (focusRow < app.trackScroll)
-        app.trackScroll = std::max (0, focusRow);
-
-    while (app.trackScroll < focusRow && app.trackScroll + fitFrom (app.trackScroll) <= focusRow)
-        ++app.trackScroll;
-
-    const int visible = fill ? 1 : fitFrom (app.trackScroll); // tracks that fit
-    std::vector<int> trackY; // where each visible track's own rows start (inside its frame)
-    int tracksEnd = tracksTop;
-
-    for (int row = 0, y = tracksTop; row < visible && app.trackScroll + row < n; ++row)
-    {
-        const int track = app.trackScroll + row;
-        trackY.push_back (y + (track == framedTrack ? 1 : 0));
-        y += blockRows (track);
-        tracksEnd = y;
-    }
-
-    // What the scroll hides, in rows (lanes, playlists, the height and folded kits all count, as
-    // they do above) and in tracks shown when scrolled to (a folded kit's pads aren't).
-    int rowsAbove = 0, rowsTotal = 0, tracksAbove = 0, tracksBelow = 0;
+    // Every track's block in the whole list, top to bottom, in rows: the view scrolls by rows,
+    // so a track taller than the view (many lanes, an open kit's pads under it) shows part way.
+    std::vector<int> blockTop ((size_t) n + 1, 0);
 
     for (int i = 0; i < n; ++i)
-    {
-        const auto rows = blockRows (i);
-        rowsTotal += rows;
+        blockTop[(size_t) i + 1] = blockTop[(size_t) i] + (fill && i != app.focused ? 0 : blockRows (i));
 
-        if (i < app.trackScroll)
-            rowsAbove += rows, tracksAbove += rows > 0 ? 1 : 0;
-        else if (i >= app.trackScroll + visible)
-            tracksBelow += rows > 0 ? 1 : 0;
+    const int rowsTotal = blockTop[(size_t) n];
+    const int area = std::max (1, tracksBottom - tracksTop);
+    const int focusRow = std::min (app.focused, n - 1); // the mix row lives below the list
+
+    // The focused track stays in view: all of it if it fits, else the rows you're on (its own,
+    // or the lane you're on), clear of its frame's top edge, which stays on the first row.
+    if (focusRow >= 0 && ! app.onTopLane() && ! app.mixFocused())
+    {
+        const int top = blockTop[(size_t) focusRow], rows = blockTop[(size_t) focusRow + 1] - top;
+        const int frame = focusRow == framedTrack ? 1 : 0;
+        int a = top, b = top + rows;
+
+        if (rows > area)
+        {
+            const int lane = app.focusedLane, laneH = lanesOf (focusRow).empty() ? rowsPerTrack : laneRows;
+            a = lane < 0 ? top : top + frame + rowsPerTrack + lane * laneH - 1; // the row above: the frame's edge
+            b = lane < 0 ? top + frame + rowsPerTrack : a + 1 + laneH;
+
+            if (lane >= 0 && lane == app.lanesUnder (focusRow) - 1)
+                b += frame; // the last lane: its frame's bottom edge too
+        }
+
+        if (a < app.rowScroll)
+            app.rowScroll = a;
+
+        if (b > app.rowScroll + area)
+            app.rowScroll = b - area;
     }
+
+    app.rowScroll = juce::jlimit (0, std::max (0, rowsTotal - area), app.rowScroll);
+
+    // The tracks with a row in view, the first and last perhaps cut.
+    int firstShown = 0, lastShown = 0; // lastShown: exclusive
+
+    while (firstShown < n && blockTop[(size_t) firstShown + 1] <= app.rowScroll)
+        ++firstShown;
+
+    for (lastShown = firstShown; lastShown < n && blockTop[(size_t) lastShown] < app.rowScroll + area; ++lastShown) {}
+
+    const int visible = lastShown - firstShown;
+    std::vector<int> trackY; // where each shown track's own rows start (inside its frame), above tracksTop when cut
+
+    for (int track = firstShown; track < lastShown; ++track)
+        trackY.push_back (tracksTop + blockTop[(size_t) track] - app.rowScroll + (track == framedTrack ? 1 : 0));
+
+    const int tracksEnd = tracksTop + rowsTotal - app.rowScroll; // past the bottom while there's more
+
+    // Out of sight: whole tracks each way (shown when scrolled to; a folded kit's pads aren't),
+    // and rows.
+    int tracksAbove = 0, tracksBelow = 0;
+
+    for (int i = 0; i < n; ++i)
+        if (blockTop[(size_t) i + 1] > blockTop[(size_t) i])
+        {
+            if (blockTop[(size_t) i + 1] <= app.rowScroll)
+                ++tracksAbove;
+            else if (blockTop[(size_t) i] >= app.rowScroll + area)
+                ++tracksBelow;
+        }
+
+    const int rowsAbove = app.rowScroll, rowsBelow = std::max (0, rowsTotal - app.rowScroll - area);
 
     // The bar: in the border after the timeline, a thumb as long as the share of rows in view,
     // in half rows. It keeps off an end while there's more past it, so a glance says which way.
-    if (const int barRows = tracksBottom - tracksTop, shownRows = std::min (tracksEnd, tracksBottom) - tracksTop;
-        ! fill && barRows >= 2 && rowsTotal > shownRows && rowsTotal > 0)
+    // Always there: all of it in view is a thumb the whole height.
+    if (! fill && area >= 2 && n > 0 && rowsTotal <= area)
+        scrollBar = { meterX - 1, tracksTop, tracksBottom, 0, 0, true, true };
+    else if (! fill && area >= 2 && rowsTotal > area)
     {
-        const int halves = barRows * 2;
-        const bool more = rowsTotal - rowsAbove - shownRows > 0;
-        int len = std::max (2, (int) std::lround ((double) halves * shownRows / rowsTotal));
+        const int halves = area * 2;
+        int len = std::max (2, (int) std::lround ((double) halves * area / rowsTotal));
         int from = (int) std::lround ((double) halves * rowsAbove / rowsTotal);
-        len = std::min (len, halves - (rowsAbove > 0 ? 1 : 0) - (more ? 1 : 0));
-        from = juce::jlimit (rowsAbove > 0 ? 1 : 0, halves - len - (more ? 1 : 0), from);
+        len = std::min (len, halves - (rowsAbove > 0 ? 1 : 0) - (rowsBelow > 0 ? 1 : 0));
+        from = juce::jlimit (rowsAbove > 0 ? 1 : 0, halves - len - (rowsBelow > 0 ? 1 : 0), from);
         scrollBar = { meterX - 1, tracksTop, tracksBottom, from, from + len, true };
     }
 
     // Where things were drawn, for the mouse: which track (and lane) each row is.
-    laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, app.trackScroll, std::min (visible, n - app.trackScroll), videoY, {}, origin, spc, true };
+    laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, firstShown, visible, videoY, {}, origin, spc, true };
 
-    for (size_t row = 0; row < trackY.size(); ++row)
+    for (int track = firstShown; track < lastShown; ++track)
     {
-        const int track = app.trackScroll + (int) row;
-
-        if (blockRows (track) == 0)
+        if (blockTop[(size_t) track + 1] == blockTop[(size_t) track])
             continue;
 
         if (track == framedTrack) // a click on its frame is a click on the track
@@ -1257,6 +1271,14 @@ void Ui::drawTimeline (App& app)
 
         if (track == framedTrack)
             laneMap.rows.push_back ({ track, -1 });
+    }
+
+    // From the first row in view, as many as there are.
+    if (n > 0)
+    {
+        auto& rows = laneMap.rows;
+        rows.erase (rows.begin(), rows.begin() + std::min ((int) rows.size(), app.rowScroll - blockTop[(size_t) firstShown]));
+        rows.resize (std::min (rows.size(), (size_t) area));
     }
 
     // Loudness as shade density; these four blocks exist in every console font.
@@ -1596,11 +1618,15 @@ void Ui::drawTimeline (App& app)
     if (n == 0)
         canvas.text (laneX + 1, tracksTop, L"no tracks \x00b7 type add", colour::dim);
 
-    for (int row = 0; row < visible && app.trackScroll + row < n; ++row)
-    {
-        const int i = app.trackScroll + row, y = trackY[(size_t) row];
+    // The tracks draw only on their own rows: one cut by the scroll draws its rows out of view
+    // into nothing (the clip ends after their lanes, below).
+    canvas.clip (tracksTop, tracksBottom);
 
-        if (blockRows (i) == 0)
+    for (int row = 0; row < visible; ++row)
+    {
+        const int i = firstShown + row, y = trackY[(size_t) row];
+
+        if (blockTop[(size_t) i + 1] == blockTop[(size_t) i]) // a folded kit's pad (or, filling, another track)
             continue;
 
         const auto t = s.track (i);
@@ -2206,9 +2232,9 @@ void Ui::drawTimeline (App& app)
 
     for (size_t row = 0; row < trackY.size(); ++row)
     {
-        const int i = app.trackScroll + (int) row;
+        const int i = firstShown + (int) row;
 
-        if (blockRows (i) == 0)
+        if (blockTop[(size_t) i + 1] == blockTop[(size_t) i]) // a folded kit's pad (or, filling, another track)
             continue;
 
         if (const auto lanes = lanesOf (i); ! lanes.empty())
@@ -2225,10 +2251,32 @@ void Ui::drawTimeline (App& app)
             // A pad's frame names its kit and pad: "2.3 808SD (pad 3 of Kit 1)".
             const auto kit = app.kitOf (t);
             const auto where = kit < 0 ? juce::String() : " (" + app.padName (t.getProperty (ids::note, -1)) + " of " + s.track (kit)[ids::name].toString() + ")";
-            focusFrame = { 0, top, w - 1, top + blockRows (i) - 1, numbers.label (i) + " " + t[ids::name].toString() + where + state,
-                           armed ? colour::rec : colour::accent, true };
+
+            // What's open under it, and the key that folds it away.
+            juce::String fold;
+            const auto openLanes = (int) lanesOf (i).size(), openPlaylists = (int) playlistsOf (i).size();
+            const auto pads = Session::isKit (t) && ! (bool) t[ids::folded] ? (int) app.kitMembers (i).size() : 0;
+
+            if (openLanes > 0)
+                fold = juce::String (openLanes) + (openLanes == 1 ? " lane" : " lanes") + L": shift+A folds";
+            else if (openPlaylists > 0)
+                fold = juce::String (openPlaylists) + (openPlaylists == 1 ? " playlist" : " playlists") + L": shift+P folds";
+
+            if (pads > 0)
+                fold << (fold.isEmpty() ? juce::String() : juce::String (L" \x00b7 ")) << juce::String (pads) << (pads == 1 ? " pad" : " pads") << L": shift+F folds";
+            else if (kit >= 0)
+                fold << (fold.isEmpty() ? juce::String() : juce::String (L" \x00b7 ")) << L"shift+F folds the kit";
+
+            // Cut by the scroll: the top edge stays on the first row, with the name; the
+            // bottom is left open, there's more of it below.
+            const int bottom = top + blockRows (i) - 1;
+            focusFrame = { 0, std::max (top, tracksTop), w - 1, std::min (bottom, tracksBottom),
+                           numbers.label (i) + " " + t[ids::name].toString() + where + state + (fold.isEmpty() ? juce::String() : L" \x00b7 " + fold),
+                           armed ? colour::rec : colour::accent, true, bottom >= tracksBottom };
         }
     }
+
+    canvas.unclip();
 
     // The cursor's handle sits under the last track, clear of the ruler's numbers.
     if (cursorCol >= 0 && cursorCol < laneW && n > 0 && tracksEnd < tracksBottom + 1)
@@ -2288,9 +2336,19 @@ void Ui::drawTimeline (App& app)
         if (ch == 0 && fill)
             canvas.text (laneX + 1, y, "track " + numbers.label (app.focused) + " of " + juce::String ((int) numbers.byNumber.size()) + L" filling the view \x00b7 \x2191\x2193 others \x00b7 f shows all",
                          colour::faint);
-        else if (ch == 0 && n > visible)
+        else if (ch == 0 && n > 0 && rowsTotal <= area)
+            canvas.text (laneX + 1, y, (numbers.byNumber.size() == 1 ? juce::String ("the track") : "all " + juce::String ((int) numbers.byNumber.size()) + " tracks") + " in view",
+                         colour::faint, -1, false, laneW - 1);
+        else if (ch == 0 && rowsTotal > area)
         {
-            // How many are out of sight each way, as an arrow and a count: (up 2 down 5).
+            // What's in view against the whole list: the tracks (first and last shown, a folded
+            // kit's pads not counted), how many are out of sight each way, and the rows.
+            int firstLabel = -1, lastLabel = -1;
+
+            for (int i = firstShown; i < lastShown; ++i)
+                if (blockTop[(size_t) i + 1] > blockTop[(size_t) i])
+                    lastLabel = i, firstLabel = firstLabel < 0 ? i : firstLabel;
+
             juce::StringArray hidden;
 
             if (tracksAbove > 0)
@@ -2299,11 +2357,15 @@ void Ui::drawTimeline (App& app)
             if (tracksBelow > 0)
                 hidden.add (juce::String (L"\x2193") + juce::String (tracksBelow));
 
-            canvas.text (laneX + 1, y, "tracks " + numbers.label (app.trackScroll) + "-" + numbers.label (std::min (n, app.trackScroll + visible) - 1)
-                                           + " of " + juce::String ((int) numbers.byNumber.size())
+            const auto range = firstLabel < 0 ? juce::String()
+                             : firstLabel == lastLabel ? "track " + numbers.label (firstLabel)
+                                                       : "tracks " + numbers.label (firstLabel) + "-" + numbers.label (lastLabel);
+            const int shownTo = std::min (rowsTotal, app.rowScroll + area);
+            canvas.text (laneX + 1, y, range + " of " + juce::String ((int) numbers.byNumber.size())
                                            + (hidden.isEmpty() ? juce::String() : " (" + hidden.joinIntoString (" ") + ")")
-                                           + L" \x00b7 \x2191\x2193 to scroll",
-                         colour::faint, -1, false, laneW - 1);
+                                           + L" \x00b7 rows " + juce::String (app.rowScroll + 1) + "-" + juce::String (shownTo) + " of " + juce::String (rowsTotal)
+                                           + (rowsAbove > 0 && rowsBelow > 0 ? L" \x00b7 \x2191\x2193 to scroll" : rowsBelow > 0 ? L" \x00b7 \x2193 for more" : L" \x00b7 \x2191 for more"),
+                         colour::dim, -1, false, laneW - 1);
         }
 
         const auto& m = app.masterMeters[(size_t) ch];
@@ -2338,7 +2400,9 @@ void Ui::drawFocusFrame()
     for (int x = f.x0 + 1; x < f.x1; ++x)
     {
         canvas.put (x, f.y0, L'\x2501', f.colour);
-        canvas.put (x, f.y1, L'\x2501', f.colour);
+
+        if (! f.openBottom)
+            canvas.put (x, f.y1, L'\x2501', f.colour);
     }
 
     for (int y = f.y0 + 1; y < f.y1; ++y)
@@ -2349,14 +2413,19 @@ void Ui::drawFocusFrame()
 
     canvas.put (f.x0, f.y0, L'\x250f', f.colour);
     canvas.put (f.x1, f.y0, L'\x2513', f.colour);
-    canvas.put (f.x0, f.y1, L'\x2517', f.colour);
-    canvas.put (f.x1, f.y1, L'\x251b', f.colour);
+
+    if (! f.openBottom)
+    {
+        canvas.put (f.x0, f.y1, L'\x2517', f.colour);
+        canvas.put (f.x1, f.y1, L'\x251b', f.colour);
+    }
 
     if (f.title.isNotEmpty())
         canvas.text (f.x0 + 2, f.y0, " " + f.title + " ", f.colour, -1, true, f.x1 - f.x0 - 3);
 }
 
-// The track list's scroll bar: a light rail down the border, the thumb in half blocks over it.
+// The track list's scroll bar: a grey track down the border, always there; with more rows than
+// fit, a thumb in the accent colour over it, in half blocks (greyed: just the track).
 void Ui::drawScrollBar()
 {
     const auto& b = scrollBar;
@@ -2367,13 +2436,14 @@ void Ui::drawScrollBar()
     for (int y = b.y0; y < b.y1; ++y)
     {
         const int top = (y - b.y0) * 2;
-        const bool upper = top >= b.from && top < b.to, lower = top + 1 >= b.from && top + 1 < b.to;
-        auto& cell = canvas.at (b.x, y);
+        const bool upper = ! b.greyed && top >= b.from && top < b.to, lower = ! b.greyed && top + 1 >= b.from && top + 1 < b.to;
 
-        if (upper || lower)
-            canvas.put (b.x, y, upper && lower ? L'\x2588' : upper ? L'\x2580' : L'\x2584', colour::dim, cell.bg);
-        else if (cell.ch == L' ')
-            canvas.put (b.x, y, L'\x2502', colour::faint, cell.bg);
+        if (upper && lower)
+            canvas.put (b.x, y, L'\x2588', colour::accent);
+        else if (upper || lower)
+            canvas.put (b.x, y, upper ? L'\x2580' : L'\x2584', colour::accent, colour::faint);
+        else
+            canvas.put (b.x, y, L'\x2588', colour::faint);
     }
 }
 

@@ -2568,10 +2568,12 @@ int main (int argc, char** argv)
 
         for (int i = 2; i < args.size(); ++i)
         {
-            // ":screen" prints the screen as text (160x44); ":key o", ":key right", ":key ]" press a key.
-            if (args[i] == ":screen")
+            // ":screen" prints the screen as text (160x44; ":screen 80 24" another size); ":key o",
+            // ":key right", ":key ]" press a key.
+            if (args[i] == ":screen" || args[i].startsWith (":screen "))
             {
-                std::printf ("%s", app.screenText (160, 44).toRawUTF8());
+                const auto size = juce::StringArray::fromTokens (args[i].fromFirstOccurrenceOf (" ", false, false), " ", "");
+                std::printf ("%s", app.screenText (size.size() == 2 ? size[0].getIntValue() : 160, size.size() == 2 ? size[1].getIntValue() : 44).toRawUTF8());
                 continue;
             }
 

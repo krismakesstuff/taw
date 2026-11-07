@@ -59,13 +59,27 @@ public:
     void put (int x, int y, wchar_t ch, int fg = -1, int bg = -1, bool bold = false);
     int text (int x, int y, const juce::String&, int fg = -1, int bg = -1, bool bold = false, int maxWidth = -1);
     void fill (int x, int y, int width, wchar_t ch, int fg = -1, int bg = -1);
-    Cell& at (int x, int y) { return cells[(size_t) (y * w + x)]; }
+    // Outside the canvas or the clip rows, at() is a scratch cell: drawn to, it shows nowhere.
+    Cell& at (int x, int y)
+    {
+        if (x < 0 || x >= w || y < std::max (0, clipTop) || y >= std::min (h, clipBottom))
+            return scratch = Cell {};
+
+        return cells[(size_t) (y * w + x)];
+    }
+
+    // Only rows top to bottom (exclusive) are drawn on until unclip: the track list, scrolled
+    // part way through a track, draws its rows above and below the area into nothing.
+    void clip (int top, int bottom) { clipTop = top; clipBottom = bottom; }
+    void unclip() { clipTop = 0; clipBottom = 1 << 30; }
 
     std::wstring row (int y) const;
 
 private:
     int w = 0, h = 0;
+    int clipTop = 0, clipBottom = 1 << 30;
     std::vector<Cell> cells;
+    Cell scratch;
 };
 
 class Ui
@@ -122,6 +136,7 @@ private:
         juce::String title;
         int colour = 0;
         bool valid = false;
+        bool openBottom = false; // cut by the scroll: sides to y1 (exclusive), no bottom edge
     };
     FocusFrame focusFrame;
     void drawFocusFrame();
@@ -133,6 +148,7 @@ private:
     {
         int x = 0, y0 = 0, y1 = 0, from = 0, to = 0;
         bool valid = false;
+        bool greyed = false; // everything's in view: the track alone, no thumb
     };
     ScrollBar scrollBar;
     void drawScrollBar();

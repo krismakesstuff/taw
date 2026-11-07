@@ -334,7 +334,7 @@ struct AgentTools
         juce::int64 cursor = 0, viewStart = 0, timeAnchor = -1, timeHead = -1;
         juce::ValueTree focusedTrack, anchorTrack;
         bool onMix = false;
-        int focusedIndex = 0, focusedLane = -1, trackScroll = 0, zoomLevel = 0, browserPadNote = 0;
+        int focusedIndex = 0, focusedLane = -1, rowScroll = 0, zoomLevel = 0, browserPadNote = 0;
         App::TopLane topLane = App::TopLane::none;
         juce::String commandLine;
         juce::ValueTree namingMarker, selectedMarker;
@@ -355,7 +355,7 @@ struct AgentTools
         v.focusedTrack = v.onMix ? juce::ValueTree() : session().track (app.focused);
         v.anchorTrack = app.trackAnchor >= 0 ? session().track (app.trackAnchor) : juce::ValueTree();
         v.focusedLane = app.focusedLane;
-        v.trackScroll = app.trackScroll;
+        v.rowScroll = app.rowScroll;
         v.zoomLevel = app.zoomLevel;
         v.browserPadNote = app.browserPadNote;
         v.topLane = app.topLane;
@@ -388,7 +388,7 @@ struct AgentTools
         app.focused = v.onMix ? count : (indexOf (v.focusedTrack) >= 0 ? indexOf (v.focusedTrack) : juce::jlimit (0, count, v.focusedIndex));
         app.trackAnchor = indexOf (v.anchorTrack);
         app.focusedLane = v.focusedLane;
-        app.trackScroll = v.trackScroll;
+        app.rowScroll = v.rowScroll;
         app.zoomLevel = v.zoomLevel;
         app.browserPadNote = v.browserPadNote;
         app.topLane = v.topLane;

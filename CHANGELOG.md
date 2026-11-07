@@ -8,6 +8,10 @@
   `library`, `scan`, `agents`, `hub`, `keycast`, the theme, `dev`, `q`); `:help` shows the
   screen's own keys and commands. `ctrl+q` quits there, as `esc` does.
 - The help shows the keys in yellow and what they do in plain text.
+- The track list scrolls by rows: a track with many lanes, or an open kit, shows as far as it
+  fits instead of leaving the view empty. The scroll bar is always there: grey with everything
+  in view, else an accent thumb as long as the share in view; the Mix row says which tracks and
+  rows are in view. The focused track's frame says what's open under it and the key that folds it.
 - Plugins that print to stdout (Waves) no longer write over the screen: it goes to
   `taw-stderr.log` with their stderr.
 - macOS: once taw handed the keyboard back to the terminal, clicks in other apps could read as

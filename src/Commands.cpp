@@ -944,6 +944,75 @@ Result App::execute (const juce::String& line)
         return loadInstrument (onto, p.rest);
     }
 
+    // add 3 inst [plugin] / add 4 sample: several new tracks of a kind at once (add 3 audio is
+    // with the plain add, below). With no plugin or sample they're empty, ready for one.
+    if ((v == "add" || v == "new") && p.args[0].isNotEmpty() && p.args[0].containsOnly ("0123456789")
+        && (p.args[1].equalsIgnoreCase ("inst") || p.args[1].equalsIgnoreCase ("sample")))
+    {
+        const int count = juce::jlimit (1, 64, p.args[0].getIntValue());
+        const bool inst = p.args[1].equalsIgnoreCase ("inst");
+        const auto what = p.rest.fromFirstOccurrenceOf (" ", false, false).trim().fromFirstOccurrenceOf (" ", false, false).trim();
+
+        if (inst && what.isNotEmpty())
+        {
+            if (! plugins.hasScanned())
+                return Result::fail (L"no plugins scanned yet \x2014 type scan (takes a moment), then add " + juce::String (count) + " inst " + what);
+
+            const auto desc = plugins.findInstrument (what);
+
+            if (! desc)
+                return Result::fail ("no instrument matches " + what.quoted() + L" \x00b7 inst alone lists them \x00b7 scan finds new ones");
+
+            const int first = session->numTracks();
+            Result last;
+
+            for (int i = 0; i < count; ++i)
+                if (last = loadInstrument (-1, *desc); ! last.ok)
+                    return last;
+
+            if (count == 1)
+                return last;
+
+            // Numbered, and only the first armed: the controller plays one of them, not all at once.
+            for (int i = 0; i < count; ++i)
+                session->track (first + i).setProperty (ids::name, desc->name + " " + juce::String (i + 1), um())
+                                         .setProperty (ids::armed, i == 0, um());
+
+            focusTrack (first);
+            return Result::good ("added " + juce::String (count) + " tracks playing " + desc->name + ": "
+                                 + trackLabel (first) + "-" + trackLabel (first + count - 1) + L" \x00b7 " + trackLabel (first)
+                                 + L" is armed for your controller (shift+R arms another)");
+        }
+
+        if (! inst && what.isNotEmpty())
+        {
+            if (count > 1)
+                return Result::fail ("add " + juce::String (count) + L" sample makes empty sample tracks \x00b7 sample <files> makes one from each file");
+
+            return startImport (splitPaths (what), -1, ImportAs::sample);
+        }
+
+        if (inst && count == 1)
+            return loadInstrument ({}, {}); // the picker, for a new track
+
+        juce::StringArray added;
+        const int first = session->numTracks();
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto n = (int) numbering().byNumber.size() + 1; // as numbered (a kit's pads aren't)
+            const auto name = (inst ? "Inst " : "Sample ") + juce::String (n);
+            session->addTrack (name, 0, um()).setProperty (ids::kind, inst ? "instrument" : "sample", um());
+            added.add (juce::String (n));
+        }
+
+        focusTrack (first);
+        const auto range = trackLabel (first) + (count > 1 ? "-" + trackLabel (first + count - 1) : juce::String());
+        return Result::good ("added " + juce::String (count) + (inst ? " instrument tracks " : " sample tracks ") + range
+                             + (inst ? L" \x00b7 " + range + " inst <name> loads a plugin on them (one at a time: 5 inst <name>)"
+                                     : L" \x00b7 " + trackLabel (first) + L" sample <file> gives one its sample \x00b7 pat x... writes hits"));
+    }
+
     if ((v == "add" || v == "new") && p.args[0].equalsIgnoreCase ("inst"))
         return loadInstrument ({}, p.rest.fromFirstOccurrenceOf (" ", false, false).trim());
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
@@ -1212,6 +1281,10 @@ Result App::execute (const juce::String& line)
             count = juce::jlimit (1, 64, args[0].getIntValue());
             args.remove (0);
         }
+
+        // "add 3 audio": the kind, said for clarity (audio is what add makes), not a name.
+        if (! args.isEmpty() && args[0].equalsIgnoreCase ("audio"))
+            args.remove (0);
 
         for (int a = args.size(); --a >= 0;)
         {

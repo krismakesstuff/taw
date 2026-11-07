@@ -257,6 +257,8 @@ records the selected tracks, else whatever is armed.
 | `mix v -3` | set the mix volume |
 | `add` / `add 3` / `add Vox` / `add 2 Gtr` | new tracks; each takes the lowest unused input |
 | `add vox1 in2` / `add 2 Gtr in3` | new tracks on given inputs (Gtr 1 on 3, Gtr 2 on 4) |
+| `add 3 audio` / `add 3 inst` / `add 4 sample` | several tracks of a kind at once: audio (as `add 3`), instrument tracks with no plugin yet ("no instrument yet"; `5-7 inst juno` loads one on all three), empty sample tracks (`7 sample <file>` gives one its sample) |
+| `add 3 inst juno` | three tracks playing Juno, named Juno 1-3; only the first is armed, so the controller plays one |
 | `b` / `bounce` | offline-print the mix bus over the time selection (selection required) |
 | `b mp3` / `b wav D:\mixes` / `b mp3 "rough 3"` | format, folder (remembered per session), file name |
 | `l` / `loop` | loop the time selection; with no selection, toggle the loop |

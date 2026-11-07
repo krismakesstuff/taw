@@ -8,6 +8,8 @@
   `library`, `scan`, `agents`, `hub`, `keycast`, the theme, `dev`, `q`); `:help` shows the
   screen's own keys and commands. `ctrl+q` quits there, as `esc` does.
 - The help shows the keys in yellow and what they do in plain text.
+- `add` makes several tracks of a kind: `add 3 audio`, `add 3 inst` (empty, ready for
+  `5-7 inst <name>`), `add 3 inst juno`, `add 4 sample` (empty, ready for a sample).
 - Inserts are `ins` everywhere (help, messages, docs; `fx` still works). Removing an insert or a
   send reads the same: by slot, by name (`2 ins l3 x`, `2 send verb x`) or the only one
   (`2 ins x`); `del` and `remove` work as `x`. `2 ins` alone lists what's in the slots under

@@ -2726,6 +2726,7 @@ void Ui::drawHelp (App& app)
         { L"TRACKS",
           { { L"TRACKS", {
                 { L"new track on input 2", L"add vox in2" },
+                { L"3 audio, inst or sample", L"add 3 inst" },
                 { L"rename", L"2n Vox" },
                 { L"use input 3", L"2i3" },
                 { L"stereo (inputs 3-4)", L"2 stereo" },

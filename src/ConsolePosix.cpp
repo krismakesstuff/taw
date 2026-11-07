@@ -32,11 +32,15 @@ termios oldMode {};
 constexpr const char* enter = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[>1u\x1b[?1000h\x1b[?1002h\x1b[?1006h";
 constexpr const char* leave = "\x1b[?1006l\x1b[?1002l\x1b[?1000l\x1b[<u\x1b[0m\x1b[?25h\x1b[?1049l";
 
+// The terminal: stdout, until plugins' stdout goes to the log too (Console::open); then a
+// copy of it only taw writes the screen to.
+int screenOut = STDOUT_FILENO;
+
 void writeAll (const char* data, size_t size)
 {
     while (size > 0)
     {
-        const auto n = ::write (STDOUT_FILENO, data, size);
+        const auto n = ::write (screenOut, data, size);
 
         if (n <= 0)
             return; // the terminal went away (window closed)
@@ -346,6 +350,8 @@ bool Console::open()
     // Whatever lands on stderr (a plugin's chatter, the Objective-C runtime's warnings about
     // classes loaded twice) would be written over the screen: it goes to taw-stderr.log in the
     // config folder until taw leaves, kept to the last run or so (over 1 MB, it starts over).
+    // Some plugins print to stdout instead (Waves' WaveShell: "eInit_RM ... Compiled for 64
+    // bits"): that goes there too, and taw draws on a copy of the terminal of its own.
     if (isatty (STDERR_FILENO))
     {
         const auto log = configFolder().getChildFile ("taw-stderr.log");
@@ -361,6 +367,16 @@ bool Console::open()
             {
                 close (savedStderr);
                 savedStderr = -1;
+            }
+
+            std::fflush (stdout);
+
+            if (const int own = dup (STDOUT_FILENO); own >= 0)
+            {
+                if (dup2 (fd, STDOUT_FILENO) >= 0)
+                    screenOut = own;
+                else
+                    close (own);
             }
 
             close (fd);
@@ -384,6 +400,14 @@ Console::~Console()
         std::fflush (stderr);
         dup2 (savedStderr, STDERR_FILENO);
         close (savedStderr);
+    }
+
+    if (screenOut != STDOUT_FILENO)
+    {
+        std::fflush (stdout);
+        dup2 (screenOut, STDOUT_FILENO);
+        close (screenOut);
+        screenOut = STDOUT_FILENO;
     }
 }
 
@@ -564,13 +588,13 @@ void Console::setClipboardText (const char* text)
 int Console::width() const
 {
     winsize ws {};
-    return ioctl (STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 ? ws.ws_col : 80;
+    return ioctl (screenOut, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 ? ws.ws_col : 80;
 }
 
 int Console::height() const
 {
     winsize ws {};
-    return ioctl (STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 ? ws.ws_row : 24;
+    return ioctl (screenOut, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0 ? ws.ws_row : 24;
 }
 
 void Console::write (const std::wstring& s)

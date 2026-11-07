@@ -8,6 +8,8 @@
   `library`, `scan`, `agents`, `hub`, `keycast`, the theme, `dev`, `q`); `:help` shows the
   screen's own keys and commands. `ctrl+q` quits there, as `esc` does.
 - The help shows the keys in yellow and what they do in plain text.
+- Plugins that print to stdout (Waves) no longer write over the screen: it goes to
+  `taw-stderr.log` with their stderr.
 - macOS: once taw handed the keyboard back to the terminal, clicks in other apps could read as
   clicks in a plugin window, so every app you clicked lost the keyboard to the terminal until
   the session closed.

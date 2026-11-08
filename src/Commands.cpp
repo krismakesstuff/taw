@@ -757,7 +757,7 @@ Result App::setLoop (const juce::String& argIn)
 Result App::executeAppLevel (const juce::String& line)
 {
     const auto trimmed = line.trim();
-    const auto needsSession = Result::fail (trimmed + L" needs a session open \x00b7 here: help, index, library, scan, agents, hub, keycast, dark|light|grey, dev, q");
+    const auto needsSession = Result::fail (trimmed + L" needs a session open \x00b7 here: help, import, index, library, scan, agents, hub, keycast, dark|light|grey, dev, q");
     Parsed p;
 
     // A track number ("3 v -6") fails to parse with no tracks: that's a session's command too.
@@ -774,6 +774,7 @@ Result App::executeAppLevel (const juce::String& line)
     if (v == "hub")                return hubCommand (p.rest.trim());
     if (v == "keycast")            return keycastCommand (p.rest.trim());
     if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
+    if (v == "import")             return importToNewSession (splitPaths (p.rest));
 
     if (v == "light" || v == "dark" || v == "grey" || v == "gray")
     {
@@ -792,6 +793,70 @@ Result App::executeAppLevel (const juce::String& line)
     }
 
     return needsSession;
+}
+
+// import on the session screen: always a new session. A Live set or Pro Tools session makes its
+// own; audio and MIDI files go into a new empty one named after the first file (dated, as new
+// sessions are, and never one that's already there), which opens with them coming in.
+Result App::importToNewSession (const juce::StringArray& paths)
+{
+    if (paths.isEmpty())
+#if JUCE_WINDOWS
+        return Result::fail (L"import what? import D:\\stems\\kick.wav \x00b7 a Live set (.als) or Pro Tools session (.ptx) makes a session of its own");
+#else
+        return Result::fail (L"import what? import ~/stems/kick.wav \x00b7 a Live set (.als) or Pro Tools session (.ptx) makes a session of its own");
+#endif
+
+    if (opening != nullptr)
+        return Result::fail (L"a session is opening \x00b7 try again when it's up");
+
+    juce::StringArray resolved, notFound;
+
+    for (const auto& path : paths)
+    {
+        const auto f = Import::resolve (path, juce::File::getCurrentWorkingDirectory());
+
+        if (f.existsAsFile())
+            resolved.add (f.getFullPathName());
+        else
+            notFound.add (path.unquoted());
+    }
+
+    if (! notFound.isEmpty())
+        return Result::fail ("not found: " + notFound.joinIntoString (", "));
+
+    for (const auto& path : resolved)
+        if (const juce::File f (path); f.hasFileExtension (".als") || f.hasFileExtension (".ptx"))
+        {
+            if (resolved.size() > 1)
+                return Result::fail (juce::String (f.hasFileExtension (".als") ? "a Live set" : "a Pro Tools session")
+                                     + " makes a session of its own: import it alone");
+
+            return f.hasFileExtension (".als") ? importAbletonSet (f) : importProToolsSession (f);
+        }
+
+    // A name for the new session that isn't taken, so this never imports into one already there.
+    const auto base = juce::File (resolved[0]).getFileNameWithoutExtension().trim();
+    const auto first = dateSessionNames ? datedName (base.isNotEmpty() ? base : juce::String ("import")) : base;
+    auto name = first;
+
+    for (int n = 2; newSessionParent.getChildFile (juce::File::createLegalFileName (name)).exists(); ++n)
+        name = first + " " + juce::String (n);
+
+    // As named here: createSession would date it again ("kick 11.07.26 2 11.07.26").
+    newSessionName = name;
+    const bool dated = std::exchange (dateSessionNames, false);
+    const auto made = createSession (Template { "empty", {} });
+    dateSessionNames = dated;
+
+    if (! made.ok)
+        return made;
+
+    if (auto r = startImport (resolved); ! r.ok)
+        return Result::fail ("made " + session->name() + L" \x00b7 but " + r.message);
+
+    return Result::good ("new session " + session->name() + L" \x00b7 importing " + juce::String (resolved.size()) + " file"
+                         + (resolved.size() == 1 ? "" : "s"));
 }
 
 Result App::execute (const juce::String& line)

@@ -1,5 +1,6 @@
 ﻿#include "App.h"
 #include "AlsImport.h"
+#include "PtImport.h"
 #include "Safety.h"
 #include "Timing.h"
 
@@ -2162,10 +2163,42 @@ Result App::importAbletonSet (const juce::File& als)
     if (! writeAbletonSession (set, dir, rate, error))
         return Result::fail (error);
 
-    const auto summary = "imported " + als.getFileName() + " as " + dir.getFileName()
-                         + (set.report.isEmpty() ? juce::String (L" \x00b7 everything came across")
-                                                 : L" \x00b7 " + juce::String (set.report.size()) + L" notes in import-report.txt (what didn't come across)");
+    return openImported (dir, "imported " + als.getFileName() + " as " + dir.getFileName()
+                                  + (set.report.isEmpty() ? juce::String (L" \x00b7 everything came across")
+                                                          : L" \x00b7 " + juce::String (set.report.size()) + L" notes in import-report.txt (what didn't come across)"));
+}
 
+// import session.ptx: the same, from Pro Tools (experimental). The new session runs at the Pro
+// Tools session's rate.
+Result App::importProToolsSession (const juce::File& ptx)
+{
+    if (bounce != nullptr || recording)
+        return Result::fail ("stop recording or bouncing first");
+
+    const auto pts = readProToolsSession (ptx);
+
+    if (pts.error.isNotEmpty())
+        return Result::fail (pts.error);
+
+    const auto parent = session != nullptr ? session->folder().getParentDirectory() : newSessionParent;
+    const auto base = juce::File::createLegalFileName (ptx.getFileNameWithoutExtension());
+    auto dir = parent.getChildFile (base);
+
+    for (int n = 2; dir.exists(); ++n)
+        dir = parent.getChildFile (base + " " + juce::String (n));
+
+    juce::String error;
+
+    if (! writeProToolsSession (pts, dir, error))
+        return Result::fail (error);
+
+    return openImported (dir, "imported " + ptx.getFileName() + " as " + dir.getFileName() + L" \x00b7 "
+                                  + juce::String (pts.report.size()) + L" notes in import-report.txt (what didn't come across)");
+}
+
+// A session just made by an import: opened, closing this one first if there is one.
+Result App::openImported (const juce::File& dir, const juce::String& summary)
+{
     if (session == nullptr)
     {
         startOpening (dir);
@@ -2207,6 +2240,8 @@ Result App::startImport (const juce::StringArray& paths, int targetTrack, Import
     for (const auto& path : paths)
         if (const auto f = juce::File::getCurrentWorkingDirectory().getChildFile (path.unquoted()); f.hasFileExtension (".als"))
             return paths.size() == 1 ? importAbletonSet (f) : Result::fail ("import a Live set on its own: it makes a new session");
+        else if (f.hasFileExtension (".ptx"))
+            return paths.size() == 1 ? importProToolsSession (f) : Result::fail ("import a Pro Tools session on its own: it makes a new session");
 
     // MIDI files become instrument tracks straight away; the rest is audio for the importer.
     juce::StringArray audioPaths;

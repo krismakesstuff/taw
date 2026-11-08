@@ -156,6 +156,7 @@ public:
     // The commands that need no session (settings for every session, the sample library,
     // plugins, agents, the hub): what the session screen's command line runs.
     Result executeAppLevel (const juce::String& line);
+    Result importToNewSession (const juce::StringArray& paths); // the session screen's import
 
     // Agents in the open session (AgentEdits.cpp, docs/plan-taw-mcp.md): taw listens on a local
     // socket for taw --mcp, and runs the agents' tool calls here, on the message thread, one at a
@@ -361,6 +362,8 @@ public:
     void startOpening (const juce::File& dir);
     // import set.als: a new session from an Ableton Live set, beside this one, then opened.
     Result importAbletonSet (const juce::File& als);
+    Result importProToolsSession (const juce::File& ptx); // experimental
+    Result openImported (const juce::File& dir, const juce::String& summary);
     juce::File openAfterClose;      // closing, then opening this (the session an import made)
     juce::String openAfterCloseNote; // ...and what to say when it does
     void stepOpening();

@@ -1,5 +1,6 @@
 ﻿#include "App.h"
 #include "AlsImport.h"
+#include "PtImport.h"
 #include "Bounce.h"
 #include "Import.h"
 #include "Library.h"
@@ -695,6 +696,33 @@ int main (int argc, char** argv)
         return 0;
     }
 
+    // taw --ptimport <session.ptx> <new session folder>   a Pro Tools session into a taw session
+    // (experimental; no device). Prints the report.
+    if (args[0] == "--ptimport" && args.size() >= 3)
+    {
+        const auto cwd = juce::File::getCurrentWorkingDirectory();
+        const auto pts = taw::readProToolsSession (cwd.getChildFile (args[1]));
+
+        if (pts.error.isNotEmpty())
+        {
+            std::printf ("%s\n", pts.error.toRawUTF8());
+            return 1;
+        }
+
+        juce::String error;
+
+        if (! taw::writeProToolsSession (pts, cwd.getChildFile (args[2]), error))
+        {
+            std::printf ("%s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        for (const auto& line : pts.report)
+            std::printf ("%s\n", line.toRawUTF8());
+
+        return 0;
+    }
+
     // taw --bouncetest <folder>   render a synthetic two-track mix to WAV and MP3 (no device needed)
     if (args[0] == "--bouncetest")
     {
@@ -1344,6 +1372,33 @@ int main (int argc, char** argv)
         check (app->helpVisible, ":? opens it too");
         type ("?");
         check (! app->helpVisible, "? closes it");
+
+        // import: a file that isn't there says so and stays here; one that is makes a new session
+        // named after it (never one already there) and comes in on a track of its own.
+        app->newSessionParent = scratch;
+        const auto missing = run ("import " + scratch.getChildFile ("nope.wav").getFullPathName());
+        std::printf ("       %s\n", missing.toRawUTF8());
+        check (app->messageIsError && missing.contains ("not found") && app->session == nullptr, ":import of a missing file says so, stays on the screen");
+        scratch.getChildFile (app->dateSessionNames ? taw::App::datedName ("kick") : juce::String ("kick")).createDirectory(); // taken
+        const auto imported = run ("import " + samples.getChildFile ("kick.wav").getFullPathName().replace (" ", "\\ "));
+        std::printf ("       %s\n", imported.toRawUTF8());
+
+        while (app->hasBackgroundWork())
+            app->pumpBackgroundWork();
+
+        check (app->session != nullptr && app->session->name().startsWith ("kick") && app->session->name().endsWith (" 2"),
+               ":import <file> makes a new session named after it, not the one already there");
+        check (app->session != nullptr && app->session->numTracks() == 1 && taw::Session::clips (app->session->track (0)).size() == 1,
+               "the file came in on a track");
+        app->requestClose (false);
+
+        if (app->closePrompt.has_value())
+            press (taw::Key::Char, 'n'); // unsaved (the import): don't save
+
+        while (app->closing != nullptr)
+            app->stepClosing();
+
+        check (app->session == nullptr, "closed back to the session screen");
 
         // ctrl+q quits from the screen, with the command line open too.
         type (":ind");

@@ -55,6 +55,7 @@ target_sources(taw PRIVATE
     src/Routing.cpp
     src/Inserts.cpp
     src/AlsImport.cpp
+    src/PtImport.cpp
     src/SessionScreen.cpp
     src/RenderPool.cpp
     src/SystemStats.cpp
@@ -66,6 +67,11 @@ target_sources(taw PRIVATE
     src/Plugins.cpp
     src/Ui.cpp
     src/Video.cpp)
+
+# ptformat (LGPL-2.1+, from Ardour): reads Pro Tools sessions for import x.ptx. Vendored with
+# taw's small changes marked "taw"; see third_party/ptformat/README.md.
+target_sources(taw PRIVATE third_party/ptformat/ptformat.cc)
+target_include_directories(taw SYSTEM PRIVATE third_party/ptformat) # its warnings aren't ours
 
 target_compile_definitions(taw PRIVATE
     JUCE_WEB_BROWSER=0

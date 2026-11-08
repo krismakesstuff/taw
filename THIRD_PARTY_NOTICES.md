@@ -8,6 +8,7 @@ built with the following, each under its own licence.
 | [JUCE](https://juce.com) 9 | audio, plugins, windows, file formats | AGPLv3 (JUCE's open-source option) | every build |
 | [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) (through JUCE) | hosting VST3 plugins | MIT | every build |
 | [Steinberg ASIO SDK](https://www.steinberg.net/developers/) 2.3.4 | ASIO audio devices | GPLv3 (the SDK's open-source option) | Windows |
+| [ptformat](https://github.com/zamaudio/ptformat) (vendored in `third_party/ptformat`, with small changes) | reading Pro Tools sessions (`import x.ptx`) | LGPL-2.1-or-later | every build |
 | [FFmpeg](https://ffmpeg.org) 9.0.2, [Gyan Doshi's shared "full" build](https://github.com/GyanD/codexffmpeg) | video (decoding, `bv` encoding) | GPLv3 (this build enables GPL components) | Windows, as DLLs next to taw.exe |
 
 JUCE itself contains third-party code (FLAC, Ogg Vorbis, zlib, libpng, libjpeg and others),

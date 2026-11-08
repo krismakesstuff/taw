@@ -1070,6 +1070,8 @@ struct AgentTools
         // A Live set comes in as a session of its own, closing this one.
         if (shape.verb == "import" && shape.args.joinIntoString (" ").containsIgnoreCase (".als"))
             return Answer::fail ("invalid", "importing a Live set closes this session: the user does that (or new_session for a session of your own)");
+        if (shape.verb == "import" && shape.args.joinIntoString (" ").containsIgnoreCase (".ptx"))
+            return Answer::fail ("invalid", "importing a Pro Tools session closes this session: the user does that");
 
         if ((shape.verb == "inst" || shape.verb == "fx" || shape.verb == "ins") && shape.args.isEmpty())
             return Answer::fail ("invalid", shape.verb + " alone opens a picker for the user: name the plugin (" + shape.verb + " vital)");

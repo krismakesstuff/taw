@@ -1,5 +1,7 @@
 #include "Import.h"
 
+#include <thread>
+
 #if JUCE_WINDOWS
  #define WIN32_LEAN_AND_MEAN
  #ifndef NOMINMAX
@@ -148,6 +150,15 @@ bool readWithSystemDecoder (const juce::File& file, juce::AudioBuffer<float>& ou
 } // namespace
 
 static const juce::StringArray audioExtensions { ".wav", ".aif", ".aiff", ".flac", ".ogg", ".mp3", ".m4a", ".aac", ".wma" };
+
+bool Import::decode (const juce::File& file, juce::AudioBuffer<float>& out, double& rate, juce::String& error)
+{
+    // On a thread of its own: Media Foundation wants COM multithreaded, which the main thread
+    // (JUCE's, apartment-threaded) can't give it.
+    bool ok = false;
+    std::thread ([&] { ok = readWithSystemDecoder (file, out, rate, error); }).join();
+    return ok;
+}
 
 Import::Import (std::vector<juce::File> sources, juce::File folder, double rate)
     : juce::Thread ("taw import"), audioFolder (std::move (folder)), sessionRate (rate)

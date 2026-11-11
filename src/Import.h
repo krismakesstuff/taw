@@ -38,6 +38,10 @@ public:
                                            juce::StringArray& notFound);
     static bool isAudioFile (const juce::File&);
 
+    // Decodes a file JUCE's own readers can't open (m4a/aac on Windows; anything ffmpeg reads on
+    // macOS), whole, up to two channels. error is set when there's something to tell the user.
+    static bool decode (const juce::File&, juce::AudioBuffer<float>& out, double& rate, juce::String& error);
+
     // Finds the file a path means even when its text lost invisible characters: names copied
     // from Mac or SMB shares map illegal characters (e.g. a trailing space) into the Unicode
     // private use area, and console drops can't deliver those. Returns a nonexistent File if

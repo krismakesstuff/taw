@@ -4,6 +4,7 @@
 // each sorted into a drum by where its energy sits.
 
 #include "Hum.h"
+#include "Import.h"
 
 #include <juce_dsp/juce_dsp.h>
 
@@ -565,7 +566,9 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         const bool held = std::any_of (heard.notes.begin(), heard.notes.end(),
                                        [time] (const HumNote& note) { return time > note.start + 0.03 && time < note.start + note.length; });
 
-        if (! held && (onsets.empty() || onset - onsets.back() > nearby * hop))
+        // And not within 80 ms of the last: a mouth's drum is a consonant and then its body, one
+        // hit that can jump twice.
+        if (! held && (onsets.empty() || onset - onsets.back() > (int) (0.08 * rate)))
             onsets.push_back (onset);
     }
 
@@ -677,24 +680,29 @@ Heard hear (const float* x, int n, double rate)
 
 std::optional<Heard> hear (const juce::File& file, juce::AudioFormatManager& formats)
 {
-    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+    juce::AudioBuffer<float> buffer;
+    double rate = 0.0;
 
-    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
-        return {};
+    if (std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (file) };
+        reader != nullptr && reader->sampleRate > 0.0 && reader->lengthInSamples > 0)
+    {
+        // A part, not a song: ten minutes at most.
+        rate = reader->sampleRate;
+        const int length = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (600.0 * rate));
+        buffer.setSize ((int) std::max (1u, std::min (2u, reader->numChannels)), length);
+        reader->read (&buffer, 0, length, 0, true, buffer.getNumChannels() > 1);
+    }
+    else if (juce::String error; ! Import::decode (file, buffer, rate, error) || rate <= 0.0)
+        return {}; // a phone's m4a goes through the system's decoder
 
-    // A part, not a song: ten minutes at most.
-    const int n = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (600.0 * reader->sampleRate));
-    const int channels = (int) std::max (1u, std::min (2u, reader->numChannels));
-    juce::AudioBuffer<float> buffer (channels, n);
-    reader->read (&buffer, 0, n, 0, true, channels > 1);
-
+    const int n = buffer.getNumSamples(), channels = buffer.getNumChannels();
     std::vector<float> x ((size_t) n, 0.0f);
 
     for (int c = 0; c < channels; ++c)
         for (int i = 0; i < n; ++i)
             x[(size_t) i] += buffer.getSample (c, i) / (float) channels;
 
-    return hear (x.data(), n, reader->sampleRate);
+    return hear (x.data(), n, rate);
 }
 
 double humBeat (double seconds, double bpm, double grid)

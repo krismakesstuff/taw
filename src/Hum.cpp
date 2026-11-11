@@ -1,0 +1,705 @@
+// Hearing a hummed, sung or beatboxed part. The melody: a pitch track (YIN's difference function,
+// several candidates a frame, the cheapest path through them) cut into notes where the pitch
+// moves, the voice stops or a note is struck again. The beat: onsets where the spectrum jumps,
+// each sorted into a drum by where its energy sits.
+
+#include "Hum.h"
+
+#include <juce_dsp/juce_dsp.h>
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+
+namespace taw
+{
+namespace
+{
+constexpr double hopSeconds = 0.01;                     // the pitch track's step
+constexpr double lowestHz = 60.0, highestHz = 1100.0;   // a voice, with room either side
+constexpr float gateDb = 40.0f;                         // this far under the loudest frame is silence
+constexpr float strikeDb = 6.0f;                        // a dip this deep and back is a new note
+constexpr float stepSemitones = 0.7f;                   // off the note by this much ...
+constexpr int stepFrames = 5;                           // ... for this long is the next note
+constexpr int shortFrames = 6;                          // shorter pieces join a neighbour (a scoop, a slide)
+constexpr float slideSemitones = 2.0f;                  // a piece whose pitch wanders more isn't a note
+
+const double twoPi = juce::MathConstants<double>::twoPi;
+
+double toDb (double gain) { return 20.0 * std::log10 (std::max (gain, 1.0e-6)); }
+
+// Every factor-th sample, after a low-pass that keeps what folds back out.
+std::vector<float> decimate (const float* x, int n, int factor)
+{
+    if (factor <= 1)
+        return { x, x + n };
+
+    const int half = 6 * factor;
+    const double cutoff = 0.4 / factor; // cycles a sample
+    std::vector<double> h ((size_t) (2 * half + 1));
+    double sum = 0.0;
+
+    for (int i = -half; i <= half; ++i)
+    {
+        const double t = twoPi * cutoff * i;
+        const double sinc = i == 0 ? 1.0 : std::sin (t) / t;
+        const double hann = 0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * i / (half + 1));
+        h[(size_t) (i + half)] = sinc * hann;
+        sum += sinc * hann;
+    }
+
+    std::vector<float> out ((size_t) (n / factor));
+
+    for (int m = 0; m < (int) out.size(); ++m)
+    {
+        const int centre = m * factor;
+        double s = 0.0;
+
+        for (int k = std::max (-half, -centre); k <= half && centre + k < n; ++k)
+            s += h[(size_t) (k + half)] * (double) x[centre + k];
+
+        out[(size_t) m] = (float) (s / sum);
+    }
+
+    return out;
+}
+
+struct PitchTrack
+{
+    double hop = hopSeconds;     // seconds a frame
+    std::vector<float> pitch;    // MIDI note with its fraction; 0 where nothing is sung
+    std::vector<float> levelDb;  // RMS around the frame
+    float gate = -100.0f;        // frames under this are silence
+};
+
+struct Candidate
+{
+    float pitch = 0.0f; // 0: nothing sung
+    float cost = 0.0f;  // how badly it fits this frame
+    float total = 0.0f; // the cheapest path that ends here
+    int from = 0;       // and where it came from in the frame before
+};
+
+PitchTrack trackPitch (const float* x, int n, double rate)
+{
+    // A voice's pitch is all under 1.1 kHz: at about 11 kHz there's a quarter of the work.
+    const int factor = std::max (1, (int) (rate / 11000.0));
+    auto low = decimate (x, n, factor);
+    const double r = rate / factor;
+
+    // Rumble and DC out (a 50 Hz high-pass): they tilt the difference function.
+    {
+        const float a = (float) (1.0 / (1.0 + twoPi * 50.0 / r));
+        float last = 0.0f, y = 0.0f;
+
+        for (auto& v : low)
+        {
+            y = a * (y + v - last);
+            last = v;
+            v = y;
+        }
+    }
+
+    const int hop = std::max (1, juce::roundToInt (r * hopSeconds));
+    const int tauMin = std::max (2, (int) (r / highestHz)), tauMax = (int) std::ceil (r / lowestHz);
+    const int span = 2 * tauMax;
+    const int frames = (int) low.size() / hop + 1;
+
+    // Each frame sits around its time: silence before the start and after the end.
+    std::vector<float> y ((size_t) (span / 2) + low.size() + (size_t) (span + tauMax + hop), 0.0f);
+    std::copy (low.begin(), low.end(), y.begin() + span / 2);
+
+    // YIN takes the first dip under a threshold. Here every threshold has a say (more for the
+    // usual ones), so a frame gives each dip a likelihood rather than one answer.
+    constexpr int numThresholds = 25;
+    std::array<double, numThresholds> weight {};
+    {
+        double sum = 0.0;
+
+        for (int k = 0; k < numThresholds; ++k)
+        {
+            const double s = 0.02 * (k + 1);
+            sum += weight[(size_t) k] = s * std::pow (1.0 - s, 7.0);
+        }
+
+        for (auto& w : weight)
+            w /= sum;
+    }
+
+    PitchTrack track;
+    track.hop = hop / r;
+    track.pitch.assign ((size_t) frames, 0.0f);
+    track.levelDb.assign ((size_t) frames, -120.0f);
+
+    std::vector<std::vector<Candidate>> lattice ((size_t) frames);
+    std::vector<double> d ((size_t) tauMax + 2);
+
+    for (int f = 0; f < frames; ++f)
+    {
+        const float* w = y.data() + (size_t) f * (size_t) hop;
+        double energy = 0.0;
+
+        for (int j = 0; j < span; ++j)
+            energy += (double) w[j] * (double) w[j];
+
+        track.levelDb[(size_t) f] = (float) toDb (std::sqrt (energy / span));
+
+        // The difference function, cumulative mean normalised.
+        d[0] = 1.0;
+        double running = 0.0;
+
+        for (int tau = 1; tau <= tauMax + 1; ++tau)
+        {
+            double s = 0.0;
+
+            for (int j = 0; j < span; ++j)
+            {
+                const double diff = (double) w[j] - (double) w[j + tau];
+                s += diff * diff;
+            }
+
+            running += s;
+            d[(size_t) tau] = running > 0.0 ? s * tau / running : 1.0;
+        }
+
+        auto& cands = lattice[(size_t) f];
+        cands.push_back ({});
+        double voiced = 0.0, lowestSoFar = 1.0e9;
+
+        for (int tau = tauMin; tau <= tauMax; ++tau)
+        {
+            const double here = d[(size_t) tau];
+
+            if (! (here < d[(size_t) tau - 1] && here <= d[(size_t) tau + 1]) || here >= lowestSoFar)
+                continue;
+
+            // The thresholds this dip is the first to get under.
+            double p = 0.0;
+
+            for (int k = 0; k < numThresholds; ++k)
+                if (const double s = 0.02 * (k + 1); s > here && s <= lowestSoFar)
+                    p += weight[(size_t) k];
+
+            lowestSoFar = here;
+
+            if (p <= 0.0)
+                continue;
+
+            double exact = tau;
+            const double before = d[(size_t) tau - 1], after = d[(size_t) tau + 1];
+
+            if (const double den = before - 2.0 * here + after; std::abs (den) > 1.0e-12)
+                exact += 0.5 * (before - after) / den;
+
+            Candidate c;
+            c.pitch = (float) (69.0 + 12.0 * std::log2 (r / exact / 440.0));
+            c.cost = (float) -std::log (std::max (p, 1.0e-4));
+            cands.push_back (c);
+            voiced += p;
+        }
+
+        cands[0].cost = (float) -std::log (std::max (1.0 - voiced, 1.0e-4));
+    }
+
+    track.gate = std::max (-60.0f,*std::max_element (track.levelDb.begin(), track.levelDb.end()) - gateDb);
+
+    for (int f = 0; f < frames; ++f)
+        if (track.levelDb[(size_t) f] < track.gate)
+        {
+            lattice[(size_t) f].resize (1);
+            lattice[(size_t) f][0].cost = 0.0f;
+        }
+
+    // The cheapest path: a pitch that stays put costs nothing, a leap costs up to an octave's
+    // worth, and starting or stopping costs more than a frame or two of doubt.
+    auto move = [] (const Candidate& a, const Candidate& b)
+    {
+        const bool sa = a.pitch > 0.0f, sb = b.pitch > 0.0f;
+
+        if (sa && sb)
+            return 0.35f * std::min (12.0f, std::abs (a.pitch - b.pitch));
+
+        return sa == sb ? 0.0f : 2.5f;
+    };
+
+    for (auto& c : lattice[0])
+        c.total = c.cost;
+
+    for (int f = 1; f < frames; ++f)
+        for (auto& c : lattice[(size_t) f])
+        {
+            const auto& prev = lattice[(size_t) f - 1];
+            float best = 1.0e30f;
+
+            for (int i = 0; i < (int) prev.size(); ++i)
+                if (const float t = prev[(size_t) i].total + move (prev[(size_t) i], c); t < best)
+                {
+                    best = t;
+                    c.from = i;
+                }
+
+            c.total = best + c.cost;
+        }
+
+    int at = 0;
+
+    for (int i = 1; i < (int) lattice.back().size(); ++i)
+        if (lattice.back()[(size_t) i].total < lattice.back()[(size_t) at].total)
+            at = i;
+
+    for (int f = frames - 1; f >= 0; --f)
+    {
+        track.pitch[(size_t) f] = lattice[(size_t) f][(size_t) at].pitch;
+        at = lattice[(size_t) f][(size_t) at].from;
+    }
+
+    return track;
+}
+
+float median (const float* v, int n)
+{
+    std::vector<float> s (v, v + n);
+    std::nth_element (s.begin(), s.begin() + n / 2, s.end());
+    return s[(size_t) n / 2];
+}
+
+struct Segment
+{
+    int from = 0, to = 0; // frames
+    bool struck = false;  // starts after a silence or a dip (not just a change of pitch)
+    float pitch = 0.0f;
+};
+
+void findNotes (PitchTrack& track, Heard& heard)
+{
+    const int frames = (int) track.pitch.size();
+    auto& pitch = track.pitch;
+    const auto& level = track.levelDb;
+
+    // The singer's tuning: where the sung pitches sit between the keys, on average (round the
+    // circle of one semitone). Taken out, so someone 40 cents flat lands on the notes they meant.
+    {
+        double c = 0.0, s = 0.0;
+
+        for (auto p : pitch)
+            if (p > 0.0f)
+            {
+                c += std::cos (twoPi * (double) p);
+                s += std::sin (twoPi * (double) p);
+            }
+
+        const double off = std::atan2 (s, c) / twoPi;
+        heard.tuningCents = 100.0 * off;
+
+        for (auto& p : pitch)
+            if (p > 0.0f)
+                p -= (float) off;
+    }
+
+    std::vector<Segment> segs;
+
+    for (int a = 0; a < frames;)
+    {
+        if (pitch[(size_t) a] <= 0.0f)
+        {
+            ++a;
+            continue;
+        }
+
+        int b = a;
+
+        while (b < frames && pitch[(size_t) b] > 0.0f)
+            ++b;
+
+        // Struck again on the same breath: the level dips and comes back.
+        std::vector<int> strikes { a };
+        float peak = level[(size_t) a], valley = peak;
+        int valleyAt = a;
+
+        for (int i = a + 1; i < b; ++i)
+        {
+            const float v = level[(size_t) i];
+
+            if (v < valley)
+            {
+                valley = v;
+                valleyAt = i;
+            }
+            else if (v - valley >= strikeDb && peak - valley >= strikeDb)
+            {
+                strikes.push_back (valleyAt);
+                peak = valley = v;
+                valleyAt = i;
+            }
+            else if (v > peak)
+            {
+                peak = valley = v;
+                valleyAt = i;
+            }
+        }
+
+        strikes.push_back (b);
+
+        // Within each, a new piece where the pitch leaves the note and stays away.
+        for (size_t k = 0; k + 1 < strikes.size(); ++k)
+        {
+            const int end = strikes[k + 1];
+            int start = strikes[k], away = 0;
+            bool struck = true, above = false;
+
+            for (int i = start + 1; i < end; ++i)
+            {
+                const int settled = i - away; // the frames before this are the note so far
+                const int back = std::max (start, settled - 30);
+                const float off = pitch[(size_t) i] - median (pitch.data() + back, settled - back);
+
+                if (std::abs (off) <= stepSemitones)
+                    away = 0;
+                else if (away > 0 && above == (off > 0.0f))
+                    ++away;
+                else
+                {
+                    away = 1;
+                    above = off > 0.0f;
+                }
+
+                if (away >= stepFrames)
+                {
+                    segs.push_back ({ start, settled, struck, 0.0f });
+                    start = settled;
+                    struck = false;
+                    away = 0;
+                }
+            }
+
+            segs.push_back ({ start, end, struck, 0.0f });
+        }
+
+        a = b;
+    }
+
+    // Short pieces are the way into a note (a scoop, a slide between two): they join the note
+    // after, or the one before; one on its own is a blip.
+    for (size_t i = 0; i < segs.size();)
+    {
+        const auto s = segs[i];
+
+        if (s.to - s.from >= shortFrames)
+        {
+            ++i;
+            continue;
+        }
+
+        if (i + 1 < segs.size() && segs[i + 1].from == s.to && ! segs[i + 1].struck)
+        {
+            segs[i + 1].from = s.from;
+            segs[i + 1].struck = s.struck;
+            segs.erase (segs.begin() + (std::ptrdiff_t) i);
+        }
+        else if (i > 0 && segs[i - 1].to == s.from && ! s.struck)
+        {
+            segs[i - 1].to = s.to;
+            segs.erase (segs.begin() + (std::ptrdiff_t) i);
+        }
+        else if (s.to - s.from < shortFrames - 1)
+            segs.erase (segs.begin() + (std::ptrdiff_t) i);
+        else
+            ++i;
+    }
+
+    for (auto& s : segs)
+        s.pitch = median (pitch.data() + s.from, s.to - s.from);
+
+    // Pieces that came out as the same note with nothing struck between them are one note.
+    for (size_t i = 0; i + 1 < segs.size();)
+    {
+        auto& s = segs[i];
+        const auto& next = segs[i + 1];
+
+        if (next.from == s.to && ! next.struck && juce::roundToInt (next.pitch) == juce::roundToInt (s.pitch))
+        {
+            s.to = next.to;
+            s.pitch = median (pitch.data() + s.from, s.to - s.from);
+            segs.erase (segs.begin() + (std::ptrdiff_t) i + 1);
+        }
+        else
+            ++i;
+    }
+
+    int sounding = 0, held = 0;
+
+    for (auto l : level)
+        sounding += l >= track.gate ? 1 : 0;
+
+    for (const auto& s : segs)
+    {
+        // A pitch that never settles (a kick's drop, a siren) isn't a note.
+        std::vector<float> sorted (pitch.begin() + s.from, pitch.begin() + s.to);
+        std::sort (sorted.begin(), sorted.end());
+
+        if (sorted[sorted.size() * 3 / 4] - sorted[sorted.size() / 4] > slideSemitones)
+            continue;
+
+        HumNote note;
+        note.start = s.from * track.hop;
+        note.length = (s.to - s.from) * track.hop;
+        note.pitch = juce::jlimit (0, 127, juce::roundToInt (s.pitch));
+        note.cents = 100.0 * ((double) s.pitch - note.pitch);
+        note.levelDb = *std::max_element (level.begin() + s.from, level.begin() + s.to);
+        heard.notes.push_back (note);
+        held += s.to - s.from;
+    }
+
+    heard.pitched = sounding > 0 ? std::min (1.0, (double) held / sounding) : 0.0;
+}
+
+void findHits (const float* x, int n, double rate, float peak, Heard& heard)
+{
+    // 23 ms frames, an eighth apart; each sits around its time.
+    const int order = juce::jlimit (8, 13, juce::roundToInt (std::log2 (rate * 0.023)));
+    const int size = 1 << order, hop = size / 8, bins = size / 2 + 1;
+    const int frames = n / hop + 1;
+    const double binHz = rate / size;
+
+    juce::dsp::FFT fft (order);
+    std::vector<float> window ((size_t) size), frame ((size_t) size * 2), last ((size_t) bins, 0.0f);
+
+    for (int i = 0; i < size; ++i)
+        window[(size_t) i] = 0.5f - 0.5f * std::cos (juce::MathConstants<float>::twoPi * (float) i / (float) (size - 1));
+
+    auto spectrum = [&] (int start) // magnitudes of the frame from this sample, in frame[0..bins)
+    {
+        std::fill (frame.begin(), frame.end(), 0.0f);
+
+        for (int i = std::max (0, -start); i < size && start + i < n; ++i)
+            frame[(size_t) i] = x[start + i] * window[(size_t) i];
+
+        fft.performFrequencyOnlyForwardTransform (frame.data(), true);
+    };
+
+    // How much louder each frame got than the one before, bin by bin, on a log scale (so a
+    // quiet hit after a loud one still shows).
+    const float scale = 100.0f / (peak * (float) size * 0.25f);
+    std::vector<float> flux ((size_t) frames, 0.0f);
+
+    for (int f = 0; f < frames; ++f)
+    {
+        spectrum (f * hop - size / 2);
+        float rise = 0.0f;
+
+        for (int k = 1; k < bins; ++k)
+        {
+            const float l = std::log1p (frame[(size_t) k] * scale);
+            rise += std::max (0.0f, l - last[(size_t) k]);
+            last[(size_t) k] = l;
+        }
+
+        flux[(size_t) f] = f > 0 ? rise : 0.0f;
+    }
+
+    const float top = *std::max_element (flux.begin(), flux.end());
+
+    if (top <= 0.0f)
+        return;
+
+    // An onset: the biggest jump for 30 ms either side, well over what's around it.
+    const double frameSeconds = hop / rate;
+    const int nearby = std::max (1, juce::roundToInt (0.03 / frameSeconds)), around = juce::roundToInt (0.1 / frameSeconds);
+    const int block = std::max (1, (int) (rate / 1000.0)); // 1 ms
+    std::vector<int> onsets;
+
+    for (int f = 1; f < frames; ++f)
+    {
+        const float v = flux[(size_t) f];
+
+        if (v < 0.1f * top)
+            continue;
+
+        bool biggest = true;
+
+        for (int g = std::max (0, f - nearby); g <= std::min (frames - 1, f + nearby) && biggest; ++g)
+            biggest = g == f || (g < f ? flux[(size_t) g] < v : flux[(size_t) g] <= v);
+
+        if (! biggest)
+            continue;
+
+        double mean = 0.0;
+        const int lo = std::max (0, f - around), hi = std::min (frames - 1, f + around);
+
+        for (int g = lo; g <= hi; ++g)
+            mean += flux[(size_t) g];
+
+        if (v < 1.5 * mean / (hi - lo + 1))
+            continue;
+
+        // Where in the frame it starts: the first millisecond well over what came before.
+        auto energy = [&] (int from, int len)
+        {
+            double e = 0.0;
+
+            for (int i = std::max (0, from); i < std::min (n, from + len); ++i)
+                e += (double) x[i] * (double) x[i];
+
+            return e / len;
+        };
+
+        const int from = f * hop - size / 2, to = std::min (n, f * hop + size / 2);
+        const double before = energy (from - 5 * block, 5 * block);
+        double loudest = 0.0;
+
+        for (int i = from; i < to; i += block)
+            loudest = std::max (loudest, energy (i, block));
+
+        int onset = juce::jlimit (0, n - 1, f * hop);
+
+        for (int i = from; i < to; i += block)
+            if (const double e = energy (i, block); e > 4.0 * before && e >= 0.1 * loudest)
+            {
+                onset = std::max (0, i);
+                break;
+            }
+
+        // Not inside a held note: a voice's vibrato moves its harmonics from bin to bin, which
+        // looks like one jump after another.
+        const double time = onset / rate;
+        const bool held = std::any_of (heard.notes.begin(), heard.notes.end(),
+                                       [time] (const HumNote& note) { return time > note.start + 0.03 && time < note.start + note.length; });
+
+        if (! held && (onsets.empty() || onset - onsets.back() > nearby * hop))
+            onsets.push_back (onset);
+    }
+
+    for (size_t h = 0; h < onsets.size(); ++h)
+    {
+        const int onset = onsets[h];
+        const int end = std::min ({ n, onset + (int) (0.2 * rate), h + 1 < onsets.size() ? onsets[h + 1] : n });
+
+        // Its spectrum, over its first 100 ms.
+        std::vector<double> power ((size_t) bins, 0.0);
+
+        for (int start = onset - size / 4; start == onset - size / 4 || start < std::min (end, onset + (int) (0.1 * rate)) - size / 2; start += size / 2)
+        {
+            spectrum (start);
+
+            for (int k = 0; k < bins; ++k)
+                power[(size_t) k] += (double) frame[(size_t) k] * (double) frame[(size_t) k];
+        }
+
+        double total = 0.0, weighted = 0.0, low = 0.0, high = 0.0, logSum = 0.0;
+        int counted = 0;
+
+        for (int k = 1; k < bins; ++k)
+        {
+            const double f = k * binHz, p = power[(size_t) k];
+
+            if (f < 40.0 || f > 16000.0)
+                continue;
+
+            total += p;
+            weighted += f * p;
+            low += f < 300.0 ? p : 0.0;
+            high += f > 5000.0 ? p : 0.0;
+            logSum += std::log (p + 1.0e-12);
+            ++counted;
+        }
+
+        if (total <= 0.0 || counted == 0)
+            continue;
+
+        HumHit hit;
+        hit.time = onset / rate;
+        hit.centroidHz = weighted / total;
+        hit.lowShare = low / total;
+        hit.highShare = high / total;
+        hit.flatness = std::exp (logSum / counted) / (total / counted + 1.0e-12);
+
+        // Level, and how long until it's 20 dB down (1 ms peaks).
+        float loud = 0.0f;
+        int loudAt = onset;
+
+        for (int i = onset; i < end; ++i)
+            if (std::abs (x[i]) > loud)
+            {
+                loud = std::abs (x[i]);
+                loudAt = i;
+            }
+
+        hit.levelDb = toDb (loud);
+        int quiet = end;
+
+        for (int i = loudAt; i + block <= end && quiet == end; i += block)
+        {
+            float most = 0.0f;
+
+            for (int j = i; j < i + block; ++j)
+                most = std::max (most, std::abs (x[j]));
+
+            if (most < 0.1f * loud)
+                quiet = i;
+        }
+
+        hit.decayMs = 1000.0 * (quiet - loudAt) / rate;
+
+        // Which drum: mostly lows is a kick, mostly highs a hat (open if it rings), the rest a snare.
+        if (hit.lowShare >= 0.4 || hit.centroidHz < 700.0)
+            hit.kind = "kick";
+        else if (hit.highShare >= 0.5 || hit.centroidHz > 5000.0)
+            hit.kind = hit.decayMs > 120.0 ? "open hat" : "hihat";
+        else
+            hit.kind = "snare";
+
+        heard.hits.push_back (hit);
+    }
+}
+} // namespace
+
+Heard hear (const float* x, int n, double rate)
+{
+    Heard heard;
+
+    if (x == nullptr || n <= 0 || rate <= 0.0)
+        return heard;
+
+    heard.seconds = n / rate;
+    float peak = 0.0f;
+
+    for (int i = 0; i < n; ++i)
+        peak = std::max (peak, std::abs (x[i]));
+
+    if (peak < 1.0e-4f)
+        return heard; // silence
+
+    auto track = trackPitch (x, n, rate);
+    findNotes (track, heard);
+    findHits (x, n, rate, peak, heard);
+    return heard;
+}
+
+std::optional<Heard> hear (const juce::File& file, juce::AudioFormatManager& formats)
+{
+    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+
+    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+        return {};
+
+    // A part, not a song: ten minutes at most.
+    const int n = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (600.0 * reader->sampleRate));
+    const int channels = (int) std::max (1u, std::min (2u, reader->numChannels));
+    juce::AudioBuffer<float> buffer (channels, n);
+    reader->read (&buffer, 0, n, 0, true, channels > 1);
+
+    std::vector<float> x ((size_t) n, 0.0f);
+
+    for (int c = 0; c < channels; ++c)
+        for (int i = 0; i < n; ++i)
+            x[(size_t) i] += buffer.getSample (c, i) / (float) channels;
+
+    return hear (x.data(), n, reader->sampleRate);
+}
+
+double humBeat (double seconds, double bpm, double grid)
+{
+    const double beat = seconds * bpm / 60.0;
+    return grid > 0.0 ? std::round (beat / grid) * grid : beat;
+}
+} // namespace taw

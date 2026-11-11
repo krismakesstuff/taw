@@ -60,6 +60,7 @@ target_sources(taw PRIVATE
     src/SystemStats.cpp
     src/AutomationEdit.cpp
     src/HubPanel.cpp
+    src/Hum.cpp
     src/TrackMenu.cpp
     src/Midi.cpp
     src/MidiEditor.cpp

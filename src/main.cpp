@@ -1,6 +1,7 @@
 ﻿#include "App.h"
 #include "AlsImport.h"
 #include "Bounce.h"
+#include "Hum.h"
 #include "Import.h"
 #include "Library.h"
 #include "Plugins.h"
@@ -3930,6 +3931,217 @@ int main (int argc, char** argv)
         }
 
         return 0;
+    }
+
+    // What taw --hum and --humtest print: the notes and the hits, in beats too when there's a tempo.
+    auto printHeard = [] (const taw::Heard& h, double bpm, double grid)
+    {
+        std::printf ("%.2f s \xc2\xb7 %s (%.0f%% held notes) \xc2\xb7 tuning %+.0f cents\n", h.seconds, h.sung() ? "sung" : "a beat",
+                     h.pitched * 100.0, h.tuningCents);
+        std::printf ("notes: %d\n", (int) h.notes.size());
+
+        for (const auto& n : h.notes)
+        {
+            std::printf ("  %7.3f s  %5.3f s  %-4s %3d  %+4.0f c  %6.1f dB", n.start, n.length,
+                         juce::MidiMessage::getMidiNoteName (n.pitch, true, true, 4).toRawUTF8(), n.pitch, n.cents, n.levelDb);
+
+            if (bpm > 0.0)
+                std::printf ("   beat %6.2f  len %5.2f", taw::humBeat (n.start, bpm, grid), std::max (grid, taw::humBeat (n.length, bpm, grid)));
+
+            std::printf ("\n");
+        }
+
+        std::printf ("hits: %d\n", (int) h.hits.size());
+
+        for (const auto& hit : h.hits)
+        {
+            std::printf ("  %7.3f s  %-8s  %6.1f dB  bright %5.0f Hz  low %.2f  high %.2f  noise %.2f  decay %4.0f ms", hit.time,
+                         hit.kind.toRawUTF8(), hit.levelDb, hit.centroidHz, hit.lowShare, hit.highShare, hit.flatness, hit.decayMs);
+
+            if (bpm > 0.0)
+                std::printf ("   beat %6.2f", taw::humBeat (hit.time, bpm, grid));
+
+            std::printf ("\n");
+        }
+    };
+
+    // taw --hum <file> [bpm [grid]]   hear a hummed, sung or beatboxed recording: its notes and its
+    // hits. With a tempo, in beats too, on a grid (0.25 of a beat unless given; 0 for none).
+    if (args[0] == "--hum" && args.size() >= 2)
+    {
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        const auto started = juce::Time::getMillisecondCounterHiRes();
+        const auto heard = taw::hear (juce::File::getCurrentWorkingDirectory().getChildFile (args[1]), fm);
+
+        if (! heard)
+        {
+            std::printf ("can't read %s\n", args[1].toRawUTF8());
+            return 1;
+        }
+
+        printHeard (*heard, args[2].getDoubleValue(), args.size() > 3 ? args[3].getDoubleValue() : 0.25);
+        std::printf ("(%.0f ms)\n", juce::Time::getMillisecondCounterHiRes() - started);
+        return 0;
+    }
+
+    // taw --humtest [folder]   a melody and a beat made by formula (a voice-like tone: weak
+    // fundamental, scoops, vibrato, 25 cents flat; a kick, snare and hats), heard back and checked
+    // against what was played. With a folder, the two are left there as wav files to listen to.
+    if (args[0] == "--humtest")
+    {
+        const double rate = 44100.0, twoPi = juce::MathConstants<double>::twoPi;
+        int failures = 0;
+
+        auto check = [&] (const juce::String& what, bool ok)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what.toRawUTF8());
+            failures += ok ? 0 : 1;
+        };
+
+        juce::Random noise (1);
+
+        auto keep = [&] (const char* name, const std::vector<float>& x)
+        {
+            if (args.size() < 2)
+                return;
+
+            const auto folder = juce::File::getCurrentWorkingDirectory().getChildFile (args[1]);
+            folder.createDirectory();
+            const auto file = folder.getChildFile (name);
+            file.deleteFile();
+            std::unique_ptr<juce::OutputStream> stream = file.createOutputStream();
+
+            if (auto w = juce::WavAudioFormat().createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (rate).withNumChannels (1).withBitsPerSample (24)))
+            {
+                const float* data = x.data();
+                w->writeFromFloatArrays (&data, 1, (int) x.size());
+            }
+        };
+
+        // The melody. from and to: the level a note comes from and leaves to (0 silence, 1 straight
+        // from or into its neighbour, between: struck again without a breath).
+        struct Sung { int pitch; double start, length, from, to; };
+        const std::vector<Sung> melody {
+            { 40, 0.50, 0.40, 0.0, 0.0 },                               // E2, low
+            { 45, 1.00, 0.40, 0.0, 0.0 }, { 45, 1.44, 0.40, 0.0, 0.0 }, // the same note twice, 40 ms apart
+            { 48, 2.00, 0.50, 0.0, 1.0 }, { 60, 2.50, 0.50, 1.0, 0.0 }, // up an octave without a gap
+            { 55, 3.20, 0.40, 0.0, 0.1 }, { 55, 3.60, 0.40, 0.1, 0.0 }, // struck again on one breath
+            { 72, 4.20, 0.30, 0.0, 0.0 },                               // C5, high
+            { 50, 4.70, 0.12, 0.0, 0.0 } };                             // short
+        {
+            const double harmonics[] = { 0.2, 1.0, 0.7, 0.5, 0.3, 0.2 }, ramp = 0.03;
+            std::vector<float> x ((size_t) (5.2 * rate), 0.0f);
+            double phase = 0.0;
+
+            for (const auto& s : melody)
+            {
+                const int at = (int) (s.start * rate), len = (int) (s.length * rate);
+
+                for (int i = 0; i < len; ++i)
+                {
+                    const double t = i / rate, left = (len - i) / rate;
+                    double pitch = s.pitch - 0.25;
+
+                    if (s.from < 1.0 && t < 0.04)
+                        pitch -= 1.5 * (1.0 - t / 0.04); // scooped into
+
+                    if (t > 0.15)
+                        pitch += 0.3 * std::sin (twoPi * 5.5 * (t - 0.15)); // vibrato
+
+                    const double hz = 440.0 * std::pow (2.0, (pitch - 69.0) / 12.0);
+                    phase += twoPi * hz / rate;
+                    double amp = t < ramp ? s.from + (1.0 - s.from) * t / ramp : 1.0, v = 0.0;
+
+                    if (left < ramp)
+                        amp = std::min (amp, s.to + (1.0 - s.to) * left / ramp);
+
+                    for (int h = 1; h <= 6; ++h)
+                        if (hz * h < 5000.0)
+                            v += harmonics[h - 1] * std::sin (phase * h);
+
+                    x[(size_t) (at + i)] = (float) (0.25 * amp * v);
+                }
+            }
+
+            for (auto& v : x)
+                v += 0.001f * (noise.nextFloat() * 2.0f - 1.0f);
+
+            keep ("hum-melody.wav", x);
+            const auto heard = taw::hear (x.data(), (int) x.size(), rate);
+            printHeard (heard, 0.0, 0.0);
+
+            check ("the melody is heard as sung", heard.sung());
+            check ("the singer's tuning (25 cents flat) is found", std::abs (heard.tuningCents + 25.0) < 10.0);
+            check ("as many notes as were sung", heard.notes.size() == melody.size());
+
+            for (size_t i = 0; i < std::min (heard.notes.size(), melody.size()); ++i)
+            {
+                const auto& n = heard.notes[i];
+                const auto& s = melody[i];
+                check ("note " + juce::String ((int) i + 1) + " is " + juce::MidiMessage::getMidiNoteName (s.pitch, true, true, 4)
+                           + " at " + juce::String (s.start, 2) + " s for " + juce::String (s.length, 2) + " s",
+                       n.pitch == s.pitch && std::abs (n.start - s.start) < 0.04 && std::abs (n.length - s.length) < 0.06);
+            }
+        }
+
+        // The beat: eighths at 120 bpm. k kick, s snare, h hat, o open hat.
+        {
+            const juce::String pattern ("khshkkshkhshkhso");
+            std::vector<float> x ((size_t) ((0.25 + 0.25 * pattern.length() + 0.5) * rate), 0.0f);
+
+            for (int p = 0; p < pattern.length(); ++p)
+            {
+                const auto drum = pattern[p];
+                const int at = (int) ((0.25 + 0.25 * p) * rate), len = (int) ((drum == 'o' ? 0.45 : 0.22) * rate);
+                juce::IIRFilter band, high1, high2;
+                band.setCoefficients (juce::IIRCoefficients::makeBandPass (rate, 2500.0, 0.8));
+                high1.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 7000.0));
+                high2.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 7000.0));
+                double phase = 0.0;
+
+                for (int i = 0; i < len; ++i)
+                {
+                    const double t = i / rate;
+                    const float hiss = noise.nextFloat() * 2.0f - 1.0f;
+                    double v = 0.0;
+
+                    if (drum == 'k')
+                    {
+                        phase += twoPi * (50.0 + 90.0 * std::exp (-t / 0.03)) / rate;
+                        v = 0.8 * std::sin (phase) * std::exp (-t / 0.05);
+                    }
+                    else if (drum == 's')
+                        v = (0.6 * (double) band.processSingleSampleRaw (hiss) + 0.1 * std::sin (twoPi * 190.0 * t)) * std::exp (-t / 0.04);
+                    else
+                        v = 0.5 * (double) high2.processSingleSampleRaw (high1.processSingleSampleRaw (hiss)) * std::exp (-t / (drum == 'o' ? 0.09 : 0.012));
+
+                    x[(size_t) (at + i)] += (float) v;
+                }
+            }
+
+            for (auto& v : x)
+                v += 0.001f * (noise.nextFloat() * 2.0f - 1.0f);
+
+            keep ("hum-beat.wav", x);
+            const auto heard = taw::hear (x.data(), (int) x.size(), rate);
+            printHeard (heard, 120.0, 0.5);
+
+            check ("the beat is heard as a beat", ! heard.sung());
+            check ("as many hits as were played", (int) heard.hits.size() == pattern.length());
+
+            for (int p = 0; p < std::min ((int) heard.hits.size(), pattern.length()); ++p)
+            {
+                const auto drum = pattern[p];
+                const juce::String kind (drum == 'k' ? "kick" : drum == 's' ? "snare" : drum == 'o' ? "open hat" : "hihat");
+                const auto& hit = heard.hits[(size_t) p];
+                check ("hit " + juce::String (p + 1) + " is a " + kind + " on eighth " + juce::String (p + 1),
+                       hit.kind == kind && std::abs (hit.time - (0.25 + 0.25 * p)) < 0.01);
+            }
+        }
+
+        std::printf ("%d failed\n", failures);
+        return failures;
     }
 
     // taw --importtest <dest> <files...>   import files at 44.1 kHz into <dest> (no device needed)

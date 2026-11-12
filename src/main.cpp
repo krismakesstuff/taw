@@ -4150,6 +4150,168 @@ int main (int argc, char** argv)
         return failures;
     }
 
+    // taw --phonetest   the phone link, asked as a phone would: its page, an upload, and what it
+    // must refuse (a wrong address, a file that isn't audio). Prints its QR code too.
+    if (args[0] == "--phonetest")
+    {
+        int failures = 0;
+
+        auto check = [&] (const char* what, bool ok)
+        {
+            std::printf ("%s  %s\n", ok ? "ok    " : "FAILED", what);
+            failures += ok ? 0 : 1;
+        };
+
+        taw::PhoneLink link;
+        juce::String error;
+
+        if (! link.start (error))
+        {
+            std::printf ("couldn't start: %s\n", error.toRawUTF8());
+            return 1;
+        }
+
+        const auto url = link.url();
+        std::printf ("%s\n", url.toRawUTF8());
+        const auto host = url.fromFirstOccurrenceOf ("//", false, false).upToFirstOccurrenceOf (":", false, false);
+        const int port = url.fromLastOccurrenceOf (":", false, false).upToFirstOccurrenceOf ("/", false, false).getIntValue();
+        const auto home = "/" + url.fromLastOccurrenceOf ("/", false, false);
+
+        // One request, the whole answer back.
+        auto ask = [&] (const juce::String& method, const juce::String& path, const juce::MemoryBlock& body)
+        {
+            juce::StreamingSocket s;
+
+            if (! s.connect (host, port, 3000))
+                return juce::String ("no connection");
+
+            const auto head = method + " " + path + " HTTP/1.1\r\nHost: taw\r\n"
+                              + (method == "POST" ? "Content-Length: " + juce::String ((int) body.getSize()) + "\r\n" : juce::String()) + "\r\n";
+            s.write (head.toRawUTF8(), (int) head.getNumBytesAsUTF8());
+
+            if (body.getSize() > 0)
+                s.write (body.getData(), (int) body.getSize());
+
+            juce::MemoryBlock answer;
+            char buffer[4096];
+
+            while (s.waitUntilReady (true, 5000) == 1)
+            {
+                const int got = s.read (buffer, sizeof (buffer), false);
+
+                if (got <= 0)
+                    break;
+
+                answer.append (buffer, (size_t) got);
+            }
+
+            return answer.toString();
+        };
+
+        const auto page = ask ("GET", home, {});
+        check ("the page is served at the address", page.startsWith ("HTTP/1.1 200") && page.contains ("Send a recording"));
+        check ("nothing at a wrong token", ask ("GET", "/nope", {}).startsWith ("HTTP/1.1 404"));
+        check ("nothing at the root", ask ("GET", "/", {}).startsWith ("HTTP/1.1 404"));
+
+        juce::MemoryBlock take (300000);
+        juce::Random random (3);
+
+        for (size_t i = 0; i < take.getSize(); ++i)
+            take[i] = (char) random.nextInt (256);
+
+        check ("an upload is taken", ask ("POST", home + "/up?name=my%20take.m4a", take).startsWith ("HTTP/1.1 200"));
+        check ("a file that isn't audio is refused", ask ("POST", home + "/up?name=notes.exe", take).startsWith ("HTTP/1.1 415"));
+        check ("an upload to a wrong token is refused", ask ("POST", "/nope/up?name=a.wav", take).startsWith ("HTTP/1.1 404"));
+        check ("a name can't climb out of the folder", ask ("POST", home + "/up?name=..%2F..%2Fevil.wav", take).startsWith ("HTTP/1.1 200"));
+
+        const auto got = link.takeReceived();
+        check ("two files arrived", got.size() == 2 && link.received() == 2);
+
+        if (got.size() == 2)
+        {
+            juce::MemoryBlock back;
+            got[0].loadFileAsData (back);
+            check ("the first whole, under its name", got[0].getFileName() == "my take.m4a" && back == take);
+            check ("the second kept inside the link's folder", got[1].getParentDirectory() == got[0].getParentDirectory());
+        }
+
+        const auto folder = got.empty() ? juce::File() : got[0].getParentDirectory();
+        const auto code = taw::PhoneLink::qr (url);
+        check ("the address makes a QR code", code.size() >= 21);
+
+        for (size_t y = 0; y < code.size(); y += 2)
+        {
+            for (size_t x = 0; x < code.size(); ++x)
+            {
+                const bool top = code[y][x], bottom = y + 1 < code.size() && code[y + 1][x];
+                std::printf ("%s", top && bottom ? "\xe2\x96\x88" : top ? "\xe2\x96\x80" : bottom ? "\xe2\x96\x84" : " ");
+            }
+
+            std::printf ("\n");
+        }
+
+        link.stop();
+        check ("its folder goes when it stops", folder != juce::File() && ! folder.exists());
+        check ("nothing answers once it's off", ask ("GET", home, {}) == "no connection");
+
+        // taw --phonetest <session-dir>: in taw itself too (on a scratch session: it's edited).
+        // phone, a second of sine sent as a phone would, and it's a clip on a new track.
+        if (args.size() >= 2)
+        {
+            auto app = std::make_unique<taw::App> (juce::File::getCurrentWorkingDirectory().getChildFile (args[1]), juce::File(), juce::String(), juce::String());
+
+            if (app->session == nullptr)
+            {
+                std::printf ("couldn't open: %s\n", app->message.toRawUTF8());
+                return failures + 1;
+            }
+
+            while (app->hasBackgroundWork())
+                app->pumpBackgroundWork();
+
+            const int tracksBefore = app->session->numTracks();
+            const auto on = app->execute ("phone");
+            std::printf ("       %s\n", on.message.toRawUTF8());
+            check ("phone turns the link on", on.ok && app->phone.running() && app->phoneVisible);
+            std::printf ("%s", app->screenText (100, 40).toRawUTF8());
+
+            juce::MemoryBlock wav;
+            {
+                std::unique_ptr<juce::OutputStream> stream = std::make_unique<juce::MemoryOutputStream> (wav, false);
+
+                if (auto w = juce::WavAudioFormat().createWriterFor (stream, juce::AudioFormatWriterOptions{}.withSampleRate (44100.0).withNumChannels (1).withBitsPerSample (16)))
+                {
+                    juce::AudioBuffer<float> b (1, 44100);
+
+                    for (int i = 0; i < b.getNumSamples(); ++i)
+                        b.setSample (0, i, 0.5f * std::sin ((float) i * 0.05f));
+
+                    w->writeFromAudioSampleBuffer (b, 0, b.getNumSamples());
+                }
+            }
+
+            const auto appUrl = app->phone.url();
+            const auto appHome = "/" + appUrl.fromLastOccurrenceOf ("/", false, false);
+            // (the same address and port: the first link is off)
+            check ("the upload is taken", ask ("POST", appHome + "/up?name=phone%20take.wav", wav).startsWith ("HTTP/1.1 200"));
+
+            for (const auto until = juce::Time::getMillisecondCounter() + 10000;
+                 juce::Time::getMillisecondCounter() < until && (app->session->numTracks() == tracksBefore || app->hasBackgroundWork());)
+            {
+                app->pumpBackgroundWork();
+                juce::Thread::sleep (5);
+            }
+
+            const auto track = app->session->track (app->session->numTracks() - 1);
+            check ("it's a clip on a new track, named after the file",
+                   app->session->numTracks() == tracksBefore + 1 && track[taw::ids::name].toString() == "phone take" && track.getNumChildren() > 0);
+            std::printf ("       %s\n", app->message.toRawUTF8());
+            check ("phone off ends it", app->execute ("phone off").ok && ! app->phone.running() && ! app->phoneVisible);
+        }
+        std::printf ("%d failed\n", failures);
+        return failures;
+    }
+
     // taw --importtest <dest> <files...>   import files at 44.1 kHz into <dest> (no device needed)
     if (args[0] == "--importtest")
     {

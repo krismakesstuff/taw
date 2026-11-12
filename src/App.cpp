@@ -635,6 +635,7 @@ int App::run()
             systemSampledAt = now;
         }
         pollImport();
+        pollPhone(); // after pollImport: what the phone sent goes in when no import is under way
         { timing::Scope t ("slow: library", 150.0); pollIndexing(); }
 
         if (opening != nullptr)
@@ -1616,6 +1617,7 @@ void App::pumpBackgroundWork()
     pollPlugins();
     pollBounce();
     pollImport();
+    pollPhone();
     pollIndexing();
 
     if (treeDirty && session != nullptr)
@@ -4098,7 +4100,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleHelpKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k)
+    if (handleHelpKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k) || handlePhoneKey (k)
         || handleSettingsKey (k) || handleIoKey (k))
         return;
 

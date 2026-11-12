@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- The phone link: `phone` shows a QR code; a phone on the same network opens its page and sends
+  recordings, which land at the cursor on a new track. `phone off` ends it.
+
 - The sample browser has a guide to its keys and mouse: `?` in it, or the toolbar's `?` button.
 - The README explains the sample library: indexing folders, what's measured, and browsing.
 - The session screen has a command line: `:` opens it, for what needs no session (`index`,

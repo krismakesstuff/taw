@@ -358,7 +358,7 @@ void Ui::drawMain (App& app)
 
     // A box over the timeline takes the clicks out of it.
     if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
-        || app.settingsVisible || app.statsVisible)
+        || app.settingsVisible || app.statsVisible || app.phoneVisible)
         laneMap.valid = false;
 
     if (app.helpVisible)
@@ -377,6 +377,8 @@ void Ui::drawMain (App& app)
         drawSettings (app);
     else if (app.statsVisible && app.session != nullptr)
         drawStats (app);
+    else if (app.phoneVisible && app.phone.running())
+        drawPhone (app);
 }
 
 // "stats": the audio's load, the machine's, and each track's share, heaviest first.
@@ -500,6 +502,61 @@ void Ui::drawStats (App& app)
 
     canvas.text (x0 + 2, y0 + boxH - 1, L"a bar is a track's share of one block (they share the cores) \x00b7 esc or stats closes", colour::faint, bg, false,
                  boxW - 4);
+}
+
+// "phone": the phone link's address as a QR code (two modules to a row: half blocks), and what
+// has come over it.
+void Ui::drawPhone (App& app)
+{
+    const auto url = app.phone.url();
+    const auto code = PhoneLink::qr (url);
+    const int w = canvas.width(), h = canvas.height(), bg = colour::headerBg;
+    constexpr int quiet = 3, white = 231, black = 16;
+    const int size = (int) code.size() + 2 * quiet, codeRows = (size + 1) / 2;
+    const bool fits = ! code.empty() && h >= codeRows + 9 && w >= size + 8;
+    const int boxW = std::min (w - 4, std::max (76, size + 6)), boxH = (fits ? codeRows + 1 : 0) + 8;
+    const int x0 = (w - boxW) / 2, y0 = h >= boxH + 6 ? 4 : 1;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    canvas.text (x0 + 2, y0 + 1, "PHONE", colour::text, bg, true);
+    canvas.text (x0 + 9, y0 + 1, "send recordings from a phone on this network", colour::dim, bg, false, boxW - 11);
+
+    int y = y0 + 3;
+
+    if (fits)
+    {
+        auto dark = [&] (int mx, int my)
+        {
+            mx -= quiet;
+            my -= quiet;
+            return mx >= 0 && my >= 0 && my < (int) code.size() && mx < (int) code.size() && code[(size_t) my][(size_t) mx];
+        };
+
+        const int cx = x0 + (boxW - size) / 2;
+
+        for (int r = 0; r < codeRows; ++r, ++y)
+            for (int c = 0; c < size; ++c)
+                canvas.put (cx + c, y, L'\x2580', dark (c, 2 * r) ? black : white, 2 * r + 1 < size && dark (c, 2 * r + 1) ? black : white);
+
+        ++y;
+    }
+
+    canvas.text (x0 + 2, y, fits ? "scan it, or open" : "on the phone, open", colour::dim, bg);
+    canvas.text (x0 + (fits ? 19 : 21), y, url, colour::text, bg, true, boxW - 23);
+    ++y;
+
+    const auto status = app.phone.status();
+    const int waiting = (int) app.phoneWaiting.size();
+    auto line = status.isNotEmpty() ? status : juce::String ("nothing sent yet");
+
+    if (waiting > 0)
+        line << L" \x00b7 " << waiting << " waiting to go in";
+
+    canvas.text (x0 + 2, y, line, status.isNotEmpty() ? colour::ok : colour::faint, bg, false, boxW - 4);
+    canvas.text (x0 + 2, y0 + boxH - 2, L"phone on the same wifi \x00b7 let taw through the firewall if asked", colour::faint, bg, false, boxW - 4);
+    canvas.text (x0 + 2, y0 + boxH - 1, L"lands at the cursor on a new track \x00b7 esc hides \x00b7 phone off ends it", colour::faint, bg, false, boxW - 4);
 }
 
 void Ui::drawTitle (App& app)
@@ -2840,6 +2897,7 @@ void Ui::drawHelp (App& app)
                 { L"audio device / driver", L"dev  panel" },
                 { L"themes (also: grey)", L"dark  light" },
                 { L"load: dsp, cpu, tracks", L"stats" },
+        { L"recordings from a phone", L"phone" },
                 { L"keys window (recording)", L"keycast" } } },
 #if TAW_HUB
             { L"HUB", {

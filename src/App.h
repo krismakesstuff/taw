@@ -9,6 +9,7 @@
 #include "Library.h"
 #include "LiveKeys.h"
 #include "MidiEditor.h"
+#include "Phone.h"
 #include "Plugins.h"
 #include "Console.h"
 #include "KeyCast.h"
@@ -467,6 +468,16 @@ public:
     Result toggleStats();
     bool statsVisible = false;
     bool handleStatsKey (const Key&);
+
+    // phone: the phone link (Phone.h). phone turns it on and shows its address as a QR code;
+    // esc hides the panel (the link stays on); phone off ends it. What the phone sends is
+    // imported at the cursor on a new track, one file at a time.
+    Result phoneCommand (const juce::String& arg);
+    bool handlePhoneKey (const Key&);
+    void pollPhone();
+    PhoneLink phone;
+    bool phoneVisible = false;
+    std::vector<juce::File> phoneWaiting; // arrived, not imported yet
     SystemStats system; // sampled about once a second
     double systemSampledAt = 0.0;
     bool midiPanelVisible = false;

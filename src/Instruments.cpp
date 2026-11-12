@@ -427,6 +427,66 @@ bool App::handleStatsKey (const Key& k)
     return true;
 }
 
+// phone: on (and its panel up); phone off: ended. Typed again while on, it shows or hides the panel.
+Result App::phoneCommand (const juce::String& arg)
+{
+    if (arg.equalsIgnoreCase ("off") || arg.equalsIgnoreCase ("stop"))
+    {
+        const bool was = phone.running();
+        phone.stop();
+        phoneVisible = false;
+        phoneWaiting.clear(); // their files went with the link
+        return Result::good (was ? "phone link off" : "the phone link wasn't on");
+    }
+
+    if (arg.isNotEmpty() && ! arg.equalsIgnoreCase ("on"))
+        return Result::fail (L"phone turns the phone link on \x00b7 phone off ends it");
+
+    if (session == nullptr)
+        return Result::fail ("open a session first: the phone's recordings go into it");
+
+    if (phone.running() && phoneVisible && arg.isEmpty())
+    {
+        phoneVisible = false;
+        return Result::good (L"the phone link is still on at " + phone.url() + L" \x00b7 phone off ends it");
+    }
+
+    if (juce::String error; ! phone.start (error))
+        return Result::fail ("phone link: " + error);
+
+    phoneVisible = true;
+    statsVisible = midiPanelVisible = helpVisible = settingsVisible = pluginPickerVisible = false;
+    return Result::good ("phone link on at " + phone.url() + L" \x00b7 esc hides the code \x00b7 phone off ends it");
+}
+
+bool App::handlePhoneKey (const Key& k)
+{
+    if (! phoneVisible || ! commandLine.isEmpty() || k.code != Key::Escape)
+        return false;
+
+    phoneVisible = false;
+    return true;
+}
+
+// What the phone sent goes in like a typed import: at the cursor, each on a new track, one at a
+// time, when nothing else is importing or recording.
+void App::pollPhone()
+{
+    if (! phone.running())
+        return;
+
+    for (auto& f : phone.takeReceived())
+        phoneWaiting.push_back (f);
+
+    if (phoneWaiting.empty() || session == nullptr || import != nullptr || recording)
+        return;
+
+    const auto file = phoneWaiting.front();
+    phoneWaiting.erase (phoneWaiting.begin());
+    auto r = startImport ({ file.getFullPathName() }, -1, ImportAs::audio);
+    say (r.ok ? Result::good ("from the phone: " + file.getFileName()) : r);
+}
+
 bool App::handleMidiPanelKey (const Key& k)
 {
     if (! midiPanelVisible || midiInputs == nullptr || ! commandLine.isEmpty())

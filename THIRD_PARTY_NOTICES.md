@@ -9,6 +9,7 @@ built with the following, each under its own licence.
 | [VST3 SDK](https://github.com/steinbergmedia/vst3sdk) (through JUCE) | hosting VST3 plugins | MIT | every build |
 | [Steinberg ASIO SDK](https://www.steinberg.net/developers/) 2.3.4 | ASIO audio devices | GPLv3 (the SDK's open-source option) | Windows |
 | [FFmpeg](https://ffmpeg.org) 9.0.2, [Gyan Doshi's shared "full" build](https://github.com/GyanD/codexffmpeg) | video (decoding, `bv` encoding) | GPLv3 (this build enables GPL components) | Windows, as DLLs next to taw.exe |
+| [QR Code generator](https://github.com/nayuki/QR-Code-generator) 1.8.0, by Project Nayuki | the phone link's address as a QR code | MIT | every build |
 
 JUCE itself contains third-party code (FLAC, Ogg Vorbis, zlib, libpng, libjpeg and others),
 listed with their licences in JUCE's `LICENSE.md` and in the source files under

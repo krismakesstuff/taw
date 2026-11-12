@@ -90,7 +90,7 @@ const char* const verbs[] = { "r", "rec", "play", "stop", "mark", "click", "c", 
                               "help", "q", "quit", "exit", "save", "cons", "consolidate", "sep", "separate", "split", "bpm", "grid", "height", "light", "dark", "grey", "gray", "project", "settings", "sig", "snap", "lat", "add", "new",
                               "a", "arm", "m", "mute", "s", "solo", "mon", "x", "i", "in", "v", "vol", "n", "name",
                               "sample", "audio", "remove", "rm", "pat", "sel", "copy", "cut", "paste", "dup", "del", "close",
-                              "inst", "ed", "edit", "scan", "midi", "stats", "fill",
+                              "inst", "ed", "edit", "scan", "midi", "stats", "phone", "fill",
                               "bus", "out", ">", "send", "io", "count", "fx", "ins",
                               "pan", "mono", "stereo", "lowlat", "browse", "index", "library", "video", "keycast", "bv", "lane", "pt", "map", "unmap", "aw", "auto", "hub", "pl", "clip", "xfade", "declick", "kit", "note", "choke", "pad" };
 
@@ -1018,6 +1018,7 @@ Result App::execute (const juce::String& line)
     if (v == "scan")               return scanPlugins (p.args[0].equalsIgnoreCase ("retry"));
     if (v == "midi")               return toggleMidiPanel();
     if (v == "stats")              return toggleStats();
+    if (v == "phone")              return phoneCommand (p.args[0]);
     if (v == "agents")             return agentsCommand (p.args[0]); // taw --mcp's way in (docs/plan-taw-mcp.md)
     if (v == "hub")                return hubCommand (p.rest.trim());
 

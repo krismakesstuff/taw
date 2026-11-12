@@ -172,6 +172,7 @@ private:
     void drawTempoPrompt (App&); // an agent's tempo change: what to do with the audio
     void drawSessionPrompt (App&); // an agent wants another session open
     void drawStats (App&);
+    void drawPhone (App&);
 
     void drawProgress (App&, const juce::String& title, const juce::String& doing, size_t done, size_t total);
     void drawMeter (int x, int y, int width, float level, int bg = -1);

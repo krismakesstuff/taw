@@ -27,6 +27,13 @@ if (WIN32)
     FetchContent_MakeAvailable(ffmpeg)
 endif()
 
+# Nayuki's QR code generator (MIT): the phone link's address, as a code on the screen.
+FetchContent_Declare(qrcodegen
+    GIT_REPOSITORY https://github.com/nayuki/QR-Code-generator.git
+    GIT_TAG        v1.8.0
+    GIT_SHALLOW    TRUE)
+FetchContent_MakeAvailable(qrcodegen)
+
 juce_add_console_app(taw PRODUCT_NAME "taw")
 
 target_sources(taw PRIVATE
@@ -64,9 +71,13 @@ target_sources(taw PRIVATE
     src/TrackMenu.cpp
     src/Midi.cpp
     src/MidiEditor.cpp
+    src/Phone.cpp
+    ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
     src/Plugins.cpp
     src/Ui.cpp
     src/Video.cpp)
+
+target_include_directories(taw SYSTEM PRIVATE ${qrcodegen_SOURCE_DIR}/cpp)
 
 target_compile_definitions(taw PRIVATE
     JUCE_WEB_BROWSER=0

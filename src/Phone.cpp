@@ -26,7 +26,9 @@ const char* const page = R"html(<!doctype html>
   :root { color-scheme: dark; }
   body { margin: 0; padding: 24px 16px; background: #14161a; color: #e8e6e1; font: 17px/1.4 system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
-  p { margin: 0 0 20px; color: #9a9890; }
+  p { margin: 0 0 20px; color: #9a9890; overflow-wrap: anywhere; }
+  p b { color: #e8e6e1; }
+  p.off { color: #e0705c; }
   label.button { display: block; margin: 0 0 12px; padding: 18px; border-radius: 12px; text-align: center; font-weight: 600; }
   label.record { background: #c8452f; color: #fff; }
   label.pick { background: #2a2e35; color: #e8e6e1; }
@@ -42,13 +44,42 @@ const char* const page = R"html(<!doctype html>
 </head>
 <body>
 <h1>taw</h1>
-<p>Send a recording to the session open in taw.</p>
+<p id="session">&nbsp;</p>
 <label class="button record">Record now<input id="record" type="file" accept="audio/*" capture></label>
 <label class="button pick">Send a recording<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
 <ul id="list"></ul>
 <script>
   const list = document.getElementById('list');
+  const session = document.getElementById('session');
+  const home = location.pathname.replace (/\/$/, '');
   let queue = Promise.resolve();
+
+  // Which session this goes into, asked again every few seconds (it can change, or taw can go).
+  function showSession (name, reached) {
+    session.className = reached ? '' : 'off';
+    session.textContent = '';
+
+    if (! reached)
+      session.textContent = "can't reach taw (is the phone link still on?)";
+    else if (name) {
+      session.append ('Recordings go into ');
+      const b = document.createElement ('b');
+      b.textContent = name;
+      session.append (b);
+    }
+    else
+      session.textContent = 'No session open in taw: recordings wait for one.';
+  }
+
+  function ask () {
+    fetch (home + '/session', { cache: 'no-store' })
+      .then (r => r.ok ? r.text() : Promise.reject())
+      .then (name => showSession (name, true))
+      .catch (() => showSession ('', false));
+  }
+
+  ask();
+  setInterval (ask, 4000);
 
   function send (file) {
     const row = document.createElement('li');
@@ -65,7 +96,7 @@ const char* const page = R"html(<!doctype html>
 
     queue = queue.then (() => new Promise (done => {
       const x = new XMLHttpRequest();
-      x.open ('POST', location.pathname.replace (/\/$/, '') + '/up?name=' + encodeURIComponent (file.name));
+      x.open ('POST', home + '/up?name=' + encodeURIComponent (file.name));
       x.upload.onprogress = e => {
         if (e.lengthComputable) {
           fill.style.width = (100 * e.loaded / e.total) + '%';
@@ -75,7 +106,7 @@ const char* const page = R"html(<!doctype html>
       x.onload = () => {
         const ok = x.status === 200;
         row.className = ok ? 'ok' : 'bad';
-        note.textContent = ok ? 'in taw' : (x.responseText || 'taw said no');
+        note.textContent = ok ? (x.responseText ? 'in ' + x.responseText : 'in taw, waiting for a session') : (x.responseText || 'taw said no');
         bar.remove();
         done();
       };
@@ -298,6 +329,9 @@ struct PhoneLink::Server final : private juce::Thread
         if (method == "GET" && (path == home || path == home + "/"))
             return reply (socket, "200 OK", "text/html; charset=utf-8", page);
 
+        if (method == "GET" && path == home + "/session")
+            return reply (socket, "200 OK", "text/plain; charset=utf-8", sessionName());
+
         // A refusal is read by the phone only if what it was sending is taken off the line first
         // (closing on unread data resets the connection, and the answer goes with it). Up to 32 MB
         // of it: more isn't worth the wait.
@@ -392,7 +426,13 @@ struct PhoneLink::Server final : private juce::Thread
             statusText = "got " + name;
         }
 
-        reply (socket, "200 OK", "text/plain; charset=utf-8", "ok");
+        reply (socket, "200 OK", "text/plain; charset=utf-8", sessionName()); // where it went
+    }
+
+    juce::String sessionName()
+    {
+        const juce::ScopedLock sl (lock);
+        return session;
     }
 
     struct Worker
@@ -411,9 +451,18 @@ struct PhoneLink::Server final : private juce::Thread
 
     juce::CriticalSection lock;
     std::vector<juce::File> arrived;
-    juce::String statusText;
+    juce::String statusText, session;
     int count = 0;
 };
+
+void PhoneLink::setSession (const juce::String& name)
+{
+    if (server == nullptr)
+        return;
+
+    const juce::ScopedLock sl (server->lock);
+    server->session = name;
+}
 
 PhoneLink::PhoneLink() = default;
 PhoneLink::~PhoneLink() = default;

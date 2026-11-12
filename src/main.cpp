@@ -4293,7 +4293,10 @@ int main (int argc, char** argv)
             const auto appUrl = app->phone.url();
             const auto appHome = "/" + appUrl.fromLastOccurrenceOf ("/", false, false);
             // (the same address and port: the first link is off)
-            check ("the upload is taken", ask ("POST", appHome + "/up?name=phone%20take.wav", wav).startsWith ("HTTP/1.1 200"));
+            app->pumpBackgroundWork(); // the link hears which session it's for
+            const auto named = app->session->name();
+            check ("the page can ask which session it's sending to", ask ("GET", appHome + "/session", {}).endsWith ("\r\n\r\n" + named));
+            check ("the upload is taken, and says where it went", ask ("POST", appHome + "/up?name=phone%20take.wav", wav).endsWith ("\r\n\r\n" + named));
 
             for (const auto until = juce::Time::getMillisecondCounter() + 10000;
                  juce::Time::getMillisecondCounter() < until && (app->session->numTracks() == tracksBefore || app->hasBackgroundWork());)

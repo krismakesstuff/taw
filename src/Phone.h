@@ -24,6 +24,9 @@ public:
 
     juce::String url() const; // http://192.168.1.20:8317/k3x9p2
 
+    // The session the recordings are going into (empty: none open), for the page to show.
+    void setSession (const juce::String& name);
+
     // The recordings that have come in since last asked, whole, in a temporary folder that lasts
     // until stop.
     std::vector<juce::File> takeReceived();

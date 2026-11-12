@@ -475,6 +475,8 @@ void App::pollPhone()
     if (! phone.running())
         return;
 
+    phone.setSession (session != nullptr ? session->name() : juce::String());
+
     for (auto& f : phone.takeReceived())
         phoneWaiting.push_back (f);
 

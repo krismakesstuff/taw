@@ -22,6 +22,8 @@
   one inside. `phone key auto` finds it again; "no key" on the phone leaves the notes as sung.
 - "Snap to the grid" on the phone (on unless turned off): off, hits and notes land where they
   were played.
+- The phone's page says when the session closed in taw, or when taw can't be reached any more,
+  with a button to close the tab; it comes back by itself if taw does.
 - `taw --phone` starts a new session with the phone link on (`taw my-song --phone`: in my-song);
   `:phone` on the session screen does the same.
 

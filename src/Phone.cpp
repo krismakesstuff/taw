@@ -68,6 +68,12 @@ const char* const page = R"html(<!doctype html>
 </head>
 <body>
 <h1>taw</h1>
+<div id="gone" hidden>
+  <p id="why" class="off"></p>
+  <button id="shut" class="button pick">Close this tab</button>
+  <p id="shutNote">This page comes back by itself if taw does.</p>
+</div>
+<div id="main">
 <p id="session">&nbsp;</p>
 <div class="what">
   <span>Make it</span>
@@ -91,6 +97,7 @@ const char* const page = R"html(<!doctype html>
 <p id="plain" hidden>To record here with a count-in, open <a id="secure">the secure page</a> (the phone asks once whether to go on).</p>
 <label class="button record" id="old">Record now<input id="record" type="file" accept="audio/*" capture></label>
 <label class="button pick">Upload a file<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
+</div>
 <ul id="list"></ul>
 <script>
   const list = document.getElementById('list');
@@ -115,15 +122,53 @@ const char* const page = R"html(<!doctype html>
       session.textContent = 'No session open in taw: recordings wait for one.';
   }
 
+  // The session closed in taw, or taw can't be reached any more: the page says so in place of
+  // its controls (a take being recorded is left to finish first). It comes back if taw does.
+  const main = document.getElementById('main'), gone = document.getElementById('gone');
+  const shutNote = document.getElementById('shutNote');
+  let hadSession = false, misses = 0;
+
+  function showGone (why) {
+    if (why && typeof take !== 'undefined' && take)
+      return;
+
+    if (why)
+      document.getElementById('why').textContent = why;
+    else if (! gone.hidden)
+      shutNote.textContent = 'This page comes back by itself if taw does.';
+
+    gone.hidden = ! why;
+    main.hidden = !! why;
+  }
+
+  // A page the phone opened itself (from the QR code) often may not close its own tab.
+  document.getElementById('shut').addEventListener ('click', () => {
+    window.close();
+    setTimeout (() => { shutNote.textContent = "The browser won't let this page close itself: close the tab from its tab list."; }, 400);
+  });
+
   function ask () {
-    fetch (home + '/session', { cache: 'no-store' })
+    const stop = new AbortController(), timer = setTimeout (() => stop.abort(), 2500);
+
+    fetch (home + '/session', { cache: 'no-store', signal: stop.signal })
       .then (r => r.ok ? r.text() : Promise.reject())
-      .then (name => showSession (name, true))
-      .catch (() => showSession ('', false));
+      .then (name => {
+        misses = 0;
+        hadSession = hadSession || !! name;
+        showSession (name, true);
+        showGone (! name && hadSession ? 'The taw session closed.' : '');
+      })
+      .catch (() => {
+        showSession ('', false);
+
+        if (++misses >= 2)
+          showGone ('Lost the connection to taw.');
+      })
+      .then (() => clearTimeout (timer));
   }
 
   ask();
-  setInterval (ask, 4000);
+  setInterval (ask, 3000);
 
   // What the recording is to become: remembered on this phone.
   const inst = document.getElementById('inst');

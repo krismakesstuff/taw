@@ -8,6 +8,10 @@
   becomes hits on a sample track for each drum (samples picked from the library), a hummed or
   sung one becomes notes on the instrument chosen on the phone. The recording sits beside the
   part, muted, lined up with it.
+- A beatboxed take's drums are told apart by how its own hits group: low hits that fall into two
+  sounds are a kick and a tom, middle ones a snare and percussion.
+- Parts made from the phone's takes all start on the same bar line (the first one's);
+  `phone here` moves that to the cursor's bar.
 - `taw --phone` starts a new session with the phone link on (`taw my-song --phone`: in my-song);
   `:phone` on the session screen does the same.
 

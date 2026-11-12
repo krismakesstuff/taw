@@ -480,6 +480,8 @@ public:
     Result phoneCommand (const juce::String& arg);
     Result startPhoneSession();  // a new session ("phone", unless a name was given) with the link on: taw --phone, :phone
     bool phoneAtStart = false;   // taw --phone: once the device is open
+    double phoneStartBeat = -1.0; // where the parts made from takes start: the first one's bar, or "phone here" (-1: not yet)
+    juce::File phoneStartIn;      // the session that's true of
     bool handlePhoneKey (const Key&);
     void pollPhone();
     PhoneLink phone;

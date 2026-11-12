@@ -3966,11 +3966,18 @@ int main (int argc, char** argv)
 
         for (const auto& hit : h.hits)
         {
-            std::printf ("  %7.3f s  %-8s  %6.1f dB  attack %5.0f Hz  bright %5.0f Hz  low %.2f  high %.2f  noise %.2f  decay %4.0f ms", hit.time,
-                         hit.kind.toRawUTF8(), hit.levelDb, hit.attackHz, hit.centroidHz, hit.lowShare, hit.highShare, hit.flatness, hit.decayMs);
+            std::printf ("  %7.3f s  %c %-8s  %6.1f dB  attack %5.0f Hz  bright %5.0f Hz  low %.2f  high %.2f  noise %.2f  decay %4.0f ms", hit.time,
+                         (char) ('a' + hit.group % 26), hit.kind.toRawUTF8(), hit.levelDb, hit.attackHz, hit.centroidHz, hit.lowShare, hit.highShare, hit.flatness, hit.decayMs);
 
             if (bpm > 0.0)
                 std::printf ("   beat %6.2f", taw::humBeat (hit.time, bpm, grid));
+
+            if (juce::SystemStats::getEnvironmentVariable ("TAW_HUM_BANDS", {}).isNotEmpty())
+            {
+                std::printf ("  |");
+                for (const auto v : hit.body)   std::printf (" %.3f", v);
+                for (const auto v : hit.attack) std::printf (" %.3f", v);
+            }
 
             std::printf ("\n");
         }
@@ -4247,7 +4254,7 @@ int main (int argc, char** argv)
         };
 
         const auto page = ask ("GET", home, {});
-        check ("the page is served at the address", page.startsWith ("HTTP/1.1 200") && page.contains ("Send a recording"));
+        check ("the page is served at the address", page.startsWith ("HTTP/1.1 200") && page.contains ("Upload a file"));
         check ("nothing at a wrong token", ask ("GET", "/nope", {}).startsWith ("HTTP/1.1 404"));
         check ("nothing at the root", ask ("GET", "/", {}).startsWith ("HTTP/1.1 404"));
 

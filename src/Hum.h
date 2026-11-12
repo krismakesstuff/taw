@@ -2,6 +2,7 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <array>
 #include <optional>
 #include <vector>
 
@@ -21,7 +22,7 @@ struct HumNote
 struct HumHit
 {
     double time = 0.0;
-    juce::String kind;    // kick, snare, hihat, open hat
+    juce::String kind;    // kick, snare, hihat, open hat, tom, perc (a second tom: "tom 2")
     double levelDb = -100.0;
 
     // What the guess is made from, for a better one later (the singer's own kick, snare and hat).
@@ -31,6 +32,11 @@ struct HumHit
     double highShare = 0.0;  // and above 5 kHz
     double flatness = 0.0;   // 0 tonal .. 1 noise
     double decayMs = 0.0;    // the peak until it's 20 dB down
+
+    // Its energy by band (below 150 Hz, to 300, 600, 1.2 k, 2.4 k, 5 k, 10 k, above), as shares:
+    // of its first 100 ms and of its attack. What a take's hits are told apart by.
+    std::array<float, 8> body {}, attack {};
+    int group = 0; // hits that sound alike within the take share one
 };
 
 struct Heard

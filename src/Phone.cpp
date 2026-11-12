@@ -62,7 +62,7 @@ const char* const page = R"html(<!doctype html>
 <select id="inst" hidden></select>
 <p id="hint"></p>
 <label class="button record">Record now<input id="record" type="file" accept="audio/*" capture></label>
-<label class="button pick">Send a recording<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
+<label class="button pick">Upload a file<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
 <ul id="list"></ul>
 <script>
   const list = document.getElementById('list');

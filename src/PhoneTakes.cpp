@@ -165,13 +165,25 @@ void App::stepPhoneJob()
         if (first)
             session->tree().setProperty (ids::bpm, std::round (job.part.bpm), um());
 
-        // The part starts on the first bar line its first beat can reach, and the recording
-        // moves along to sit under it.
+        // Every part starts on the same bar line, so one take sits over the last: the first
+        // bar line the first take's first beat could reach from the cursor ("phone here" moves
+        // it). The recording moves along to sit under its part, losing what won't fit before it.
         auto take = session->track (session->numTracks() - 1).getChildWithName (ids::CLIP);
         const double spb = session->samplesPerBeat(), bar = juce::jmax (1, session->beatsPerBar());
         const double lead = job.part.firstOnset * sampleRate();
-        job.startBeat = std::ceil (((double) (juce::int64) take[ids::start] + lead) / spb / bar - 1.0e-6) * bar;
-        take.setProperty (ids::start, (juce::int64) std::llround (job.startBeat * spb - lead), um());
+
+        if (phoneStartBeat < 0.0 || phoneStartIn != session->folder())
+        {
+            phoneStartBeat = std::ceil (((double) (juce::int64) take[ids::start] + lead) / spb / bar - 1.0e-6) * bar;
+            phoneStartIn = session->folder();
+        }
+
+        job.startBeat = phoneStartBeat;
+        const auto from = (juce::int64) std::llround (job.startBeat * spb - lead);
+        const auto cut = juce::jmax ((juce::int64) 0, -from);
+        take.setProperty (ids::start, from + cut, um());
+        take.setProperty (ids::offset, (juce::int64) take[ids::offset] + cut, um());
+        take.setProperty (ids::length, juce::jmax ((juce::int64) 1, (juce::int64) take[ids::length] - cut), um());
         const auto at = formatBars ((juce::int64) std::llround (job.startBeat * spb));
 
         if (drums)

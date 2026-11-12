@@ -28,7 +28,9 @@ constexpr float stableSemitones = 0.6f;                 // ... within this; the 
 constexpr float dipSemitones = 1.0f;                    // a short piece this far off the note it joins: struck again
 constexpr float sameSemitones = 0.7f;                  // pieces closer than this with nothing struck between are one note
 constexpr float slideSemitones = 2.0f;                  // a piece whose pitch wanders more isn't a note
-constexpr double junkDb = 14.0;                         // hits this far under the usual one are noises, not drums
+constexpr double twoSounds = 0.4;                       // hits of a family are two drums when they fit two groups this well (a silhouette, 0..1)
+constexpr double twoSoundsApart = 0.18;                 // ... and the groups are this far apart (0 the same .. 1 nothing shared)
+constexpr double junkDb = 14.0;                        // hits this far under the usual one are noises, not drums
 
 const double twoPi = juce::MathConstants<double>::twoPi;
 
@@ -465,6 +467,197 @@ void findNotes (PitchTrack& track, Heard& heard)
     heard.pitched = sounding > 0 ? std::min (1.0, (double) held / sounding) : 0.0;
 }
 
+// Which drum each hit is. Its attack says which family: low (kick, toms), hats, or the middle
+// (snare, percussion). Within a family nobody's mouth makes the drums the way the next one
+// does, and a phone hears them its own way, so there are no numbers to hold a tom or a clap
+// to: the family's hits are split in two where they fall into two sounds on their own (and
+// left as one drum where they don't), and the two named against each other.
+struct HitSplit
+{
+    std::vector<int> a, b; // b empty: one sound
+};
+
+// what: each hit as a point (the same length each); which: the hits to split.
+HitSplit splitHits (const std::vector<std::vector<double>>& what, const std::vector<int>& which)
+{
+    const size_t n = which.size();
+    HitSplit one { which, {} };
+
+    if (n < 4)
+        return one;
+
+    std::vector<std::vector<double>> apart (n, std::vector<double> (n, 0.0));
+
+    for (size_t i = 0; i < n; ++i)
+        for (size_t j = 0; j < n; ++j)
+        {
+            double sum = 0.0;
+
+            for (size_t k = 0; k < what[(size_t) which[i]].size(); ++k)
+            {
+                const double d = what[(size_t) which[i]][k] - what[(size_t) which[j]][k];
+                sum += d * d;
+            }
+
+            apart[i][j] = std::sqrt (sum);
+        }
+
+    // Nearest joined first (by the average between their hits), down to two.
+    std::vector<std::vector<size_t>> groups;
+    auto between = apart;
+
+    for (size_t i = 0; i < n; ++i)
+        groups.push_back ({ i });
+
+    while (groups.size() > 2)
+    {
+        size_t a = 0, b = 1;
+
+        for (size_t i = 0; i < groups.size(); ++i)
+            for (size_t j = i + 1; j < groups.size(); ++j)
+                if (between[i][j] < between[a][b])
+                {
+                    a = i;
+                    b = j;
+                }
+
+        const double na = (double) groups[a].size(), nb = (double) groups[b].size();
+
+        for (size_t k = 0; k < groups.size(); ++k)
+            between[a][k] = between[k][a] = (na * between[a][k] + nb * between[b][k]) / (na + nb);
+
+        groups[a].insert (groups[a].end(), groups[b].begin(), groups[b].end());
+        groups.erase (groups.begin() + (std::ptrdiff_t) b);
+        between.erase (between.begin() + (std::ptrdiff_t) b);
+
+        for (auto& row : between)
+            row.erase (row.begin() + (std::ptrdiff_t) b);
+    }
+
+    // Two sounds only if each has more than one hit (one odd hit is a drum hit differently)
+    // and the hits sit well nearer their own than the other's.
+    if (groups[0].size() < 2 || groups[1].size() < 2)
+        return one;
+
+    double fit = 0.0, gap = 0.0;
+
+    for (size_t g = 0; g < 2; ++g)
+        for (const size_t i : groups[g])
+        {
+            double own = 0.0, other = 0.0;
+
+            for (const size_t j : groups[g])
+                own += apart[i][j] / (double) (groups[g].size() - 1);
+
+            for (const size_t j : groups[1 - g])
+                other += apart[i][j] / (double) groups[1 - g].size();
+
+            gap += other / (double) n;
+
+            fit += (other - own) / std::max ({ own, other, 1.0e-9 }) / (double) n;
+        }
+
+    if (juce::SystemStats::getEnvironmentVariable ("TAW_HUM_BANDS", {}).isNotEmpty())
+        std::printf ("split %d/%d  fit %.2f  gap %.2f\n", (int) groups[0].size(), (int) groups[1].size(), fit, gap);
+
+    if (fit < twoSounds || gap < twoSoundsApart)
+        return one;
+
+    HitSplit two;
+
+    for (const size_t i : groups[0]) two.a.push_back (which[i]);
+    for (const size_t i : groups[1]) two.b.push_back (which[i]);
+
+    return two;
+}
+
+void nameHits (std::vector<HumHit>& hits)
+{
+    std::vector<int> lows, mids;
+    std::vector<std::vector<double>> lowPoint, midPoint;
+
+    for (size_t h = 0; h < hits.size(); ++h)
+    {
+        auto& hit = hits[h];
+        lowPoint.emplace_back();
+        midPoint.emplace_back();
+
+        // Low ones by their whole body. Middle ones by what's over 600 Hz and how noisy they
+        // are: a snare said with some voice under it is still the snare.
+        double upper = 1.0e-9;
+
+        for (size_t b = 3; b < hit.body.size(); ++b)
+            upper += hit.body[b];
+
+        for (size_t b = 0; b < hit.body.size(); ++b)
+        {
+            lowPoint.back().push_back (std::sqrt ((double) hit.body[b] / 2.0));
+
+            if (b >= 3)
+                midPoint.back().push_back (std::sqrt ((double) hit.body[b] / upper / 2.0));
+        }
+
+        midPoint.back().push_back (std::sqrt (hit.flatness));
+
+        // (1 kHz: one real take's kicks started at 170 to 700 Hz, its snares at 1.5 to 3.3 kHz.)
+        if (hit.attack[0] + hit.attack[1] >= 0.4 || hit.attackHz < 1000.0)
+            lows.push_back ((int) h);
+        else if (hit.attack[6] + hit.attack[7] >= 0.5 || hit.attackHz > 5000.0)
+            hit.kind = hit.decayMs > 120.0 ? "open hat" : "hihat"; // open if it rings
+        else
+            mids.push_back ((int) h);
+    }
+
+    int groupsSoFar = 0;
+    const auto name = [&] (const std::vector<int>& which, const juce::String& kind)
+    {
+        for (const int h : which)
+        {
+            hits[(size_t) h].kind = kind;
+            hits[(size_t) h].group = groupsSoFar;
+        }
+
+        ++groupsSoFar;
+    };
+    const auto mean = [&] (const std::vector<int>& which, auto&& of)
+    {
+        double sum = 0.0;
+
+        for (const int h : which)
+            sum += of (hits[(size_t) h]) / (double) which.size();
+
+        return sum;
+    };
+    const auto deep = [] (const HumHit& hit) { return (double) hit.body[0]; };
+
+    // Low: two sounds are a kick (the deeper) and a tom. One is a kick, unless there's not
+    // much low end after its attack (a "dn", a "gu": a tom).
+    if (const auto low = splitHits (lowPoint, lows); ! low.b.empty())
+    {
+        const bool first = mean (low.a, deep) >= mean (low.b, deep);
+        name (first ? low.a : low.b, "kick");
+        name (first ? low.b : low.a, "tom");
+    }
+    else if (! lows.empty())
+    {
+        const bool tom = mean (lows, [] (const HumHit& hit) { return hit.lowShare; }) < 0.5
+                         || mean (lows, [] (const HumHit& hit) { return hit.centroidHz; }) > 600.0;
+        name (lows, tom ? "tom" : "kick");
+    }
+
+    // Middle: two sounds are the snare (the one hit more) and percussion.
+    if (const auto mid = splitHits (midPoint, mids); ! mid.b.empty())
+    {
+        const bool first = mid.a.size() >= mid.b.size();
+        name (first ? mid.a : mid.b, "snare");
+        name (first ? mid.b : mid.a, "perc");
+    }
+    else
+    {
+        name (mids, "snare");
+    }
+}
+
 void findHits (const float* x, int n, double rate, float peak, Heard& heard)
 {
     // 23 ms frames, an eighth apart; each sits around its time.
@@ -592,7 +785,9 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         // And its attack alone (the first frame): what the mouth meant. A snare's "k" or "p" is
         // bright even when a low body follows it; a kick is low from the start.
         std::vector<double> power ((size_t) bins, 0.0);
-        double attackTotal = 0.0, attackLow = 0.0, attackHigh = 0.0, attackWeighted = 0.0;
+        double attackTotal = 0.0, attackWeighted = 0.0;
+        std::array<double, 8> bodyBands {}, attackBands {};
+        const auto bandOf = [] (double f) { return f < 150.0 ? 0 : f < 300.0 ? 1 : f < 600.0 ? 2 : f < 1200.0 ? 3 : f < 2400.0 ? 4 : f < 5000.0 ? 5 : f < 10000.0 ? 6 : 7; };
 
         for (int start = onset - size / 4; start == onset - size / 4 || start < std::min (end, onset + (int) (0.1 * rate)) - size / 2; start += size / 2)
         {
@@ -608,8 +803,7 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
                         const double p = power[(size_t) k];
                         attackTotal += p;
                         attackWeighted += f * p;
-                        attackLow += f < 300.0 ? p : 0.0;
-                        attackHigh += f > 5000.0 ? p : 0.0;
+                        attackBands[(size_t) bandOf (f)] += p;
                     }
         }
 
@@ -627,6 +821,7 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
             weighted += f * p;
             low += f < 300.0 ? p : 0.0;
             high += f > 5000.0 ? p : 0.0;
+            bodyBands[(size_t) bandOf (f)] += p;
             logSum += std::log (p + 1.0e-12);
             ++counted;
         }
@@ -640,6 +835,12 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         hit.lowShare = low / total;
         hit.highShare = high / total;
         hit.flatness = std::exp (logSum / counted) / (total / counted + 1.0e-12);
+
+        for (size_t b = 0; b < 8; ++b)
+        {
+            hit.body[b] = (float) (bodyBands[b] / total);
+            hit.attack[b] = (float) (attackTotal > 0.0 ? attackBands[b] / attackTotal : bodyBands[b] / total);
+        }
 
         // Level, and how long until it's 20 dB down (1 ms peaks).
         float loud = 0.0f;
@@ -668,23 +869,8 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
 
         hit.decayMs = 1000.0 * (quiet - loudAt) / rate;
 
-        // Which drum, by its attack: mostly lows is a kick, mostly highs a hat (open if it rings),
-        // the rest a snare.
-        const double attackCentroid = attackTotal > 0.0 ? attackWeighted / attackTotal : hit.centroidHz;
-        const double lowAtFirst = attackTotal > 0.0 ? attackLow / attackTotal : hit.lowShare;
-        const double highAtFirst = attackTotal > 0.0 ? attackHigh / attackTotal : hit.highShare;
-        hit.attackHz = attackCentroid;
-
-        // (1 kHz: one real take's kicks started at 170 to 700 Hz, its snares at 1.5 to 3.3 kHz.)
-        // A low attack without much low end after it is a tom (or a "dn", a "gu": something between).
-        if (lowAtFirst >= 0.4 || attackCentroid < 1000.0)
-            hit.kind = hit.lowShare < 0.5 || hit.centroidHz > 600.0 ? "tom" : "kick";
-        else if (highAtFirst >= 0.5 || attackCentroid > 5000.0)
-            hit.kind = hit.decayMs > 120.0 ? "open hat" : "hihat";
-        else
-            hit.kind = "snare";
-
-        heard.hits.push_back (hit);
+        hit.attackHz = attackTotal > 0.0 ? attackWeighted / attackTotal : hit.centroidHz;
+        heard.hits.push_back (hit); // which drum: nameHits, once they're all in
     }
 
     // A breath, the phone being put down: far quieter than the drums around it.
@@ -699,6 +885,8 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         const double floor = levels[levels.size() / 2] - junkDb;
         std::erase_if (heard.hits, [floor] (const HumHit& hit) { return hit.levelDb < floor; });
     }
+
+    nameHits (heard.hits);
 }
 } // namespace
 

@@ -445,11 +445,20 @@ Result App::phoneCommand (const juce::String& arg)
         return Result::good (was ? "phone link off" : "the phone link wasn't on");
     }
 
-    if (arg.isNotEmpty() && ! arg.equalsIgnoreCase ("on"))
-        return Result::fail (L"phone turns the phone link on \x00b7 phone off ends it");
-
     if (session == nullptr)
         return Result::fail ("open a session first: the phone's recordings go into it");
+
+    // Where the parts made from takes start: the bar the cursor is in.
+    if (arg.equalsIgnoreCase ("here"))
+    {
+        const double bar = juce::jmax (1, session->beatsPerBar());
+        phoneStartBeat = std::floor ((double) cursor / session->samplesPerBeat() / bar + 1.0e-6) * bar;
+        phoneStartIn = session->folder();
+        return Result::good ("parts from the phone start at " + formatBars ((juce::int64) std::llround (phoneStartBeat * session->samplesPerBeat())));
+    }
+
+    if (arg.isNotEmpty() && ! arg.equalsIgnoreCase ("on"))
+        return Result::fail (L"phone turns the phone link on \x00b7 phone here: parts start at this bar \x00b7 phone off ends it");
 
     if (phone.running() && phoneVisible && arg.isEmpty())
     {

@@ -174,6 +174,10 @@ off View > Allow Mouse Reporting (Terminal.app).
   lines on screen when the grid is on, as one undo step. Its automation goes with it when the
   button is let go. Not while recording.
 - Drag from empty lane: selects time.
+- The routing column: a click steps onto that insert, send or output (the mix's inserts too);
+  a double-click opens it as `|` does: an insert's plugin window (an empty slot: the effects
+  picker), a send's or the output's bus picker. Double-click an instrument track's name: its
+  instrument's window.
 - `taw --exec` takes `:click X Y`, `:dblclick X Y` and `:drag X Y X2` (cells of its 160×44
   screen).
 

@@ -96,6 +96,31 @@ public:
         std::vector<std::pair<int, int>> rows; // from tracksTop down: (track, automation lane; -1 its own row)
         double origin = 0.0, spc = 1.0; // column 0 starts at origin; a column is spc samples
         bool valid = false;
+        // The routing column (ioX -1: hidden), the mix's row, the track panel's width, and which
+        // of its track's own rows each row is (-1: a frame, an automation lane, a playlist).
+        int ioX = -1, mixY = -1, headerW = 0;
+        std::vector<int> rowIn;
+
+        // The routing cell at a point (App::ioFirstInsert..ioOutput), or -1: a track's inserts on
+        // its first row, its sends below (name and level) with its output; the mix's inserts.
+        int ioCellAt (int x, int y) const
+        {
+            const int i = y - tracksTop;
+            const bool mix = y == mixY;
+            const int r = mix ? 0 : i >= 0 && i < (int) rowIn.size() ? rowIn[(size_t) i] : -1;
+            const int slotsX = ioX + layout::ioSlots - 1;
+
+            if (! valid || ioX < 0 || r < 0)
+                return -1;
+
+            if (x >= slotsX && x < slotsX + 5 * layout::ioSlotW && (r == 0 || ! mix))
+                return (r == 0 ? 0 : 5) + (x - slotsX) / layout::ioSlotW;
+
+            if (! mix && x >= ioX + layout::ioOut - 1 && x < ioX + layout::ioOut + 5 && r == (rowsPerTrack > 1 ? 1 : 0))
+                return 10;
+
+            return -1;
+        }
 
         bool inLane (int x) const { return valid && x >= laneX && x < laneX + laneW; }
         // The track drawn on row y (its own rows or its lanes), or -1.

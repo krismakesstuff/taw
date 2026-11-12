@@ -3778,8 +3778,35 @@ void App::handleMouse (const Key& k)
         return;
     }
 
+    // The routing column: a click steps onto that insert, send or output (the mix's inserts
+    // too); a double-click opens it as | does: an insert's window (empty: the effects picker), a
+    // send's or the output's bus picker. A double-click on an instrument track's name: its plugin.
+    if (session != nullptr && ! k.right && map.valid)
+    {
+        const bool onMix = k.y == map.mixY;
+
+        if (const int cell = map.ioCellAt (k.x, k.y); cell >= 0 && (onMix || track >= 0))
+        {
+            focusTrack (onMix ? session->numTracks() : track);
+            ioCell = cell;
+
+            say (k.doubleClick ? togglePluginHere() : Result::good (describeIoCell (ioTrack(), ioCell)));
+            return;
+        }
+
+        if (k.doubleClick && track >= 0 && k.x < map.headerW && map.laneAt (k.y) < 0 && Session::isInstrumentTrack (session->track (track)))
+        {
+            focusTrack (track);
+            ioCell = -1;
+            say (toggleEditor (track));
+            return;
+        }
+    }
+
     if (session == nullptr || k.right || ! map.inLane (k.x) || track < 0)
         return;
+
+    ioCell = -1; // out of the routing column
 
     // An automation lane: onto it, the cursor where it was clicked.
     if (const auto lane = map.laneAt (k.y); lane >= 0)

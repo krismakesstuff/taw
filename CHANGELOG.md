@@ -4,6 +4,9 @@
 
 - Clips drag with the mouse on the timeline: along their track, onto the grid lines on screen,
   their automation with them. A drag from empty lane selects time.
+- Double-click opens plugins and sends: an insert in the routing column (an empty slot picks an
+  effect), a send or the output (picks its bus), an instrument track's name (its instrument).
+  One click steps onto the slot.
 - The MIDI editor copies notes: alt+drag takes copies of the selected notes, and ctrl+c / ctrl+x
   / ctrl+v copy, cut and paste them at the cursor (in another clip too). Off the grid is now
   ctrl+drag for notes (alt copies).

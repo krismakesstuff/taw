@@ -1307,6 +1307,9 @@ void Ui::drawTimeline (App& app)
 
     // Where things were drawn, for the mouse: which track (and lane) each row is.
     laneMap = { laneX, laneW, rulerY, tracksTop, rowsPerTrack, firstShown, visible, videoY, {}, origin, spc, true };
+    laneMap.ioX = io ? ioX : -1;
+    laneMap.mixY = masterY;
+    laneMap.headerW = leftW;
 
     for (int track = firstShown; track < lastShown; ++track)
     {
@@ -1316,8 +1319,13 @@ void Ui::drawTimeline (App& app)
         if (track == framedTrack) // a click on its frame is a click on the track
             laneMap.rows.push_back ({ track, -1 });
 
+        laneMap.rowIn.resize (laneMap.rows.size(), -1);
+
         for (int r = 0; r < rowsPerTrack; ++r)
+        {
             laneMap.rows.push_back ({ track, -1 });
+            laneMap.rowIn.push_back (r);
+        }
 
         for (int lane = 0; lane < (int) lanesOf (track).size(); ++lane)
             for (int r = 0; r < laneRows; ++r)
@@ -1335,8 +1343,13 @@ void Ui::drawTimeline (App& app)
     if (n > 0)
     {
         auto& rows = laneMap.rows;
-        rows.erase (rows.begin(), rows.begin() + std::min ((int) rows.size(), app.rowScroll - blockTop[(size_t) firstShown]));
+        auto& rowIn = laneMap.rowIn;
+        rowIn.resize (rows.size(), -1);
+        const auto cut = std::min ((int) rows.size(), app.rowScroll - blockTop[(size_t) firstShown]);
+        rows.erase (rows.begin(), rows.begin() + cut);
+        rowIn.erase (rowIn.begin(), rowIn.begin() + cut);
         rows.resize (std::min (rows.size(), (size_t) area));
+        rowIn.resize (rows.size(), -1);
     }
 
     // Loudness as shade density; these four blocks exist in every console font.

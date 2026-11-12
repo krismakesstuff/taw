@@ -40,6 +40,7 @@ const char* const page = R"html(<!doctype html>
   .what b { display: block; padding: 10px 4px; border-radius: 10px; background: #2a2e35; text-align: center; font-weight: 500; font-size: 15px; }
   .what input:checked + b { background: #e8e6e1; color: #14161a; }
   select { width: 100%; margin: 0 0 12px; padding: 12px; border-radius: 10px; border: 0; background: #2a2e35; color: #e8e6e1; font: inherit; }
+  .check { display: block; margin: 0 0 12px; color: #9a9890; font-size: 15px; }
   #hint { font-size: 14px; margin: 0 0 16px; }
   .button { display: block; box-sizing: border-box; width: 100%; margin: 0 0 12px; padding: 18px; border: 0; border-radius: 12px; text-align: center; font: inherit; font-weight: 600; }
   .record { background: #c8452f; color: #fff; }
@@ -75,6 +76,8 @@ const char* const page = R"html(<!doctype html>
   <label><input type="radio" name="as" value="notes"><b>notes</b></label>
 </div>
 <select id="inst" hidden></select>
+<select id="key" hidden></select>
+<label class="check" id="gridRow" hidden><input id="grid" type="checkbox" checked> snap to the grid (sixteenths)</label>
 <p id="hint"></p>
 <div id="click" hidden>
   <div class="tempo">
@@ -129,9 +132,32 @@ const char* const page = R"html(<!doctype html>
   const keep = (key, value) => { try { localStorage.setItem (key, value); } catch (e) {} };
   const chosen = () => document.querySelector ('input[name=as]:checked').value;
 
+  // Notes kept to a key (so one sung part agrees with the next), and everything on the grid:
+  // both on unless turned off here.
+  const keyBox = document.getElementById('key'), gridRow = document.getElementById('gridRow'), gridBox = document.getElementById('grid');
+  const keyAuto = document.createElement ('option');
+  keyAuto.value = 'auto';
+  keyAuto.textContent = 'key: found from what you sing';
+  keyBox.append (keyAuto);
+
+  for (const [value, text] of [['off', 'no key: the notes as sung']])
+    keyBox.append (new Option (text, value));
+
+  for (const mode of ['major', 'minor'])
+    for (const root of ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'])
+      keyBox.append (new Option ('key: ' + root + ' ' + mode, root + ' ' + mode));
+
+  keyBox.value = kept ('taw.key') || 'auto';
+  if (keyBox.selectedIndex < 0) keyBox.value = 'auto';
+  keyBox.addEventListener ('change', () => keep ('taw.key', keyBox.value));
+  gridBox.checked = kept ('taw.grid') !== '0';
+  gridBox.addEventListener ('change', () => keep ('taw.grid', gridBox.checked ? '1' : '0'));
+
   function showChoice () {
     const as = chosen();
     inst.hidden = as !== 'notes';
+    keyBox.hidden = as !== 'notes';
+    gridRow.hidden = as === 'audio';
     hint.textContent = as === 'drums' ? 'Beatbox it: kicks, snares, hats. taw puts the hits on drum tracks, with the recording beside them, muted.'
                      : as === 'notes' ? 'Hum or sing it. taw writes the notes for the instrument, with the recording beside them, muted.'
                      : 'The recording goes on a track as it is.';
@@ -169,7 +195,8 @@ const char* const page = R"html(<!doctype html>
 
   function send (file, click) {
     const as = chosen(), instrument = as === 'notes' ? inst.value : '';
-    const clicked = click ? '&at=' + click.at.toFixed (4) + '&bpm=' + click.bpm : '';
+    const clicked = (click ? '&at=' + click.at.toFixed (4) + '&bpm=' + click.bpm : '')
+                  + '&grid=' + (gridBox.checked ? 1 : 0) + '&key=' + encodeURIComponent (keyBox.value);
     const row = document.createElement('li');
     const note = document.createElement('small');
     const bar = document.createElement('div');
@@ -245,6 +272,8 @@ const char* const page = R"html(<!doctype html>
         const parts = text.split (' ');
         const bpm = Math.round (parseFloat (parts[0]) || 120), empty = parts[2] === '1';
         beatsPerBar = parseInt (parts[1]) || 4;
+        const key = parts.slice (3).join (' ');
+        keyAuto.textContent = key ? "key: the session's (" + key + ')' : 'key: found from what you sing';
 
         if (take)
           return;
@@ -693,6 +722,8 @@ struct PhoneLink::Server final : private juce::Thread
         // An upload: the file's name and what to make of it in the query, the file itself as the body.
         juce::String name, as ("audio"), instrument;
         double downbeat = -1.0, bpm = 0.0;
+        bool onGrid = true;
+        juce::String key ("auto");
 
         for (const auto& pair : juce::StringArray::fromTokens (query, "&", ""))
         {
@@ -706,6 +737,10 @@ struct PhoneLink::Server final : private juce::Thread
                 instrument = value.trim().substring (0, 80);
             else if (pair.startsWith ("at="))
                 downbeat = juce::jlimit (0.0, 60.0, value.getDoubleValue());
+            else if (pair.startsWith ("grid="))
+                onGrid = value != "0";
+            else if (pair.startsWith ("key="))
+                key = value.trim().substring (0, 20);
             else if (pair.startsWith ("bpm="))
                 bpm = juce::jlimit (0.0, 400.0, value.getDoubleValue());
         }
@@ -762,7 +797,7 @@ struct PhoneLink::Server final : private juce::Thread
 
         {
             const juce::ScopedLock sl (lock);
-            arrived.push_back ({ file, as, instrument, bpm >= 20.0 ? downbeat : -1.0, bpm >= 20.0 ? bpm : 0.0 });
+            arrived.push_back ({ file, as, instrument, bpm >= 20.0 ? downbeat : -1.0, bpm >= 20.0 ? bpm : 0.0, onGrid, key });
             ++count;
             statusText = "got " + name;
         }
@@ -808,14 +843,14 @@ void PhoneLink::setInstruments (const juce::StringArray& names)
     server->instruments = names;
 }
 
-void PhoneLink::setSession (const juce::String& name, double bpm, int beatsPerBar, bool empty)
+void PhoneLink::setSession (const juce::String& name, double bpm, int beatsPerBar, bool empty, const juce::String& key)
 {
     if (server == nullptr)
         return;
 
     const juce::ScopedLock sl (server->lock);
     server->session = name;
-    server->tempo = juce::String (bpm, 2) + " " + juce::String (beatsPerBar) + " " + (empty ? "1" : "0");
+    server->tempo = juce::String (bpm, 2) + " " + juce::String (beatsPerBar) + " " + (empty ? "1" : "0") + " " + key;
 }
 
 PhoneLink::PhoneLink() = default;

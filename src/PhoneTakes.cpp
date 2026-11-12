@@ -73,7 +73,7 @@ void App::pollPhone()
         return;
 
     if (session != nullptr)
-        phone.setSession (session->name(), session->bpm(), session->beatsPerBar(), session->numTracks() == 0 && phoneJob == nullptr);
+        phone.setSession (session->name(), session->bpm(), session->beatsPerBar(), session->numTracks() == 0 && phoneJob == nullptr, phoneKeyName());
     else
         phone.setSession ({});
 
@@ -204,9 +204,25 @@ void App::stepPhoneJob()
         if (first && clicked)
             session->tree().setProperty (ids::bpm, std::round (job.take.bpm), um());
 
-        job.part = clicked ? arrange (*heard, drums, session->bpm(), job.take.downbeat)
-                           : arrange (*heard, drums, first ? 0.0 : session->bpm());
+        job.part = clicked ? arrange (*heard, drums, session->bpm(), job.take.downbeat, job.take.onGrid)
+                           : arrange (*heard, drums, first ? 0.0 : session->bpm(), -1.0, job.take.onGrid);
         job.heardTake = *heard;
+
+        // Notes kept to a key, so one sung part agrees with the next: the one the phone named,
+        // else the session's so far, else the one this take fits best (the session's from now).
+        juce::String inKey;
+
+        if (! drums && job.take.key != "off")
+        {
+            if (const auto named = HumKey::named (job.take.key))
+                phoneKey = named;
+            else if (phoneKeyName().isEmpty())
+                phoneKey = keyOf (job.part);
+
+            phoneKeyIn = session->folder();
+            snapToKey (job.part, *phoneKey);
+            inKey = " in " + phoneKey->name();
+        }
 
         if (first && ! clicked)
             session->tree().setProperty (ids::bpm, std::round (job.part.bpm), um());
@@ -245,7 +261,7 @@ void App::stepPhoneJob()
             clip.appendChild (Session::makeNote (note.beat, note.length, note.pitch, note.vel), um());
 
         const auto plugin = session->track (index)[ids::pluginName].toString();
-        say (Result::good ("from the phone: " + juce::String ((int) job.part.notes.size()) + " notes on track " + trackLabel (index)
+        say (Result::good ("from the phone: " + juce::String ((int) job.part.notes.size()) + " notes" + inKey + " on track " + trackLabel (index)
                            + (plugin.isNotEmpty() ? " (" + plugin + ")" : juce::String()) + " at " + at
                            + (plugin.isEmpty() ? L" \x00b7 " + trackLabel (index) + " inst <name> gives it a sound" : juce::String())
                            + L" \x00b7 the recording is muted beside them"));

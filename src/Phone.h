@@ -30,7 +30,8 @@ public:
     // The session the recordings are going into (empty: none open), for the page to show, and
     // what its click goes by: the tempo, the beats in a bar, and whether there's nothing in the
     // session yet (the phone may then set the tempo).
-    void setSession (const juce::String& name, double bpm = 0.0, int beatsPerBar = 4, bool empty = false);
+    // key: the key the session's sung parts are in so far ("A minor"; empty: none yet).
+    void setSession (const juce::String& name, double bpm = 0.0, int beatsPerBar = 4, bool empty = false, const juce::String& key = {});
 
     // The instruments the page offers for a sung part (the scanned plugins' names).
     void setInstruments (const juce::StringArray& names);
@@ -43,6 +44,8 @@ public:
         juce::String as, instrument;
         double downbeat = -1.0; // recorded on the page to its click: where in the file beat one is (seconds) ...
         double bpm = 0.0;       // ... and the click's tempo
+        bool onGrid = true;     // hits and notes on sixteenths; else as played
+        juce::String key { "auto" }; // notes kept to a key: "auto" (the session's, or found from the take), "off", or "A minor"
     };
 
     // The recordings that have come in since last asked, whole, in a temporary folder that lasts

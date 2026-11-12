@@ -65,7 +65,7 @@ std::optional<Heard> hear (const juce::File&, juce::AudioFormatManager&);
 // first note or hit, firstOnset seconds into the recording.
 struct HumPart
 {
-    struct Note { double beat = 0.0, length = 0.25; int pitch = 60, vel = 100; };
+    struct Note { double beat = 0.0, length = 0.25; int pitch = 60, vel = 100; double cents = 0.0; }; // cents: how far the sung pitch sat from the note
     struct Hit { double beat = 0.0; float vel = 0.8f; juce::String kind; };
 
     std::vector<Note> notes; // a melody ...
@@ -79,7 +79,23 @@ struct HumPart
 // take alone, which a beat is good for and a few sung notes aren't.
 // downbeat: where in the take beat one fell, for a take made to a click at nearBpm (firstOnset
 // is then that, not the first sound); under 0, the first sound is taken to be beat one.
-HumPart arrange (const Heard&, bool asBeat, double nearBpm = 0.0, double downbeat = -1.0);
+// onGrid: on sixteenths; else where it was sung or hit, to the tempo.
+HumPart arrange (const Heard&, bool asBeat, double nearBpm = 0.0, double downbeat = -1.0, bool onGrid = true);
+
+// A key, for sung parts to agree in: the notes outside it go to the nearest one inside (the way
+// the voice was leaning).
+struct HumKey
+{
+    int root = 0;       // 0 C .. 11 B
+    bool minor = false; // natural minor; else major
+
+    juce::String name() const;                                  // "A minor"
+    static std::optional<HumKey> named (const juce::String&);   // "A minor", "am", "F# major", "Bb"
+    bool has (int pitch) const;
+};
+
+HumKey keyOf (const HumPart&);          // the key its notes fit best (by how long each is held)
+void snapToKey (HumPart&, HumKey);
 
 // A time in seconds as beats at a tempo, on a grid (in beats; 0 leaves it alone).
 double humBeat (double seconds, double bpm, double grid);

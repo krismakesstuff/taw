@@ -17,6 +17,11 @@
   the bar line, so a part that starts off the beat stays there. The click can carry on through
   the take, for headphones. For this the link is HTTPS with a certificate of taw's own: the phone
   warns once. The `http` address still sends files.
+- Sung parts from the phone are kept to a key, so one agrees with the next: found from the first
+  one (or chosen on the phone, or `phone key a minor`), and the notes outside it go to the nearest
+  one inside. `phone key auto` finds it again; "no key" on the phone leaves the notes as sung.
+- "Snap to the grid" on the phone (on unless turned off): off, hits and notes land where they
+  were played.
 - `taw --phone` starts a new session with the phone link on (`taw my-song --phone`: in my-song);
   `:phone` on the session screen does the same.
 

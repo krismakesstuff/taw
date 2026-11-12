@@ -1106,7 +1106,7 @@ std::vector<int> beatSteps (const std::vector<HumHit>& hits, double nearBpm, dou
 }
 } // namespace
 
-HumPart arrange (const Heard& heard, bool asBeat, double nearBpm, double downbeat)
+HumPart arrange (const Heard& heard, bool asBeat, double nearBpm, double downbeat, bool onGrid)
 {
     HumPart part;
 
@@ -1170,7 +1170,7 @@ HumPart arrange (const Heard& heard, bool asBeat, double nearBpm, double downbea
         {
             const auto& hit = heard.hits[i];
             // The loudest is a full hit; 20 dB under it, a ghost.
-            part.hits.push_back ({ steps[i] * 0.25, (float) juce::jlimit (0.25, 1.0, 1.0 + (hit.levelDb - loudest) / 26.0), hit.kind });
+            part.hits.push_back ({ onGrid ? steps[i] * 0.25 : std::max (0.0, (hit.time - part.firstOnset) / (4.0 * step)), (float) juce::jlimit (0.25, 1.0, 1.0 + (hit.levelDb - loudest) / 26.0), hit.kind });
         }
     }
     else
@@ -1190,13 +1190,139 @@ HumPart arrange (const Heard& heard, bool asBeat, double nearBpm, double downbea
                 length = std::min (length, steps[i + 1] - steps[i]);
 
             part.notes.push_back ({ steps[i] * 0.25, length * 0.25, note.pitch,
-                                    juce::jlimit (50, 115, juce::roundToInt (110.0 + 2.5 * (note.levelDb - loudest))) });
+                                    juce::jlimit (50, 115, juce::roundToInt (110.0 + 2.5 * (note.levelDb - loudest))), note.cents });
+
+            if (! onGrid)
+            {
+                // As sung: where it started and how long it was held, out of the next one's way.
+                auto& made = part.notes.back();
+                made.beat = std::max (0.0, (note.start - part.firstOnset) / (4.0 * step));
+                made.length = std::max (0.05, note.length / (4.0 * step));
+
+                if (i + 1 < heard.notes.size())
+                    made.length = std::max (0.05, std::min (made.length, (heard.notes[i + 1].start - note.start) / (4.0 * step)));
+            }
         }
     }
 
     const double end = asBeat ? part.hits.back().beat + 0.25 : part.notes.back().beat + part.notes.back().length;
     part.beats = 4.0 * std::ceil (end / 4.0);
     return part;
+}
+
+juce::String HumKey::name() const
+{
+    static const char* const names[] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
+    return juce::String (names[((root % 12) + 12) % 12]) + (minor ? " minor" : " major");
+}
+
+std::optional<HumKey> HumKey::named (const juce::String& text)
+{
+    const auto t = text.trim();
+
+    if (t.isEmpty())
+        return {};
+
+    static const int letters[] = { 9, 11, 0, 2, 4, 5, 7 }; // a b c d e f g
+    const auto letter = juce::CharacterFunctions::toLowerCase (t[0]);
+
+    if (letter < 'a' || letter > 'g')
+        return {};
+
+    HumKey key;
+    key.root = letters[letter - 'a'];
+    auto rest = t.substring (1);
+
+    if (rest.startsWith ("#"))
+    {
+        key.root = (key.root + 1) % 12;
+        rest = rest.substring (1);
+    }
+    else if (rest.startsWith ("b") && ! rest.startsWithIgnoreCase ("b m")) // Bb, Ebm
+    {
+        key.root = (key.root + 11) % 12;
+        rest = rest.substring (1);
+    }
+
+    rest = rest.trim().toLowerCase();
+
+    if (rest == "m" || rest.startsWith ("min"))
+        key.minor = true;
+    else if (rest.isNotEmpty() && ! rest.startsWith ("maj"))
+        return {};
+
+    return key;
+}
+
+bool HumKey::has (int pitch) const
+{
+    static const bool major[] = { true, false, true, false, true, true, false, true, false, true, false, true };
+    static const bool natural[] = { true, false, true, true, false, true, false, true, true, false, true, false };
+    const int degree = (((pitch - root) % 12) + 12) % 12;
+    return minor ? natural[degree] : major[degree];
+}
+
+HumKey keyOf (const HumPart& part)
+{
+    // How much each of the twelve notes is held, against how much each belongs in a key
+    // (Krumhansl and Kessler's profiles): the key that agrees best.
+    static const double major[] = { 6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88 };
+    static const double minor[] = { 6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17 };
+    double held[12] = {};
+
+    for (const auto& note : part.notes)
+        held[((note.pitch % 12) + 12) % 12] += note.length;
+
+    HumKey best;
+    double most = -2.0;
+
+    for (int root = 0; root < 12; ++root)
+        for (const bool isMinor : { false, true })
+        {
+            const auto* profile = isMinor ? minor : major;
+            double meanHeld = 0.0, meanProfile = 0.0;
+
+            for (int i = 0; i < 12; ++i)
+            {
+                meanHeld += held[i] / 12.0;
+                meanProfile += profile[i] / 12.0;
+            }
+
+            double both = 0.0, a = 0.0, b = 0.0;
+
+            for (int i = 0; i < 12; ++i)
+            {
+                const double h = held[(i + root) % 12] - meanHeld, p = profile[i] - meanProfile;
+                both += h * p;
+                a += h * h;
+                b += p * p;
+            }
+
+            if (const double agrees = a > 0.0 ? both / std::sqrt (a * b) : 0.0; agrees > most)
+            {
+                most = agrees;
+                best = { root, isMinor };
+            }
+        }
+
+    return best;
+}
+
+void snapToKey (HumPart& part, HumKey key)
+{
+    for (auto& note : part.notes)
+    {
+        if (key.has (note.pitch))
+            continue;
+
+        // A semitone up or down, whichever is in the key; both, and it's the way the voice leaned.
+        const bool up = key.has (note.pitch + 1), down = key.has (note.pitch - 1);
+
+        if (up && (! down || note.cents > 0.0))
+            ++note.pitch;
+        else if (down)
+            --note.pitch;
+    }
 }
 
 double humBeat (double seconds, double bpm, double grid)

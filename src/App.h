@@ -482,6 +482,9 @@ public:
     bool phoneAtStart = false;   // taw --phone: once the device is open
     double phoneStartBeat = -1.0; // where the parts made from takes start: the first one's bar, or "phone here" (-1: not yet)
     juce::File phoneStartIn;      // the session that's true of
+    std::optional<HumKey> phoneKey; // the key its sung parts are kept to: the first one's, or "phone key" (none yet: found from the next)
+    juce::File phoneKeyIn;
+    juce::String phoneKeyName() const { return phoneKey.has_value() && session != nullptr && phoneKeyIn == session->folder() ? phoneKey->name() : juce::String(); }
     bool handlePhoneKey (const Key&);
     void pollPhone();
     PhoneLink phone;

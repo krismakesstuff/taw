@@ -4429,7 +4429,33 @@ int main (int argc, char** argv)
                 check ("its notes fall from the click's beat one, not from the first note",
                        s.numTracks() == again + 2 && count (s.track (again + 1), taw::ids::NOTE) == 9 && clickedAt >= unclicked);
                 const auto tempo = ask ("GET", appHome + "/tempo", {});
-                check ("the page can ask the tempo and the bar", tempo.endsWith ("\r\n\r\n" + juce::String (s.bpm(), 2) + " " + juce::String (s.beatsPerBar()) + " 0"));
+                check ("the page can ask the tempo and the bar", tempo.endsWith ("\r\n\r\n" + juce::String (s.bpm(), 2) + " " + juce::String (s.beatsPerBar()) + " 0 " + app->phoneKeyName())
+                                                                 && app->phoneKeyName().isNotEmpty());
+
+                // Kept to a key, and off the grid when asked.
+                const auto pitches = [&] (int t)
+                {
+                    juce::Array<int> all;
+
+                    for (const auto& note : s.track (t).getChild (0))
+                        all.add ((int) note[taw::ids::pitch]);
+
+                    return all;
+                };
+                check ("a key is found from the first sung part, and its notes are in it",
+                       [&] { for (const int p : pitches (then + 1)) if (! app->phoneKey->has (p)) return false; return true; }());
+                const int free = s.numTracks();
+                check ("a melody sent in another key, off the grid, is taken", sendAs (args[3], "notes", "&grid=0&key=F%23%20major"));
+                bool inKey = app->phoneKeyName() == "F# major", offGrid = false;
+
+                for (const auto& note : s.track (free + 1).getChild (0))
+                {
+                    const double beat = note[taw::ids::beat];
+                    inKey = inKey && taw::HumKey::named ("F# major")->has ((int) note[taw::ids::pitch]);
+                    offGrid = offGrid || std::abs (beat * 4.0 - std::round (beat * 4.0)) > 0.01;
+                }
+
+                check ("its notes are in that key, where they were sung", inKey && offGrid);
             }
 
             // HTTPS, asked as a browser would (curl, taking the certificate as it is).

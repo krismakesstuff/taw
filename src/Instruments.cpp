@@ -457,8 +457,33 @@ Result App::phoneCommand (const juce::String& arg)
         return Result::good ("parts from the phone start at " + formatBars ((juce::int64) std::llround (phoneStartBeat * session->samplesPerBeat())));
     }
 
+    // The key sung parts are kept to: "phone key a minor", "phone key auto" (found from the next take).
+    if (arg.startsWithIgnoreCase ("key"))
+    {
+        const auto asked = arg.substring (3).trim();
+
+        if (asked.isEmpty())
+            return Result::good (phoneKeyName().isNotEmpty() ? "sung parts from the phone are kept to " + phoneKeyName()
+                                                             : juce::String ("no key yet: the next sung part sets it"));
+
+        if (asked.equalsIgnoreCase ("auto"))
+        {
+            phoneKey.reset();
+            return Result::good ("the next sung part from the phone sets the key");
+        }
+
+        const auto key = HumKey::named (asked);
+
+        if (! key.has_value())
+            return Result::fail (L"phone key a minor \x00b7 phone key f# \x00b7 phone key auto");
+
+        phoneKey = key;
+        phoneKeyIn = session->folder();
+        return Result::good ("sung parts from the phone are kept to " + key->name());
+    }
+
     if (arg.isNotEmpty() && ! arg.equalsIgnoreCase ("on"))
-        return Result::fail (L"phone turns the phone link on \x00b7 phone here: parts start at this bar \x00b7 phone off ends it");
+        return Result::fail (L"phone turns the phone link on \x00b7 phone here: parts start at this bar \x00b7 phone key <key> \x00b7 phone off ends it");
 
     if (phone.running() && phoneVisible && arg.isEmpty())
     {

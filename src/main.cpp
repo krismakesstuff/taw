@@ -3983,6 +3983,33 @@ int main (int argc, char** argv)
         printHeard (*heard, args[2].getDoubleValue(), args.size() > 3 ? args[3].getDoubleValue() : 0.25);
         std::printf ("(%.0f ms)\n", juce::Time::getMillisecondCounterHiRes() - started);
 
+        // taw --hum <file> drums / notes: as the part it would be on the timeline (sixteenths, in
+        // the take's own tempo): a row of steps for each drum, or the notes by beat.
+        if (args.contains ("drums") || args.contains ("notes"))
+        {
+            const auto part = taw::arrange (*heard, args.contains ("drums"), args[2].getDoubleValue()); // near the bpm given, if one is
+            std::printf ("\nas a part: %.2f bpm, %g beats, from %.3f s\n", part.bpm, part.beats, part.firstOnset);
+            juce::StringArray kinds;
+
+            for (const auto& hit : part.hits)
+                kinds.addIfNotAlreadyThere (hit.kind);
+
+            for (const auto& kind : kinds)
+            {
+                juce::String row = juce::String::repeatedString (".", juce::roundToInt (part.beats * 4.0));
+
+                for (const auto& hit : part.hits)
+                    if (hit.kind == kind)
+                        row = row.replaceSection (juce::roundToInt (hit.beat * 4.0), 1, hit.vel > 0.75f ? "X" : hit.vel > 0.45f ? "x" : "o");
+
+                std::printf ("  %-8s %s\n", kind.toRawUTF8(), row.toRawUTF8());
+            }
+
+            for (const auto& note : part.notes)
+                std::printf ("  beat %6.2f  len %5.2f  %-4s %3d  vel %3d\n", note.beat, note.length,
+                             juce::MidiMessage::getMidiNoteName (note.pitch, true, true, 4).toRawUTF8(), note.pitch, note.vel);
+        }
+
         // taw --hum <file> ... contour: the sung pitch itself, a line every 20 ms where there is one.
         if (args.contains ("contour"))
             for (size_t i = 0; i < heard->contour.size(); i += 2)

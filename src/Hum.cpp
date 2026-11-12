@@ -22,8 +22,13 @@ constexpr float gateDb = 40.0f;                         // this far under the lo
 constexpr float strikeDb = 6.0f;                        // a dip this deep and back is a new note
 constexpr float stepSemitones = 0.7f;                   // off the note by this much ...
 constexpr int stepFrames = 5;                           // ... for this long is the next note
-constexpr int shortFrames = 6;                          // shorter pieces join a neighbour (a scoop, a slide)
+constexpr int shortFrames = 12;                         // shorter pieces are notes only if they hold still ...
+constexpr int stableFrames = 8;                         // ... for this long ...
+constexpr float stableSemitones = 0.6f;                 // ... within this; the rest join a neighbour (a scoop, a slide)
+constexpr float dipSemitones = 1.0f;                    // a short piece this far off the note it joins: struck again
+constexpr float sameSemitones = 0.7f;                  // pieces closer than this with nothing struck between are one note
 constexpr float slideSemitones = 2.0f;                  // a piece whose pitch wanders more isn't a note
+constexpr double junkDb = 14.0;                         // hits this far under the usual one are noises, not drums
 
 const double twoPi = juce::MathConstants<double>::twoPi;
 
@@ -379,45 +384,51 @@ void findNotes (PitchTrack& track, Heard& heard)
         a = b;
     }
 
-    // Short pieces are the way into a note (a scoop, a slide between two): they join the note
-    // after, or the one before; one on its own is a blip.
+    // A short piece is a note of its own only if the pitch holds still in it (a grace note).
+    // Otherwise it's the way into a note (a scoop, a slide between two, the dip of a consonant):
+    // it joins the note after, or the one before; one on its own is a blip. A dip well under the
+    // note it joins means that note was struck again ("da-da" on one pitch).
+    auto middle = [&] (const Segment& s) { return median (pitch.data() + s.from, s.to - s.from); };
+
     for (size_t i = 0; i < segs.size();)
     {
         const auto s = segs[i];
+        const int length = s.to - s.from;
+        const bool joinsNext = i + 1 < segs.size() && segs[i + 1].from == s.to && ! segs[i + 1].struck;
+        const bool joinsPrev = i > 0 && segs[i - 1].to == s.from && ! s.struck;
+        // Still: past the way in (its first quarter) and short of the way out (its last tenth).
+        const auto [lowest, highest] = std::minmax_element (pitch.begin() + s.from + length / 4, pitch.begin() + s.to - length / 10);
+        const bool still = *highest - *lowest <= stableSemitones && length >= stableFrames;
 
-        if (s.to - s.from >= shortFrames)
+        if (length >= shortFrames || still)
         {
             ++i;
             continue;
         }
 
-        if (i + 1 < segs.size() && segs[i + 1].from == s.to && ! segs[i + 1].struck)
+        if (joinsNext)
         {
-            segs[i + 1].from = s.from;
-            segs[i + 1].struck = s.struck;
-            segs.erase (segs.begin() + (std::ptrdiff_t) i);
+            auto& next = segs[i + 1];
+            const bool dip = std::abs (middle (s) - middle (next)) > dipSemitones;
+            next.from = s.from;
+            next.struck = s.struck || dip;
         }
-        else if (i > 0 && segs[i - 1].to == s.from && ! s.struck)
-        {
+        else if (joinsPrev)
             segs[i - 1].to = s.to;
-            segs.erase (segs.begin() + (std::ptrdiff_t) i);
-        }
-        else if (s.to - s.from < shortFrames - 1)
-            segs.erase (segs.begin() + (std::ptrdiff_t) i);
-        else
-            ++i;
+
+        segs.erase (segs.begin() + (std::ptrdiff_t) i);
     }
 
     for (auto& s : segs)
-        s.pitch = median (pitch.data() + s.from, s.to - s.from);
+        s.pitch = middle (s);
 
-    // Pieces that came out as the same note with nothing struck between them are one note.
+    // Pieces at about the same pitch with nothing struck between them are one note.
     for (size_t i = 0; i + 1 < segs.size();)
     {
         auto& s = segs[i];
         const auto& next = segs[i + 1];
 
-        if (next.from == s.to && ! next.struck && juce::roundToInt (next.pitch) == juce::roundToInt (s.pitch))
+        if (next.from == s.to && ! next.struck && std::abs (next.pitch - s.pitch) < sameSemitones)
         {
             s.to = next.to;
             s.pitch = median (pitch.data() + s.from, s.to - s.from);
@@ -665,14 +676,28 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         hit.attackHz = attackCentroid;
 
         // (1 kHz: one real take's kicks started at 170 to 700 Hz, its snares at 1.5 to 3.3 kHz.)
+        // A low attack without much low end after it is a tom (or a "dn", a "gu": something between).
         if (lowAtFirst >= 0.4 || attackCentroid < 1000.0)
-            hit.kind = "kick";
+            hit.kind = hit.lowShare < 0.5 || hit.centroidHz > 600.0 ? "tom" : "kick";
         else if (highAtFirst >= 0.5 || attackCentroid > 5000.0)
             hit.kind = hit.decayMs > 120.0 ? "open hat" : "hihat";
         else
             hit.kind = "snare";
 
         heard.hits.push_back (hit);
+    }
+
+    // A breath, the phone being put down: far quieter than the drums around it.
+    if (heard.hits.size() >= 3)
+    {
+        std::vector<double> levels;
+
+        for (const auto& hit : heard.hits)
+            levels.push_back (hit.levelDb);
+
+        std::nth_element (levels.begin(), levels.begin() + (std::ptrdiff_t) levels.size() / 2, levels.end());
+        const double floor = levels[levels.size() / 2] - junkDb;
+        std::erase_if (heard.hits, [floor] (const HumHit& hit) { return hit.levelDb < floor; });
     }
 }
 } // namespace
@@ -726,6 +751,238 @@ std::optional<Heard> hear (const juce::File& file, juce::AudioFormatManager& for
             x[(size_t) i] += buffer.getSample (c, i) / (float) channels;
 
     return hear (x.data(), n, rate);
+}
+
+namespace
+{
+// The tempo the onsets were played at, from the take alone: the beat that onsets most often
+// sit one or two of apart. The loud ones count for more: they're the pulse (a backbeat), and the
+// quiet ones between are played loosely (a fill rushes). Between 75 and 150 bpm (one octave:
+// half or double fits as well).
+double tempoOf (const std::vector<double>& times, const std::vector<double>& weights)
+{
+    if (times.size() < 3)
+        return 120.0;
+
+    double best = 120.0, bestScore = -1.0;
+
+    for (double bpm = 75.0; bpm < 150.0; bpm += 0.25)
+    {
+        const double beat = 60.0 / bpm, slack = 0.03; // a gap within about 30 ms of the beat counts
+        double score = 0.0;
+
+        for (size_t i = 0; i < times.size(); ++i)
+            for (size_t j = i + 1; j < times.size() && times[j] - times[i] < 2.0 * beat + 4.0 * slack; ++j)
+                for (const double lag : { beat, 2.0 * beat })
+                {
+                    const double off = (times[j] - times[i] - lag) / slack;
+                    score += weights[i] * weights[j] * std::exp (-0.5 * off * off);
+                }
+
+        if (score > bestScore)
+        {
+            bestScore = score;
+            best = bpm;
+        }
+    }
+
+    return best;
+}
+
+// Each onset's place on the grid of sixteenths, counted from the first. The grid follows the
+// player: after each onset it's pulled half way to where the onset really fell, and its step
+// leans towards the gap just played.
+std::vector<int> stepsOf (const std::vector<double>& times, double step)
+{
+    const double slowest = step * 1.1, fastest = step * 0.9; // drift, not another tempo
+    std::vector<int> steps;
+    double anchorTime = times.empty() ? 0.0 : times.front();
+    int anchorStep = 0;
+
+    for (size_t i = 0; i < times.size(); ++i)
+    {
+        if (i == 0)
+        {
+            steps.push_back (0);
+            continue;
+        }
+
+        const double raw = anchorStep + (times[i] - anchorTime) / step;
+        const int at = std::max (steps.back() + 1, juce::roundToInt (raw));
+        const double late = raw - at; // in steps
+        step = juce::jlimit (fastest, slowest, step * (1.0 + 0.3 * late / std::max (1, at - anchorStep)));
+        anchorTime = times[i] - 0.5 * late * step;
+        anchorStep = at;
+        steps.push_back (at);
+    }
+
+    return steps;
+}
+// A beat's hits on the grid. Its loudest hits are its pulse (the backbeat, the downbeats): when
+// they're a beat or more apart they go on beats first, a whole number of beats from one to the
+// next, and the hits between are placed by how far along they fall. That holds where placing
+// hit after hit doesn't: the quiet ones are played loosely, and their small errors add up.
+// Without such a pulse (every hit as loud as the next), hit after hit it is.
+std::vector<int> beatSteps (const std::vector<HumHit>& hits, double nearBpm, double& bpm, double& origin)
+{
+    std::vector<double> times, weights;
+    double loudest = -200.0;
+
+    for (const auto& hit : hits)
+    {
+        times.push_back (hit.time);
+        weights.push_back (std::pow (10.0, hit.levelDb / 20.0));
+        loudest = std::max (loudest, hit.levelDb);
+    }
+
+    std::vector<size_t> pulse;
+    std::vector<double> pulseTimes;
+
+    for (size_t i = 0; i < hits.size(); ++i)
+        if (hits[i].levelDb >= loudest - 4.0)
+        {
+            pulse.push_back (i);
+            pulseTimes.push_back (times[i]);
+        }
+
+    double beat = nearBpm > 0.0 ? 60.0 / nearBpm : 0.0;
+    bool pulsed = pulse.size() >= 3;
+
+    if (pulsed && beat <= 0.0)
+    {
+        // The beat the pulse's gaps are most nearly whole numbers of.
+        double least = 1.0e9;
+
+        for (double b = 0.4; b <= 0.8; b += 0.0025)
+        {
+            double off = 0.0;
+
+            for (size_t k = 0; k + 1 < pulseTimes.size(); ++k)
+            {
+                const double beats = (pulseTimes[k + 1] - pulseTimes[k]) / b;
+                off += std::abs (beats - std::max (1.0, std::round (beats)));
+            }
+
+            if (off < least)
+            {
+                least = off;
+                beat = b;
+            }
+        }
+    }
+
+    for (size_t k = 0; pulsed && k + 1 < pulseTimes.size(); ++k)
+        pulsed = pulseTimes[k + 1] - pulseTimes[k] >= 0.75 * beat;
+
+    if (! pulsed)
+    {
+        bpm = nearBpm > 0.0 ? nearBpm : tempoOf (times, weights);
+        origin = times.front();
+        return stepsOf (times, 15.0 / bpm);
+    }
+
+    bpm = 60.0 / beat;
+    const auto pulseBeats = stepsOf (pulseTimes, beat);
+    std::vector<int> steps (hits.size(), 0);
+
+    for (size_t k = 0; k < pulse.size(); ++k)
+        steps[pulse[k]] = 4 * pulseBeats[k];
+
+    for (size_t k = 0; k + 1 < pulse.size(); ++k)
+        for (size_t i = pulse[k] + 1; i < pulse[k + 1]; ++i)
+        {
+            const double along = (times[i] - pulseTimes[k]) / (pulseTimes[k + 1] - pulseTimes[k]);
+            steps[i] = steps[pulse[k]] + juce::roundToInt (along * (steps[pulse[k + 1]] - steps[pulse[k]]));
+        }
+
+    // Before the pulse starts, counted back at its first pace; after it ends, hit after hit at its last.
+    const double early = (pulseTimes[1] - pulseTimes[0]) / (steps[pulse[1]] - steps[pulse[0]]);
+
+    for (size_t i = 0; i < pulse.front(); ++i)
+        steps[i] = -std::max (1, juce::roundToInt ((pulseTimes.front() - times[i]) / early));
+
+    const size_t last = pulse.back(), before = pulse[pulse.size() - 2];
+    const auto after = stepsOf ({ times.begin() + (std::ptrdiff_t) last, times.end() }, (times[last] - times[before]) / (steps[last] - steps[before]));
+
+    for (size_t i = last; i < hits.size(); ++i)
+        steps[i] = steps[last] + after[i - last];
+
+    // From 0, with the pulse still on the beat.
+    const int lead = 4 * (int) std::ceil (-*std::min_element (steps.begin(), steps.end()) / 4.0);
+
+    for (auto& s : steps)
+        s += lead;
+
+    origin = pulseTimes.front() - steps[pulse.front()] * early;
+    return steps;
+}
+} // namespace
+
+HumPart arrange (const Heard& heard, bool asBeat, double nearBpm)
+{
+    HumPart part;
+
+    if (asBeat ? heard.hits.empty() : heard.notes.empty())
+        return part;
+
+    std::vector<int> steps;
+
+    if (asBeat)
+        steps = beatSteps (heard.hits, nearBpm, part.bpm, part.firstOnset);
+    else
+    {
+        // A sung note's level says little about the pulse, and a few notes little about the
+        // tempo: hummed to a session's tempo, that's the tempo (the grid follows the drift).
+        std::vector<double> times;
+
+        for (const auto& note : heard.notes)
+            times.push_back (note.start);
+
+        part.bpm = nearBpm > 0.0 ? nearBpm : tempoOf (times, std::vector<double> (times.size(), 1.0));
+        part.firstOnset = times.front();
+        steps = stepsOf (times, 15.0 / part.bpm);
+    }
+
+    const double step = 15.0 / part.bpm;
+
+    if (asBeat)
+    {
+        double loudest = -200.0;
+
+        for (const auto& hit : heard.hits)
+            loudest = std::max (loudest, hit.levelDb);
+
+        for (size_t i = 0; i < heard.hits.size(); ++i)
+        {
+            const auto& hit = heard.hits[i];
+            // The loudest is a full hit; 20 dB under it, a ghost.
+            part.hits.push_back ({ steps[i] * 0.25, (float) juce::jlimit (0.25, 1.0, 1.0 + (hit.levelDb - loudest) / 26.0), hit.kind });
+        }
+    }
+    else
+    {
+        double loudest = -200.0;
+
+        for (const auto& note : heard.notes)
+            loudest = std::max (loudest, note.levelDb);
+
+        for (size_t i = 0; i < heard.notes.size(); ++i)
+        {
+            const auto& note = heard.notes[i];
+            // As long as it was held, on the grid, and out of the next note's way (one voice).
+            int length = std::max (1, juce::roundToInt (note.length / step));
+
+            if (i + 1 < steps.size())
+                length = std::min (length, steps[i + 1] - steps[i]);
+
+            part.notes.push_back ({ steps[i] * 0.25, length * 0.25, note.pitch,
+                                    juce::jlimit (50, 115, juce::roundToInt (110.0 + 2.5 * (note.levelDb - loudest))) });
+        }
+    }
+
+    const double end = asBeat ? part.hits.back().beat + 0.25 : part.notes.back().beat + part.notes.back().length;
+    part.beats = 4.0 * std::ceil (end / 4.0);
+    return part;
 }
 
 double humBeat (double seconds, double bpm, double grid)

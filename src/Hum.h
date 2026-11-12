@@ -54,6 +54,25 @@ struct Heard
 Heard hear (const float* mono, int numSamples, double sampleRate);
 std::optional<Heard> hear (const juce::File&, juce::AudioFormatManager&);
 
+// What was heard as a part to put on the timeline: on a grid of sixteenths, in the take's own
+// tempo (found from the take, and followed as it drifts: nobody hums to a click). Beat 0 is the
+// first note or hit, firstOnset seconds into the recording.
+struct HumPart
+{
+    struct Note { double beat = 0.0, length = 0.25; int pitch = 60, vel = 100; };
+    struct Hit { double beat = 0.0; float vel = 0.8f; juce::String kind; };
+
+    std::vector<Note> notes; // a melody ...
+    std::vector<Hit> hits;   // ... or a beat, as asked for
+    double bpm = 120.0;
+    double firstOnset = 0.0;
+    double beats = 0.0;      // its length, in whole bars of four
+};
+
+// nearBpm: the tempo it was hummed to (the session's), if there was one; 0 finds it from the
+// take alone, which a beat is good for and a few sung notes aren't.
+HumPart arrange (const Heard&, bool asBeat, double nearBpm = 0.0);
+
 // A time in seconds as beats at a tempo, on a grid (in beats; 0 leaves it alone).
 double humBeat (double seconds, double bpm, double grid);
 } // namespace taw

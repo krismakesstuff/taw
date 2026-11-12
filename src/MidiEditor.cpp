@@ -378,6 +378,31 @@ private:
         return {};
     }
 
+    // Another clip's strip in the ruler under a point (edges included), or none.
+    juce::ValueTree otherStripAt (juce::Point<float> p) const
+    {
+        if (p.y < (float) toolbarH + 16.0f || p.y >= (float) (toolbarH + rulerH))
+            return {};
+
+        const auto clips = Session::midiClips (holder);
+
+        for (auto it = clips.rbegin(); it != clips.rend(); ++it)
+            if (*it != clip && p.x >= xOf ((*it)[ids::beat]) - 5.0f && p.x <= xOf (Session::clipEnd (*it)) + 5.0f)
+                return *it;
+
+        return {};
+    }
+
+    // Another of the track's clips becomes the one edited, the view staying where it is: a
+    // press on one of its notes, or on its strip, carries straight on as an edit of it.
+    void adopt (const juce::ValueTree& c)
+    {
+        stopSounding();
+        clip = c;
+        selected.clear();
+        dirty = true;
+    }
+
     void pruneSelection()
     {
         selected.erase (std::remove_if (selected.begin(), selected.end(), [this] (const juce::ValueTree& n) { return n.getParent() != clip; }),
@@ -772,7 +797,7 @@ private:
                 g.fillRect (xOf (b), (float) roll.getY(), 1.0f, (float) roll.getHeight());
             }
 
-            // Other clips' notes on the track: outlines, to play against (double-click opens one).
+            // Other clips' notes on the track: outlines (a press on one makes its clip the one edited).
             for (const auto& c : Session::midiClips (holder))
                 if (c != clip)
                     for (const auto& n : notesOf (c))
@@ -1012,7 +1037,7 @@ private:
         {
             if (std::abs (p.x - xOf (clipStart())) < 6.0f || std::abs (p.x - xOf (clipEnd())) < 6.0f)
                 shape = juce::MouseCursor::LeftRightResizeCursor;
-            else if (onClipStrip (p))
+            else if (onClipStrip (p) || otherStripAt (p).isValid())
             {
                 shape = juce::MouseCursor::DraggingHandCursor;
                 now = "drag:\nmove clip";
@@ -1050,6 +1075,11 @@ private:
             if (e.x < keysW)
                 return;
 
+            // Another clip's strip (and not this one's, where they overlap): that clip, from here.
+            if (const bool onThis = onClipStrip (p) || std::abs (p.x - xOf (clipEnd())) < 6.0f || std::abs (p.x - xOf (clipStart())) < 6.0f; ! onThis)
+                if (const auto other = otherStripAt (p); other.isValid())
+                    adopt (other);
+
             if (std::abs (p.x - xOf (clipEnd())) < 6.0f)
                 drag = Drag::clipEnd;
             else if (std::abs (p.x - xOf (clipStart())) < 6.0f)
@@ -1084,7 +1114,15 @@ private:
 
         if (rollArea().contains (e.getPosition()))
         {
-            const auto hit = noteAt (p);
+            auto hit = noteAt (p);
+
+            // A note of another clip on the track: that clip, and the note as if it had been.
+            if (! hit)
+                if (const auto other = otherClipAt (p); other.isValid())
+                {
+                    adopt (other);
+                    hit = noteAt (p);
+                }
 
             if (e.mods.isPopupMenu())
             {

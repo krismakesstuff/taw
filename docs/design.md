@@ -218,10 +218,12 @@ One MIDI clip, for fine work with the mouse.
   length, double-click empty space to draw one (as long and loud as the last one touched),
   right-click or Delete to remove. Drag on empty space selects (shift adds). A note moved or
   stretched past the clip takes the clip with it. Other clips' notes on the track show as
-  outlines; double-click one to open its clip. Hidden notes (trimmed off) show faint.
+  outlines: press on one and its clip becomes the one edited, the press carrying on as a move,
+  resize or selection of that note (the view stays put). Hidden notes (trimmed off) show faint.
 - **Ruler:** bars and beats; the track's clips as strips, this one with handles: drag its edges
   to trim or extend it (notes are only hidden), drag the strip between them to move the clip,
-  notes and all (its automation follows).
+  notes and all (its automation follows). Another clip's strip does the same for that clip,
+  which becomes the one edited.
 - **Keyboard down the side:** click (and drag) to play notes. Clicking or dragging a note
   plays it too, through the track's instrument, armed or not (the engine's audition queue).
 - **Lane:** velocity (drag a stalk; across several to set each; a selected one moves every

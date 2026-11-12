@@ -5,6 +5,8 @@
 - Clips drag with the mouse on the timeline: along their track by the grid's step, selected as
   they go, their automation with them. In the MIDI editor, the clip's strip in the ruler drags
   it too.
+- The MIDI editor has a scroll bar for time along the bottom, and the track's other clips show
+  in the notes' colour, not grey.
 - The MIDI editor works on every clip of the track: a press on another clip's note or strip
   makes that the clip being edited, and carries on as the edit. A drag from empty lane selects time.
 - Double-click opens plugins and sends: an insert in the routing column (an empty slot picks an

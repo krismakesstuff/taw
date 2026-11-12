@@ -17,7 +17,7 @@ EditorColours colours { juce::Colour (0xff1c1c1c), juce::Colour (0xff262626), ju
                         juce::Colour (0xff00af5f), juce::Colour (0xffff0000), juce::Colour (0xff121212),
                         juce::Colour (0xff87afd7), juce::Colour (0xff303030), juce::Colour (0xff005f87) };
 
-constexpr int toolbarH = 32, rulerH = 34, keysW = 58, laneH = 110, gap = 4;
+constexpr int toolbarH = 32, rulerH = 34, keysW = 58, laneH = 110, gap = 4, scrollH = 14;
 constexpr double minLength = 1.0 / 64.0; // beats: the shortest a note gets by dragging
 
 struct GridChoice
@@ -204,7 +204,10 @@ private:
     // The note being auditioned (-1: none).
     int soundingPitch = -1, soundingChannel = 0;
 
-    enum class Drag { none, move, resizeEnd, resizeStart, marquee, velocity, velocityAll, control, ruler, clipStart, clipEnd, clipMove, keys };
+    enum class Drag { none, move, resizeEnd, resizeStart, marquee, velocity, velocityAll, control, ruler, clipStart, clipEnd, clipMove, keys, scroll };
+    struct Stretch { double from, beats; };
+    Stretch scrolling {};    // the bar's stretch while its thumb is dragged (it mustn't change under the mouse)
+    float thumbGrab = 0.0f;  // where on the thumb it was grabbed, from its left
     double clipWas = 0.0; // where the clip was when its strip was grabbed
     Drag drag = Drag::none;
 
@@ -229,7 +232,30 @@ private:
     // Geometry
 
     int rollTop() const { return toolbarH + rulerH; }
-    int laneTop() const { return getHeight() - laneH; }
+    int laneTop() const { return getHeight() - laneH - scrollH; }
+    juce::Rectangle<int> scrollArea() const { return { keysW, getHeight() - scrollH, getWidth() - keysW, scrollH }; }
+
+    // The scroll bar along the bottom: the stretch of time it stands for (from the session's
+    // start, or the view's if that's before it, to a few bars past the last clip, the cursor
+    // and the view), and where the view's thumb is in it.
+    Stretch scrollStretch() const
+    {
+        double end = std::max (viewBeat + visibleBeats(), (double) app.cursor / spb());
+
+        for (const auto& c : Session::midiClips (holder))
+            end = std::max (end, Session::clipEnd (c));
+
+        const auto from = std::min (0.0, viewBeat);
+        return { from, std::max (1.0, end + 4.0 * beatsPerBar() - from) };
+    }
+
+    juce::Rectangle<float> scrollThumb (Stretch s) const
+    {
+        const auto area = scrollArea().toFloat().reduced (0.0f, 3.0f);
+        const auto w = std::max (24.0f, (float) (visibleBeats() / s.beats) * area.getWidth());
+        const auto x = area.getX() + (float) ((viewBeat - s.from) / s.beats) * area.getWidth();
+        return { std::min (x, area.getRight() - w), area.getY(), w, area.getHeight() };
+    }
     int rollBottom() const { return laneTop() - gap; }
     juce::Rectangle<int> rollArea() const { return { keysW, rollTop(), getWidth() - keysW, rollBottom() - rollTop() }; }
     juce::Rectangle<int> laneArea() const { return { keysW, laneTop(), getWidth() - keysW, laneH }; }
@@ -774,7 +800,7 @@ private:
             }
 
             // Outside the clip: shaded.
-            g.setColour (colours.outside.withAlpha (0.6f));
+            g.setColour (colours.outside.withAlpha (0.4f));
             g.fillRect (juce::Rectangle<float> ((float) roll.getX(), (float) roll.getY(), std::max (0.0f, xOf (clipStart()) - (float) roll.getX()), (float) roll.getHeight()));
             g.fillRect (juce::Rectangle<float> (xOf (clipEnd()), (float) roll.getY(), std::max (0.0f, (float) roll.getRight() - xOf (clipEnd())), (float) roll.getHeight()));
 
@@ -803,7 +829,9 @@ private:
                     for (const auto& n : notesOf (c))
                         if (n.inWindow)
                         {
-                            g.setColour (colours.dim.withAlpha (0.7f));
+                            g.setColour (colours.note.withAlpha (0.4f));
+                            g.fillRect (rectOf (n).reduced (0.0f, 1.0f));
+                            g.setColour (colours.note.withAlpha (0.85f));
                             g.drawRect (rectOf (n).reduced (0.0f, 1.0f), 1.0f);
                         }
 
@@ -929,7 +957,7 @@ private:
             for (const auto& c : Session::midiClips (holder))
             {
                 const auto r = juce::Rectangle<float> (xOf (c[ids::beat]), stripY, xOf (Session::clipEnd (c)) - xOf (c[ids::beat]), stripH);
-                g.setColour (c == clip ? colours.note : colours.faint);
+                g.setColour (c == clip ? colours.note : colours.note.withAlpha (0.45f));
                 g.fillRect (r);
 
                 if (c == clip)
@@ -998,7 +1026,7 @@ private:
             if (x >= (float) keysW && x <= (float) getWidth())
             {
                 g.setColour (c);
-                g.fillRect (x, (float) toolbarH, w, (float) (getHeight() - toolbarH));
+                g.fillRect (x, (float) toolbarH, w, (float) (getHeight() - scrollH - toolbarH));
             }
         };
 
@@ -1007,6 +1035,14 @@ private:
 
         if (app.engine.isRolling())
             line (app.heardPlayhead(), app.recording ? colours.rec : colours.play, 2.0f);
+
+        // The scroll bar: the view's thumb, brighter while it's dragged.
+        {
+            g.setColour (colours.panel);
+            g.fillRect (0, getHeight() - scrollH, getWidth(), scrollH);
+            g.setColour (drag == Drag::scroll ? colours.text : colours.dim);
+            g.fillRoundedRectangle (scrollThumb (drag == Drag::scroll ? scrolling : scrollStretch()), 3.0f);
+        }
 
         // What's under the mouse, in the corner.
         g.setColour (colours.dim);
@@ -1068,6 +1104,17 @@ private:
         downPitch = pitchAt (p.y);
         drag = Drag::none;
         pruneSelection();
+
+        // The scroll bar: the thumb drags; a press beside it brings the view there first.
+        if (scrollArea().contains (e.getPosition()))
+        {
+            scrolling = scrollStretch();
+            auto thumb = scrollThumb (scrolling);
+            thumbGrab = thumb.contains (p.x, thumb.getCentreY()) ? p.x - thumb.getX() : thumb.getWidth() * 0.5f;
+            drag = Drag::scroll;
+            mouseDrag (e);
+            return;
+        }
 
         // Ruler: a clip edge drags; anywhere else puts taw's cursor there (and drags it).
         if (e.y >= toolbarH && e.y < toolbarH + rulerH)
@@ -1397,6 +1444,14 @@ private:
             case Drag::keys:
                 audition (pitchAt (p.y), 0, 100);
                 break;
+
+            case Drag::scroll:
+            {
+                const auto area = scrollArea().toFloat();
+                viewBeat = scrolling.from + (double) ((p.x - thumbGrab - area.getX()) / area.getWidth()) * scrolling.beats;
+                viewBeat = std::max (-visibleBeats() * 0.5, viewBeat);
+                break;
+            }
 
             case Drag::none:
                 break;

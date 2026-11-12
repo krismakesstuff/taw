@@ -239,6 +239,8 @@ One MIDI clip, for fine work with the mouse.
   taw's, as before), `q` quantize, `r` `t`
   (or `+` `-`) zoom the window around taw's cursor (the session's zoom stays), Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
   space plays, ctrl+z undoes, ctrl+s saves, shift+E closes it.
+- **Scroll bar** along the bottom: drag its thumb to move through time (it reaches a few bars
+  past the last clip); a press beside the thumb brings the view there.
 - **Mouse wheel:** scrolls pitch; shift: time; ctrl: zoom time around the mouse; alt: row height.
 
 ### Command grammar

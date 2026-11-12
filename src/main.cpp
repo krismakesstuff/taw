@@ -3955,8 +3955,8 @@ int main (int argc, char** argv)
 
         for (const auto& hit : h.hits)
         {
-            std::printf ("  %7.3f s  %-8s  %6.1f dB  bright %5.0f Hz  low %.2f  high %.2f  noise %.2f  decay %4.0f ms", hit.time,
-                         hit.kind.toRawUTF8(), hit.levelDb, hit.centroidHz, hit.lowShare, hit.highShare, hit.flatness, hit.decayMs);
+            std::printf ("  %7.3f s  %-8s  %6.1f dB  attack %5.0f Hz  bright %5.0f Hz  low %.2f  high %.2f  noise %.2f  decay %4.0f ms", hit.time,
+                         hit.kind.toRawUTF8(), hit.levelDb, hit.attackHz, hit.centroidHz, hit.lowShare, hit.highShare, hit.flatness, hit.decayMs);
 
             if (bpm > 0.0)
                 std::printf ("   beat %6.2f", taw::humBeat (hit.time, bpm, grid));

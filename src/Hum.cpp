@@ -578,7 +578,10 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
         const int end = std::min ({ n, onset + (int) (0.2 * rate), h + 1 < onsets.size() ? onsets[h + 1] : n });
 
         // Its spectrum, over its first 100 ms.
+        // And its attack alone (the first frame): what the mouth meant. A snare's "k" or "p" is
+        // bright even when a low body follows it; a kick is low from the start.
         std::vector<double> power ((size_t) bins, 0.0);
+        double attackTotal = 0.0, attackLow = 0.0, attackHigh = 0.0, attackWeighted = 0.0;
 
         for (int start = onset - size / 4; start == onset - size / 4 || start < std::min (end, onset + (int) (0.1 * rate)) - size / 2; start += size / 2)
         {
@@ -586,6 +589,17 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
 
             for (int k = 0; k < bins; ++k)
                 power[(size_t) k] += (double) frame[(size_t) k] * (double) frame[(size_t) k];
+
+            if (start == onset - size / 4)
+                for (int k = 1; k < bins; ++k)
+                    if (const double f = k * binHz; f >= 40.0 && f <= 16000.0)
+                    {
+                        const double p = power[(size_t) k];
+                        attackTotal += p;
+                        attackWeighted += f * p;
+                        attackLow += f < 300.0 ? p : 0.0;
+                        attackHigh += f > 5000.0 ? p : 0.0;
+                    }
         }
 
         double total = 0.0, weighted = 0.0, low = 0.0, high = 0.0, logSum = 0.0;
@@ -643,10 +657,17 @@ void findHits (const float* x, int n, double rate, float peak, Heard& heard)
 
         hit.decayMs = 1000.0 * (quiet - loudAt) / rate;
 
-        // Which drum: mostly lows is a kick, mostly highs a hat (open if it rings), the rest a snare.
-        if (hit.lowShare >= 0.4 || hit.centroidHz < 700.0)
+        // Which drum, by its attack: mostly lows is a kick, mostly highs a hat (open if it rings),
+        // the rest a snare.
+        const double attackCentroid = attackTotal > 0.0 ? attackWeighted / attackTotal : hit.centroidHz;
+        const double lowAtFirst = attackTotal > 0.0 ? attackLow / attackTotal : hit.lowShare;
+        const double highAtFirst = attackTotal > 0.0 ? attackHigh / attackTotal : hit.highShare;
+        hit.attackHz = attackCentroid;
+
+        // (1 kHz: one real take's kicks started at 170 to 700 Hz, its snares at 1.5 to 3.3 kHz.)
+        if (lowAtFirst >= 0.4 || attackCentroid < 1000.0)
             hit.kind = "kick";
-        else if (hit.highShare >= 0.5 || hit.centroidHz > 5000.0)
+        else if (highAtFirst >= 0.5 || attackCentroid > 5000.0)
             hit.kind = hit.decayMs > 120.0 ? "open hat" : "hihat";
         else
             hit.kind = "snare";

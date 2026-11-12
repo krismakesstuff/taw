@@ -25,7 +25,8 @@ struct HumHit
     double levelDb = -100.0;
 
     // What the guess is made from, for a better one later (the singer's own kick, snare and hat).
-    double centroidHz = 0.0; // brightness
+    double attackHz = 0.0;   // brightness of its first 20 ms: the consonant, which says which drum
+    double centroidHz = 0.0; // brightness over its first 100 ms
     double lowShare = 0.0;   // of the energy, below 300 Hz
     double highShare = 0.0;  // and above 5 kHz
     double flatness = 0.0;   // 0 tonal .. 1 noise

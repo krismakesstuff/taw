@@ -398,7 +398,7 @@ void App::startClosing (bool thenQuit, bool save, bool bounceAsked)
     closing->thenQuit = thenQuit;
     closing->save = save;
     closing->total = hosted.size() + 1; // and the session file
-    helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = trackMenuVisible = false;
+    helpVisible = settingsVisible = pluginPickerVisible = busPickerVisible = sendFaderVisible = trackMenuVisible = false;
     ioCell = -1;
 
     if (save)
@@ -3745,6 +3745,10 @@ void App::dispatchKey (const Key& k)
 // clip selects it and opens it in its editor (MIDI or audio).
 void App::handleMouse (const Key& k)
 {
+    // The send fader takes the mouse while it's up.
+    if (sendFaderVisible)
+        return handleSendFaderMouse (k);
+
     const auto& map = ui.lanes();
     const int track = map.trackAt (k.y);
 
@@ -3790,7 +3794,18 @@ void App::handleMouse (const Key& k)
             focusTrack (onMix ? session->numTracks() : track);
             ioCell = cell;
 
-            say (k.doubleClick ? togglePluginHere() : Result::good (describeIoCell (ioTrack(), ioCell)));
+            // One click opens it: an insert's window (empty: the effects picker), a send's fader
+            // (empty: the bus picker). The output's bus picker takes two, like | from the keys.
+            // (The second click of a double-click isn't another: it would close what the first opened.)
+            if (cell == ioOutput)
+                say (k.doubleClick ? togglePluginHere() : Result::good (describeIoCell (ioTrack(), ioCell)));
+            else if (k.doubleClick)
+                return;
+            else if (cell >= ioFirstSend && Session::send (session->track (track), cell - ioFirstSend).isValid())
+                openSendFader (track, cell - ioFirstSend);
+            else
+                say (togglePluginHere());
+
             return;
         }
 
@@ -4231,7 +4246,7 @@ void App::handleMainKey (const Key& k)
 
     // The project settings panel takes the arrows, enter and esc while it's open; the
     // instrument picker takes typing too (it filters).
-    if (handleHelpKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k) || handlePhoneKey (k)
+    if (handleHelpKey (k) || handlePluginPickerKey (k) || handleBusPickerKey (k) || handleSendFaderKey (k) || handleTrackMenuKey (k) || handleAutoPanelKey (k) || handleMidiPanelKey (k) || handleStatsKey (k) || handlePhoneKey (k)
         || handleSettingsKey (k) || handleIoKey (k))
         return;
 

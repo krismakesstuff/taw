@@ -726,6 +726,19 @@ public:
     std::vector<BusChoice> busChoices() const;
     void openBusPicker (int track, int cell);
 
+    // The send fader: a send's level, for the mouse (a click on a send in the routing column)
+    // and the arrows. Held: pressed on, so a drag moves it.
+    bool sendFaderVisible = false, sendFaderHeld = false;
+    int sendFaderTrack = -1, sendFaderSlot = 0;
+    void openSendFader (int track, int slot);
+    bool handleSendFaderKey (const Key&);
+    void handleSendFaderMouse (const Key&);
+    void setSendLevel (double db);
+    // The fader's law over its columns: the first is off, the rest -60 to +12 dB, the upper
+    // three quarters of them from -24 (a dB a column or so around unity).
+    static double faderDb (int col, int cols);
+    static int faderCol (double db, int cols);
+
     // The track menu (shift+T): what can be done to the focused or selected tracks.
     struct TrackMenuItem
     {

@@ -142,8 +142,19 @@ public:
     };
     const LaneMap& lanes() const { return laneMap; }
 
+    // The send fader's box and its fader's cells, for the mouse.
+    struct FaderMap
+    {
+        int x = 0, y = 0, cols = 0, boxX = 0, boxY = 0, boxW = 0, boxH = 0;
+        bool valid = false;
+        bool inBox (int px, int py) const { return valid && px >= boxX && px < boxX + boxW && py >= boxY && py < boxY + boxH; }
+    };
+    const FaderMap& fader() const { return faderMap; }
+
 private:
     LaneMap laneMap;
+    FaderMap faderMap;
+    void drawSendFader (App&);
 
     void drawMain (App&);
     void drawTitle (App&);

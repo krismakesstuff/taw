@@ -1078,4 +1078,128 @@ bool App::handleIoKey (const Key& k)
             return false;
     }
 }
+
+//==============================================================================
+// The send fader
+
+double App::faderDb (int col, int cols)
+{
+    if (col <= 0 || cols < 2)
+        return -96.0;
+
+    const auto t = (double) juce::jmin (col, cols - 1) / (cols - 1);
+    return std::round (t <= 0.25 ? -60.0 + t / 0.25 * 36.0 : -24.0 + (t - 0.25) / 0.75 * 36.0);
+}
+
+int App::faderCol (double db, int cols)
+{
+    if (db < -60.0 || cols < 2)
+        return 0;
+
+    const auto t = db <= -24.0 ? (db + 60.0) / 36.0 * 0.25 : 0.25 + (juce::jmin (12.0, db) + 24.0) / 36.0 * 0.75;
+    return juce::jlimit (1, cols - 1, (int) std::lround (t * (cols - 1)));
+}
+
+void App::openSendFader (int track, int slot)
+{
+    sendFaderVisible = true;
+    sendFaderHeld = false;
+    sendFaderTrack = track;
+    sendFaderSlot = slot;
+    say (Result::good (describeIoCell (track, ioFirstSend + slot)));
+}
+
+void App::setSendLevel (double db)
+{
+    auto send = session != nullptr && sendFaderTrack < session->numTracks() ? Session::send (session->track (sendFaderTrack), sendFaderSlot) : juce::ValueTree();
+
+    if (! send.isValid())
+    {
+        sendFaderVisible = false;
+        return;
+    }
+
+    db = juce::jlimit (-96.0, 12.0, db);
+
+    if (! juce::approximatelyEqual (db, (double) send[ids::db]))
+    {
+        beginEdit ("send level", "send:" + juce::String (sendFaderTrack) + ":" + juce::String (sendFaderSlot));
+        send.setProperty (ids::db, db, um());
+        flashValue (session->track (sendFaderTrack), "send " + Session::slotName (sendFaderSlot).toLowerCase());
+    }
+
+    say (Result::good (describeIoCell (sendFaderTrack, ioFirstSend + sendFaderSlot)));
+}
+
+bool App::handleSendFaderKey (const Key& k)
+{
+    if (! sendFaderVisible)
+        return false;
+
+    const auto send = session != nullptr && sendFaderTrack < session->numTracks() ? Session::send (session->track (sendFaderTrack), sendFaderSlot) : juce::ValueTree();
+
+    if (! send.isValid() || k.code == Key::Escape || k.code == Key::Enter)
+    {
+        sendFaderVisible = false;
+        return send.isValid();
+    }
+
+    const auto db = (double) send[ids::db];
+
+    // Up from off starts at -60; down from there is off.
+    auto stepped = [db] (double by) { return db <= -96.0 ? (by > 0.0 ? -60.0 : -96.0) : db + by < -60.0 ? -96.0 : std::round (db + by); };
+
+    if (k.code == Key::Left || k.code == Key::Right || (k.code == Key::Char && (k.ch == '[' || k.ch == ']')))
+        setSendLevel (stepped ((k.code == Key::Right || k.ch == ']' ? 1.0 : -1.0) * (k.shift ? 6.0 : 1.0)));
+    else if (k.code == Key::Char && k.ch == '0')
+        setSendLevel (0.0);
+    else if (k.code == Key::Char && (k.ch == 'b' || k.ch == '|'))
+    {
+        sendFaderVisible = false;
+        openBusPicker (sendFaderTrack, sendFaderSlot + 1);
+    }
+    else if (k.code == Key::Delete || (k.code == Key::Char && (k.ch == 'm' || k.ch == 'M' || k.ch == 'p' || k.ch == 'P')))
+    {
+        // Off, pre / post and removing it are the routing column's keys (M, P, del), on this send.
+        auto asColumn = k;
+
+        if (k.code == Key::Char)
+            asColumn.ch = k.ch == 'm' ? L'M' : k.ch == 'p' ? L'P' : k.ch;
+
+        focusTrack (sendFaderTrack);
+        ioCell = ioFirstSend + sendFaderSlot;
+        handleIoKey (asColumn);
+        sendFaderVisible = sendFaderVisible && k.code != Key::Delete;
+    }
+
+    return true; // nothing gets past it
+}
+
+// A press on the fader puts the level there and holds it for a drag; a press outside its box
+// closes it.
+void App::handleSendFaderMouse (const Key& k)
+{
+    const auto& f = ui.fader();
+
+    if (k.release || k.right)
+    {
+        sendFaderHeld = false;
+        return;
+    }
+
+    if (k.drag)
+    {
+        if (sendFaderHeld && f.valid)
+            setSendLevel (faderDb (k.x - f.x, f.cols));
+
+        return;
+    }
+
+    sendFaderHeld = f.valid && k.y >= f.y - 1 && k.y <= f.y + 1 && k.x >= f.x - 1 && k.x <= f.x + f.cols;
+
+    if (sendFaderHeld)
+        setSendLevel (faderDb (k.x - f.x, f.cols));
+    else if (! k.doubleClick && ! f.inBox (k.x, k.y)) // (the second click of the two that opened it isn't one)
+        sendFaderVisible = false;
+}
 } // namespace taw

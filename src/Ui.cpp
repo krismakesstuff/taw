@@ -276,6 +276,7 @@ void Ui::render (App& app)
     }
 
     canvas.resize (w, h);
+    faderMap.valid = false;
     laneMap.valid = false; // until the timeline is drawn (a picker or a box over it: clicks pass it by)
 
     if (w < 70 || h < 16)
@@ -357,7 +358,7 @@ void Ui::drawMain (App& app)
     drawKeysWarning (app);
 
     // A box over the timeline takes the clicks out of it.
-    if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
+    if (app.helpVisible || app.pluginPickerVisible || app.busPickerVisible || app.sendFaderVisible || app.trackMenuVisible || app.autoPanelVisible || app.midiPanelVisible
         || app.settingsVisible || app.statsVisible || app.phoneVisible)
         laneMap.valid = false;
 
@@ -367,6 +368,8 @@ void Ui::drawMain (App& app)
         drawPluginPicker (app);
     else if (app.busPickerVisible && app.session != nullptr)
         drawBusPicker (app);
+    else if (app.sendFaderVisible && app.session != nullptr)
+        drawSendFader (app);
     else if (app.trackMenuVisible && app.session != nullptr)
         drawTrackMenu (app);
     else if (app.autoPanelVisible && app.session != nullptr)
@@ -3190,6 +3193,60 @@ void Ui::drawBusPicker (App& app)
     }
 
     canvas.text (x0 + 2, y0 + boxH - 2, L"type to filter or name a new bus \x00b7 \x2191\x2193 \x00b7 enter \x00b7 esc", colour::dim, bg, false, boxW - 4);
+}
+
+// The send fader: one send's level along a line, for the mouse and the arrows.
+void Ui::drawSendFader (App& app)
+{
+    const auto& s = *app.session;
+
+    if (app.sendFaderTrack < 0 || app.sendFaderTrack >= s.numTracks())
+        return;
+
+    const auto t = s.track (app.sendFaderTrack);
+    const auto send = Session::send (t, app.sendFaderSlot);
+
+    if (! send.isValid())
+        return;
+
+    const int w = canvas.width();
+    const int boxW = std::min (w - 4, 72), boxH = 9, x0 = (w - boxW) / 2, y0 = 1, bg = colour::headerBg;
+
+    for (int y = 0; y < boxH; ++y)
+        canvas.fill (x0, y0 + y, boxW, L' ', -1, bg);
+
+    const int dest = s.findBus (send[ids::to]);
+    const auto title = "SEND " + Session::slotName (app.sendFaderSlot);
+    canvas.text (x0 + 2, y0 + 1, title, colour::text, bg, true);
+    canvas.text (x0 + 3 + title.length(), y0 + 1,
+                 "of track " + juce::String (app.sendFaderTrack + 1) + " " + t[ids::name].toString() + L" \x2192 "
+                     + (dest < 0 ? juce::String ("a bus that's gone") : s.track (dest)[ids::name].toString()),
+                 colour::dim, bg, false, boxW - title.length() - 5);
+
+    // The fader: off at its left end, then -60 to +12 dB; lit up to the knob.
+    const double db = send[ids::db];
+    const bool off = send[ids::mute];
+    const int fx = x0 + 5, cols = boxW - 10, fy = y0 + 3, knob = App::faderCol (db, cols);
+    faderMap = { fx, fy, cols, x0, y0, boxW, boxH, true };
+
+    canvas.text (x0 + 2, fy, L"-\x221e", colour::dim, bg);
+    canvas.text (fx + cols + 1, fy, "+12", colour::dim, bg);
+
+    for (int c = 0; c < cols; ++c)
+        canvas.put (fx + c, fy, c == knob ? L'\x25cf' : c < knob ? L'\x2501' : L'\x2500',
+                    c == knob ? (off ? colour::dim : colour::text) : c < knob ? (off ? colour::faint : colour::accent) : colour::faint, bg);
+
+    // Marks under it: where unity and a few levels are.
+    for (const int mark : { -48, -24, -12, -6, 0, 6 })
+    {
+        const auto label = juce::String (mark);
+        canvas.text (fx + App::faderCol (mark, cols) - (mark < 0 ? 1 : 0), fy + 1, label, mark == 0 ? colour::text : colour::faint, bg);
+    }
+
+    canvas.text (x0 + 2, fy + 3, (db <= -96.0 ? juce::String (L"-\x221e") : juce::String (juce::roundToInt (db))) + " dB", colour::text, bg, true);
+    canvas.text (x0 + 12, fy + 3, juce::String ((bool) send[ids::pre] ? "pre-fader" : "post-fader") + (off ? L" \x00b7 off" : L""), off ? colour::faint : colour::dim, bg);
+    canvas.text (x0 + 2, y0 + boxH - 2, L"drag, or \x2190\x2192 (shift: 6 dB) \x00b7 0 unity \x00b7 m off \x00b7 p pre/post \x00b7 b bus \x00b7 del removes \x00b7 esc",
+                 colour::dim, bg, false, boxW - 4);
 }
 
 // The track menu: a letter, what it does, and the command it stands for.

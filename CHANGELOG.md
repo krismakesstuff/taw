@@ -9,9 +9,9 @@
   in the notes' colour, not grey.
 - The MIDI editor works on every clip of the track: a press on another clip's note or strip
   makes that the clip being edited, and carries on as the edit. A drag from empty lane selects time.
-- Double-click opens plugins and sends: an insert in the routing column (an empty slot picks an
-  effect), a send or the output (picks its bus), an instrument track's name (its instrument).
-  One click steps onto the slot.
+- The mouse opens plugins and sends in the routing column with one click: an insert's window
+  (an empty slot picks an effect), and a send's fader, to drag its level (an empty one picks a
+  bus). Double-click the output to pick its bus, or an instrument track's name for its plugin.
 - The MIDI editor copies notes: alt+drag takes copies of the selected notes, and ctrl+c / ctrl+x
   / ctrl+v copy, cut and paste them at the cursor (in another clip too). Off the grid is now
   ctrl+drag for notes (alt copies).

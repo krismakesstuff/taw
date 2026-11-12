@@ -204,7 +204,8 @@ private:
     // The note being auditioned (-1: none).
     int soundingPitch = -1, soundingChannel = 0;
 
-    enum class Drag { none, move, resizeEnd, resizeStart, marquee, velocity, velocityAll, control, ruler, clipStart, clipEnd, keys };
+    enum class Drag { none, move, resizeEnd, resizeStart, marquee, velocity, velocityAll, control, ruler, clipStart, clipEnd, clipMove, keys };
+    double clipWas = 0.0; // where the clip was when its strip was grabbed
     Drag drag = Drag::none;
 
     struct Original
@@ -337,6 +338,12 @@ private:
             }
 
         return out;
+    }
+
+    // On the clip's strip in the ruler, between its edge handles: dragging there moves the clip.
+    bool onClipStrip (juce::Point<float> p) const
+    {
+        return p.y >= (float) toolbarH + 16.0f && p.y < (float) (toolbarH + rulerH) && p.x >= xOf (clipStart()) + 6.0f && p.x <= xOf (clipEnd()) - 6.0f;
     }
 
     juce::Rectangle<float> rectOf (const ShownNote& n, bool full = false) const
@@ -1005,6 +1012,11 @@ private:
         {
             if (std::abs (p.x - xOf (clipStart())) < 6.0f || std::abs (p.x - xOf (clipEnd())) < 6.0f)
                 shape = juce::MouseCursor::LeftRightResizeCursor;
+            else if (onClipStrip (p))
+            {
+                shape = juce::MouseCursor::DraggingHandCursor;
+                now = "drag:\nmove clip";
+            }
         }
 
         setMouseCursor (shape);
@@ -1042,6 +1054,12 @@ private:
                 drag = Drag::clipEnd;
             else if (std::abs (p.x - xOf (clipStart())) < 6.0f)
                 drag = Drag::clipStart;
+            else if (onClipStrip (p))
+            {
+                drag = Drag::clipMove;
+                clipWas = clipStart();
+                begin ("move clip");
+            }
             else
             {
                 drag = Drag::ruler;
@@ -1326,6 +1344,11 @@ private:
                 break;
             }
 
+            // The clip along the track, its notes with it.
+            case Drag::clipMove:
+                clip.setProperty (ids::beat, std::max (0.0, snap (clipWas + dx, free)), um());
+                break;
+
             case Drag::clipEnd:
             {
                 const auto at = std::max (clipStart() + minLength, snap (beatAt (p.x), free));
@@ -1351,6 +1374,10 @@ private:
 
         if (drag != Drag::velocity && drag != Drag::velocityAll)
             stopSounding();
+
+        // A moved clip takes its automation with it (a playlist's clip leaves the track's be).
+        if (drag == Drag::clipMove && clip.isValid() && holder.hasType (ids::TRACK))
+            app.moveAutomation (holder, clipWas, (double) clip[ids::len], clipStart());
 
         drag = Drag::none;
         marquee = {};

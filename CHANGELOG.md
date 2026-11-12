@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- Clips drag with the mouse on the timeline: along their track, onto the grid lines on screen,
-  their automation with them. A drag from empty lane selects time.
+- Clips drag with the mouse on the timeline: along their track by the grid's step, selected as
+  they go, their automation with them. In the MIDI editor, the clip's strip in the ruler drags
+  it too. A drag from empty lane selects time.
 - Double-click opens plugins and sends: an insert in the routing column (an empty slot picks an
   effect), a send or the output (picks its bus), an instrument track's name (its instrument).
   One click steps onto the slot.

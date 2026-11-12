@@ -3899,11 +3899,12 @@ void App::dragClip (int x)
         return;
     }
 
-    // As far as the mouse has gone, then onto the nearest grid line on screen (grid on).
+    // As far as the mouse has gone, then onto the grid's step (grid 16: sixteenths; the finest
+    // line on screen when zoomed in past it). Zoomed out, a column is the smallest move.
     const auto spb = session->samplesPerBeat();
     auto to = d.from + (x - d.downX) * ui.lanes().spc;
 
-    if (const auto step = gridSpacing().finest(); step > 0.0)
+    if (const auto step = session->gridOn() ? hitStepBeats() * spb : 0.0; step > 0.0)
         to = std::round (to / step) * step;
 
     to = std::max (0.0, to);
@@ -3922,7 +3923,10 @@ void App::dragClip (int x)
     else
         d.clip.setProperty (ids::start, (juce::int64) std::llround (to), um());
 
+    // Selected as it goes, so it's plain which clip has moved (one under another, say).
     // (The cursor stays where it was pressed: moving it could scroll the view under the mouse.)
+    timeAnchor = (juce::int64) std::llround (to);
+    timeHead = (juce::int64) std::llround (to + d.length);
     say (Result::good ("clip moved to " + formatBars ((juce::int64) std::llround (to)) + L" \x00b7 ctrl+z puts it back"));
 }
 

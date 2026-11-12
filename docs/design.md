@@ -170,8 +170,9 @@ off View > Allow Mouse Reporting (Terminal.app).
   Shift-click stretches the time and track selections to it.
 - Double-click a clip: selects it and opens it in its editor, MIDI or audio (shift+E, or
   `edit`, from the keyboard).
-- Drag a clip (audio, MIDI or hits; the one on top): it moves along its track, onto the grid
-  lines on screen when the grid is on, as one undo step. Its automation goes with it when the
+- Drag a clip (audio, MIDI or hits; the one on top): it moves along its track, by the grid's
+  step when the grid is on (`grid 16`: sixteenths; a column, zoomed out past that), as one undo
+  step, and is selected as it goes. Its automation goes with it when the
   button is let go. Not while recording.
 - Drag from empty lane: selects time.
 - The routing column: a click steps onto that insert, send or output (the mix's inserts too);
@@ -219,7 +220,8 @@ One MIDI clip, for fine work with the mouse.
   stretched past the clip takes the clip with it. Other clips' notes on the track show as
   outlines; double-click one to open its clip. Hidden notes (trimmed off) show faint.
 - **Ruler:** bars and beats; the track's clips as strips, this one with handles: drag its edges
-  to trim or extend it (notes are only hidden).
+  to trim or extend it (notes are only hidden), drag the strip between them to move the clip,
+  notes and all (its automation follows).
 - **Keyboard down the side:** click (and drag) to play notes. Clicking or dragging a note
   plays it too, through the track's instrument, armed or not (the engine's audition queue).
 - **Lane:** velocity (drag a stalk; across several to set each; a selected one moves every

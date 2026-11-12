@@ -27,6 +27,7 @@ const char* const page = R"html(<!doctype html>
 <title>taw</title>
 <style>
   :root { color-scheme: dark; }
+  [hidden] { display: none !important; }
   body { margin: 0; padding: 24px 16px; background: #14161a; color: #e8e6e1; font: 17px/1.4 system-ui, sans-serif; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   p { margin: 0 0 20px; color: #9a9890; overflow-wrap: anywhere; }
@@ -53,7 +54,7 @@ const char* const page = R"html(<!doctype html>
   #pulse b { display: block; font-size: 44px; line-height: 1.1; }
   #pulse small { color: inherit; opacity: 0.7; }
   a { color: #e8e6e1; }
-  label.pick { background: #2a2e35; color: #e8e6e1; }
+  .pick { background: #2a2e35; color: #e8e6e1; }
   input[type=file] { display: none; }
   ul { list-style: none; margin: 20px 0 0; padding: 0; }
   li { padding: 12px 0; border-top: 1px solid #2a2e35; overflow-wrap: anywhere; }
@@ -82,6 +83,7 @@ const char* const page = R"html(<!doctype html>
   </div>
   <button id="go" class="button record">Record with a count-in</button>
   <div id="pulse" hidden><b id="count"></b><small id="counting"></small></div>
+  <button id="cancel" class="button pick" hidden>Cancel (nothing is sent)</button>
 </div>
 <p id="plain" hidden>To record here with a count-in, open <a id="secure">the secure page</a> (the phone asks once whether to go on).</p>
 <label class="button record" id="old">Record now<input id="record" type="file" accept="audio/*" capture></label>
@@ -220,6 +222,7 @@ const char* const page = R"html(<!doctype html>
                     && (window.AudioContext || window.webkitAudioContext);
   const bpmBox = document.getElementById('bpm'), during = document.getElementById('during'), go = document.getElementById('go');
   const pulse = document.getElementById('pulse'), count = document.getElementById('count'), counting = document.getElementById('counting');
+  const cancel = document.getElementById('cancel');
   let beatsPerBar = 4, bpmTouched = false, take = null;
 
   document.getElementById('click').hidden = ! canRecord;
@@ -347,6 +350,7 @@ const char* const page = R"html(<!doctype html>
 
     take = t;
     pulse.hidden = false;
+    cancel.hidden = false;
     go.textContent = 'Stop and send';
     go.className = 'button record on';
     requestAnimationFrame (show);
@@ -361,6 +365,7 @@ const char* const page = R"html(<!doctype html>
     t.ctx.close();
     take = null;
     pulse.hidden = true;
+    cancel.hidden = true;
     go.textContent = 'Record with a count-in';
     go.className = 'button record';
 
@@ -382,6 +387,9 @@ const char* const page = R"html(<!doctype html>
     const file = new File ([wav (all.subarray (Math.min (skip, total)), rate)], name, { type: 'audio/wav' });
     send (file, { at: lead - Math.max (0, (t.blocks[0].time - from)), bpm: t.bpm });
   }
+
+  // Stops and throws the take away.
+  cancel.addEventListener ('click', () => { if (take) finish (take, false); });
 
   go.addEventListener ('click', () => {
     if (take)

@@ -4450,7 +4450,7 @@ int main (int argc, char** argv)
                     }
 
                     reading.join();
-                    check ("the page is served over HTTPS", answer.contains ("Upload a file") && answer.contains ("Record with a count-in"));
+                    check ("the page is served over HTTPS", answer.contains ("Upload a file") && answer.contains ("Record with a count-in") && answer.contains ("Cancel (nothing is sent)"));
                 }
                 else
                     std::printf ("       (no curl: HTTPS not asked)\n");

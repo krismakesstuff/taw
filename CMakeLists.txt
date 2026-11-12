@@ -34,6 +34,19 @@ FetchContent_Declare(qrcodegen
     GIT_SHALLOW    TRUE)
 FetchContent_MakeAvailable(qrcodegen)
 
+# Mbed TLS (Apache-2.0): the phone link over HTTPS, which a phone's browser asks for before it
+# lets a page record. The release archive (its generated sources are in it: no Python or Perl).
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(GEN_FILES OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(DISABLE_PACKAGE_CONFIG_AND_INSTALL ON CACHE BOOL "" FORCE)
+FetchContent_Declare(mbedtls
+    URL      https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.5/mbedtls-3.6.5.tar.bz2
+    URL_HASH SHA256=4A11F1777BB95BF4AD96721CAC945A26E04BF19F57D905F241FE77EBEDDF46D8
+    EXCLUDE_FROM_ALL)
+FetchContent_MakeAvailable(mbedtls)
+
 juce_add_console_app(taw PRODUCT_NAME "taw")
 
 target_sources(taw PRIVATE
@@ -73,12 +86,13 @@ target_sources(taw PRIVATE
     src/MidiEditor.cpp
     src/Phone.cpp
     src/PhoneTakes.cpp
+    src/PhoneTls.cpp
     ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
     src/Plugins.cpp
     src/Ui.cpp
     src/Video.cpp)
 
-target_include_directories(taw SYSTEM PRIVATE ${qrcodegen_SOURCE_DIR}/cpp)
+target_include_directories(taw SYSTEM PRIVATE ${qrcodegen_SOURCE_DIR}/cpp ${mbedtls_SOURCE_DIR}/include)
 
 target_compile_definitions(taw PRIVATE
     JUCE_WEB_BROWSER=0
@@ -220,6 +234,7 @@ if (APPLE)
 endif()
 
 target_link_libraries(taw PRIVATE
+    mbedtls
     juce::juce_audio_devices
     juce::juce_audio_formats
     juce::juce_audio_processors

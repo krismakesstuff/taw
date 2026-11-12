@@ -1,6 +1,7 @@
 // The phone link: a very small HTTP server (one page, one upload) for the local network.
 
 #include "Phone.h"
+#include "PhoneTls.h"
 
 #include <qrcodegen.hpp>
 
@@ -10,6 +11,8 @@
 
 namespace taw
 {
+juce::File configFolder(); // Session.h
+
 namespace
 {
 constexpr int firstPort = 8317, portsToTry = 12;
@@ -37,8 +40,19 @@ const char* const page = R"html(<!doctype html>
   .what input:checked + b { background: #e8e6e1; color: #14161a; }
   select { width: 100%; margin: 0 0 12px; padding: 12px; border-radius: 10px; border: 0; background: #2a2e35; color: #e8e6e1; font: inherit; }
   #hint { font-size: 14px; margin: 0 0 16px; }
-  label.button { display: block; margin: 0 0 12px; padding: 18px; border-radius: 12px; text-align: center; font-weight: 600; }
-  label.record { background: #c8452f; color: #fff; }
+  .button { display: block; box-sizing: border-box; width: 100%; margin: 0 0 12px; padding: 18px; border: 0; border-radius: 12px; text-align: center; font: inherit; font-weight: 600; }
+  .record { background: #c8452f; color: #fff; }
+  .record.on { background: #e8e6e1; color: #14161a; }
+  .tempo { display: flex; align-items: center; gap: 10px; margin: 0 0 12px; color: #9a9890; font-size: 15px; }
+  .tempo input[type=number] { width: 76px; padding: 10px; border-radius: 10px; border: 0; background: #2a2e35; color: #e8e6e1; font: inherit; }
+  .tempo input:disabled { opacity: 0.6; }
+  .tempo label { flex: 1; }
+  #pulse { margin: 0 0 12px; padding: 18px; border-radius: 12px; background: #2a2e35; text-align: center; }
+  #pulse.beat { background: #e8e6e1; color: #14161a; }
+  #pulse.beat.one { background: #c8452f; color: #fff; }
+  #pulse b { display: block; font-size: 44px; line-height: 1.1; }
+  #pulse small { color: inherit; opacity: 0.7; }
+  a { color: #e8e6e1; }
   label.pick { background: #2a2e35; color: #e8e6e1; }
   input[type=file] { display: none; }
   ul { list-style: none; margin: 20px 0 0; padding: 0; }
@@ -61,7 +75,16 @@ const char* const page = R"html(<!doctype html>
 </div>
 <select id="inst" hidden></select>
 <p id="hint"></p>
-<label class="button record">Record now<input id="record" type="file" accept="audio/*" capture></label>
+<div id="click" hidden>
+  <div class="tempo">
+    <span>Tempo</span><input id="bpm" type="number" min="40" max="240" step="1" inputmode="numeric">
+    <label><input id="during" type="checkbox"> click while recording (headphones)</label>
+  </div>
+  <button id="go" class="button record">Record with a count-in</button>
+  <div id="pulse" hidden><b id="count"></b><small id="counting"></small></div>
+</div>
+<p id="plain" hidden>To record here with a count-in, open <a id="secure">the secure page</a> (the phone asks once whether to go on).</p>
+<label class="button record" id="old">Record now<input id="record" type="file" accept="audio/*" capture></label>
 <label class="button pick">Upload a file<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
 <ul id="list"></ul>
 <script>
@@ -142,8 +165,9 @@ const char* const page = R"html(<!doctype html>
 
   showChoice();
 
-  function send (file) {
+  function send (file, click) {
     const as = chosen(), instrument = as === 'notes' ? inst.value : '';
+    const clicked = click ? '&at=' + click.at.toFixed (4) + '&bpm=' + click.bpm : '';
     const row = document.createElement('li');
     const note = document.createElement('small');
     const bar = document.createElement('div');
@@ -158,7 +182,7 @@ const char* const page = R"html(<!doctype html>
 
     queue = queue.then (() => new Promise (done => {
       const x = new XMLHttpRequest();
-      x.open ('POST', home + '/up?name=' + encodeURIComponent (file.name) + '&as=' + as + '&inst=' + encodeURIComponent (instrument));
+      x.open ('POST', home + '/up?name=' + encodeURIComponent (file.name) + '&as=' + as + '&inst=' + encodeURIComponent (instrument) + clicked);
       x.upload.onprogress = e => {
         if (e.lengthComputable) {
           fill.style.width = (100 * e.loaded / e.total) + '%';
@@ -188,6 +212,191 @@ const char* const page = R"html(<!doctype html>
       for (const f of e.target.files) send (f);
       e.target.value = '';
     });
+
+)html" /* (in two: a compiler's limit on one string) */ R"html(
+  // Recording here, to a click: a bar counted in at the session's tempo, then the take, which
+  // starts on beat one. Only a secure page may record (the https address).
+  const canRecord = window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+                    && (window.AudioContext || window.webkitAudioContext);
+  const bpmBox = document.getElementById('bpm'), during = document.getElementById('during'), go = document.getElementById('go');
+  const pulse = document.getElementById('pulse'), count = document.getElementById('count'), counting = document.getElementById('counting');
+  let beatsPerBar = 4, bpmTouched = false, take = null;
+
+  document.getElementById('click').hidden = ! canRecord;
+  document.getElementById('old').hidden = !! canRecord;
+
+  if (! canRecord && location.protocol === 'http:') {
+    document.getElementById('plain').hidden = false;
+    document.getElementById('secure').href = 'https://' + location.host + location.pathname;
+  }
+
+  during.checked = kept ('taw.during') === '1';
+  during.addEventListener ('change', () => keep ('taw.during', during.checked ? '1' : '0'));
+  bpmBox.addEventListener ('input', () => { bpmTouched = true; keep ('taw.bpm', bpmBox.value); });
+
+  // The session's tempo; with nothing in the session yet, the phone's own (the take sets it).
+  function askTempo () {
+    fetch (home + '/tempo', { cache: 'no-store' })
+      .then (r => r.ok ? r.text() : Promise.reject())
+      .then (text => {
+        const parts = text.split (' ');
+        const bpm = Math.round (parseFloat (parts[0]) || 120), empty = parts[2] === '1';
+        beatsPerBar = parseInt (parts[1]) || 4;
+
+        if (take)
+          return;
+
+        bpmBox.disabled = ! empty;
+
+        if (! empty)
+          bpmBox.value = bpm;
+        else if (! bpmTouched)
+          bpmBox.value = kept ('taw.bpm') || bpm;
+      })
+      .catch (() => {});
+  }
+
+  if (canRecord) {
+    askTempo();
+    setInterval (askTempo, 4000);
+  }
+
+  // The microphone's samples, each block with the time (the audio clock's) of its first.
+  const tap = 'registerProcessor ("tap", class extends AudioWorkletProcessor {'
+            + '  process (inputs) {'
+            + '    const x = inputs[0] && inputs[0][0];'
+            + '    if (x) this.port.postMessage ({ time: currentTime, samples: x.slice (0) });'
+            + '    return true;'
+            + '  }'
+            + '});';
+
+  function wav (samples, rate) {
+    const view = new DataView (new ArrayBuffer (44 + 2 * samples.length));
+    const text = (at, s) => { for (let i = 0; i < s.length; ++i) view.setUint8 (at + i, s.charCodeAt (i)); };
+    text (0, 'RIFF'); view.setUint32 (4, 36 + 2 * samples.length, true); text (8, 'WAVE'); text (12, 'fmt ');
+    view.setUint32 (16, 16, true); view.setUint16 (20, 1, true); view.setUint16 (22, 1, true);
+    view.setUint32 (24, rate, true); view.setUint32 (28, 2 * rate, true); view.setUint16 (32, 2, true); view.setUint16 (34, 16, true);
+    text (36, 'data'); view.setUint32 (40, 2 * samples.length, true);
+
+    for (let i = 0; i < samples.length; ++i)
+      view.setInt16 (44 + 2 * i, Math.max (-32768, Math.min (32767, Math.round (samples[i] * 32767))), true);
+
+    return view.buffer;
+  }
+
+  function tick (t, time, accent) {
+    const osc = t.ctx.createOscillator(), gain = t.ctx.createGain();
+    osc.frequency.value = accent ? 1760 : 1175;
+    gain.gain.setValueAtTime (0.0001, time);
+    gain.gain.exponentialRampToValueAtTime (0.9, time + 0.002);
+    gain.gain.exponentialRampToValueAtTime (0.0001, time + 0.045);
+    osc.connect (gain).connect (t.ctx.destination);
+    osc.start (time);
+    osc.stop (time + 0.06);
+  }
+
+  async function begin () {
+    const bpm = Math.max (40, Math.min (240, Math.round (parseFloat (bpmBox.value) || 120)));
+    const t = { bpm, bar: beatsPerBar, beat: 60 / bpm, blocks: [], next: 0 };
+    t.stream = await navigator.mediaDevices.getUserMedia ({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 } });
+    t.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await t.ctx.resume();
+    const source = t.ctx.createMediaStreamSource (t.stream), silent = t.ctx.createGain();
+    silent.gain.value = 0;
+
+    if (t.ctx.audioWorklet) {
+      const url = URL.createObjectURL (new Blob ([tap], { type: 'application/javascript' }));
+      await t.ctx.audioWorklet.addModule (url);
+      URL.revokeObjectURL (url);
+      t.node = new AudioWorkletNode (t.ctx, 'tap', { numberOfInputs: 1, numberOfOutputs: 1, channelCount: 1 });
+      t.node.port.onmessage = e => t.blocks.push (e.data);
+    }
+    else {
+      // An older browser: bigger blocks, their time less sure.
+      t.node = t.ctx.createScriptProcessor (2048, 1, 1);
+      t.node.onaudioprocess = e => t.blocks.push ({ time: e.playbackTime - 2 * 2048 / t.ctx.sampleRate, samples: e.inputBuffer.getChannelData (0).slice (0) });
+    }
+
+    source.connect (t.node).connect (silent).connect (t.ctx.destination);
+
+    // A click is heard, and a sound made to it comes back, a little late: the way out and the way in.
+    const settings = t.stream.getAudioTracks()[0].getSettings ? t.stream.getAudioTracks()[0].getSettings() : {};
+    const known = (t.ctx.outputLatency || 0) + (settings.latency || 0);
+    t.late = known > 0 ? known + (t.ctx.baseLatency || 0) : 0.03;
+    t.start = t.ctx.currentTime + 0.25;
+    t.one = t.start + t.bar * t.beat; // beat one of the take
+
+    // Clicks, set a little ahead of time: the count-in, and on through the take if asked for.
+    t.timer = setInterval (() => {
+      for (; t.start + t.next * t.beat < t.ctx.currentTime + 0.4; ++t.next)
+        if (t.next < t.bar || during.checked)
+          tick (t, t.start + t.next * t.beat, t.next % t.bar === 0);
+    }, 50);
+
+    const show = () => {
+      if (take !== t)
+        return;
+
+      const beats = (t.ctx.currentTime - (t.ctx.outputLatency || 0) - t.start) / t.beat, whole = Math.floor (beats);
+      const lit = beats >= 0 && beats - whole < 0.25;
+      pulse.className = lit ? (((whole % t.bar) + t.bar) % t.bar === 0 ? 'beat one' : 'beat') : '';
+      count.textContent = whole < 0 ? '' : whole < t.bar ? String (t.bar - whole) : String (whole % t.bar + 1);
+      counting.textContent = whole < t.bar ? 'counting in' : 'recording: bar ' + Math.floor (whole / t.bar);
+      requestAnimationFrame (show);
+    };
+
+    take = t;
+    pulse.hidden = false;
+    go.textContent = 'Stop and send';
+    go.className = 'button record on';
+    requestAnimationFrame (show);
+  }
+
+  function finish (t, sendIt) {
+    clearInterval (t.timer);
+    const until = t.ctx.currentTime;
+    t.stream.getTracks().forEach (track => track.stop());
+    t.node.disconnect();
+    const rate = t.ctx.sampleRate;
+    t.ctx.close();
+    take = null;
+    pulse.hidden = true;
+    go.textContent = 'Record with a count-in';
+    go.className = 'button record';
+
+    // From a tenth of a second before beat one (as it came back in): a first hit a touch early is kept.
+    const lead = 0.1, from = t.one + t.late - lead;
+
+    if (! sendIt || ! t.blocks.length || until < t.one + 0.3)
+      return;
+
+    let total = 0;
+    for (const b of t.blocks) total += b.samples.length;
+    const all = new Float32Array (total);
+    let at = 0;
+    for (const b of t.blocks) { all.set (b.samples, at); at += b.samples.length; }
+
+    const skip = Math.max (0, Math.round ((from - t.blocks[0].time) * rate));
+    const stamp = new Date(), two = n => String (n).padStart (2, '0');
+    const name = 'take ' + two (stamp.getHours()) + '-' + two (stamp.getMinutes()) + '-' + two (stamp.getSeconds()) + '.wav';
+    const file = new File ([wav (all.subarray (Math.min (skip, total)), rate)], name, { type: 'audio/wav' });
+    send (file, { at: lead - Math.max (0, (t.blocks[0].time - from)), bpm: t.bpm });
+  }
+
+  go.addEventListener ('click', () => {
+    if (take)
+      return finish (take, true);
+
+    go.disabled = true;
+    begin().catch (e => {
+      const row = document.createElement('li'), note = document.createElement('small');
+      row.className = 'bad';
+      row.textContent = "couldn't record";
+      note.textContent = e && e.name === 'NotAllowedError' ? 'the browser was told not to let this page use the microphone' : String (e && e.message || e);
+      row.appendChild (note);
+      list.prepend (row);
+    }).then (() => { go.disabled = false; });
+  });
 </script>
 </body>
 </html>
@@ -289,6 +498,10 @@ struct PhoneLink::Server final : private juce::Thread
         token = makeToken();
         folder = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("taw-phone-" + token);
         folder.createDirectory();
+
+        // HTTPS if it can be had (without it the page can send files, not record).
+        juce::String why;
+        secure = tls.prepare (configFolder().getChildFile ("phone"), address, why);
         startThread();
         return true;
     }
@@ -325,7 +538,34 @@ struct PhoneLink::Server final : private juce::Thread
         }
     }
 
-    static void reply (juce::StreamingSocket& socket, const char* status, const char* type, const juce::String& body)
+    // A connection, plain or under TLS.
+    struct Wire
+    {
+        juce::StreamingSocket& socket;
+        std::unique_ptr<PhoneTls::Line> tls;
+
+        int read (void* to, int most, int timeoutMs) // bytes; 0: none in that time; under 0: closed
+        {
+            if (tls != nullptr)
+                return tls->read (to, most, timeoutMs);
+
+            if (socket.waitUntilReady (true, timeoutMs) != 1)
+                return 0;
+
+            const int got = socket.read (to, most, false);
+            return got > 0 ? got : -1;
+        }
+
+        void write (const void* from, int size)
+        {
+            if (tls != nullptr)
+                tls->write (from, size);
+            else
+                socket.write (from, size);
+        }
+    };
+
+    static void reply (Wire& socket, const char* status, const char* type, const juce::String& body)
     {
         const auto utf8 = body.toRawUTF8();
         const auto length = (int) body.getNumBytesAsUTF8();
@@ -341,11 +581,14 @@ struct PhoneLink::Server final : private juce::Thread
         statusText = text;
     }
 
-    void serve (juce::StreamingSocket& socket)
+    void serve (juce::StreamingSocket& connection)
     {
         // Nothing from outside the local network gets a word back.
-        if (! isLocalAddress (socket.getHostName()))
+        if (! isLocalAddress (connection.getHostName()))
             return;
+
+        Wire socket { connection, nullptr };
+        bool sniffed = false;
 
         // The request's head: up to the blank line.
         juce::MemoryBlock data;
@@ -353,14 +596,22 @@ struct PhoneLink::Server final : private juce::Thread
 
         while (headEnd < 0 && data.getSize() < 16384 && ! stopping)
         {
-            if (socket.waitUntilReady (true, 3000) != 1)
-                return;
-
             char buffer[2048];
-            const int got = socket.read (buffer, sizeof (buffer), false);
+            const int got = socket.read (buffer, sizeof (buffer), 3000);
 
             if (got <= 0)
                 return;
+
+            // HTTPS starts with a TLS handshake (its first byte says so); plain HTTP with a letter.
+            if (! std::exchange (sniffed, true) && buffer[0] == 0x16)
+            {
+                socket.tls = secure ? tls.accept (connection, buffer, got, stopping) : nullptr;
+
+                if (socket.tls == nullptr)
+                    return;
+
+                continue;
+            }
 
             data.append (buffer, (size_t) got);
             const auto* bytes = static_cast<const char*> (data.getData());
@@ -395,6 +646,12 @@ struct PhoneLink::Server final : private juce::Thread
         if (method == "GET" && path == home + "/session")
             return reply (socket, "200 OK", "text/plain; charset=utf-8", sessionName());
 
+        if (method == "GET" && path == home + "/tempo")
+        {
+            const juce::ScopedLock sl (lock);
+            return reply (socket, "200 OK", "text/plain; charset=utf-8", tempo);
+        }
+
         if (method == "GET" && path == home + "/instruments")
         {
             const juce::ScopedLock sl (lock);
@@ -409,9 +666,9 @@ struct PhoneLink::Server final : private juce::Thread
             auto left = std::min<juce::int64> (length, 32LL * 1024 * 1024) - ((juce::int64) data.getSize() - headEnd);
             std::vector<char> sink (64 * 1024);
 
-            while (method == "POST" && left > 0 && ! stopping && socket.waitUntilReady (true, 3000) == 1)
+            while (method == "POST" && left > 0 && ! stopping)
             {
-                const int got = socket.read (sink.data(), (int) std::min<juce::int64> ((juce::int64) sink.size(), left), false);
+                const int got = socket.read (sink.data(), (int) std::min<juce::int64> ((juce::int64) sink.size(), left), 3000);
 
                 if (got <= 0)
                     break;
@@ -427,6 +684,7 @@ struct PhoneLink::Server final : private juce::Thread
 
         // An upload: the file's name and what to make of it in the query, the file itself as the body.
         juce::String name, as ("audio"), instrument;
+        double downbeat = -1.0, bpm = 0.0;
 
         for (const auto& pair : juce::StringArray::fromTokens (query, "&", ""))
         {
@@ -438,6 +696,10 @@ struct PhoneLink::Server final : private juce::Thread
                 as = value;
             else if (pair.startsWith ("inst="))
                 instrument = value.trim().substring (0, 80);
+            else if (pair.startsWith ("at="))
+                downbeat = juce::jlimit (0.0, 60.0, value.getDoubleValue());
+            else if (pair.startsWith ("bpm="))
+                bpm = juce::jlimit (0.0, 400.0, value.getDoubleValue());
         }
 
         name = juce::File::createLegalFileName (name.trim()).substring (0, 120);
@@ -470,13 +732,7 @@ struct PhoneLink::Server final : private juce::Thread
 
             while (written < length && ! failed && ! stopping)
             {
-                if (socket.waitUntilReady (true, 20000) != 1)
-                {
-                    failed = true;
-                    break;
-                }
-
-                const int got = socket.read (buffer.data(), (int) std::min<juce::int64> ((juce::int64) buffer.size(), length - written), false);
+                const int got = socket.read (buffer.data(), (int) std::min<juce::int64> ((juce::int64) buffer.size(), length - written), 20000);
 
                 if (got <= 0 || ! out.write (buffer.data(), (size_t) got))
                 {
@@ -498,7 +754,7 @@ struct PhoneLink::Server final : private juce::Thread
 
         {
             const juce::ScopedLock sl (lock);
-            arrived.push_back ({ file, as, instrument });
+            arrived.push_back ({ file, as, instrument, bpm >= 20.0 ? downbeat : -1.0, bpm >= 20.0 ? bpm : 0.0 });
             ++count;
             statusText = "got " + name;
         }
@@ -528,8 +784,10 @@ struct PhoneLink::Server final : private juce::Thread
 
     juce::CriticalSection lock;
     std::vector<Take> arrived;
-    juce::String statusText, session;
+    juce::String statusText, session, tempo;
     juce::StringArray instruments;
+    PhoneTls tls;
+    bool secure = false; // the key and certificate are there: HTTPS is answered
     int count = 0;
 };
 
@@ -542,13 +800,14 @@ void PhoneLink::setInstruments (const juce::StringArray& names)
     server->instruments = names;
 }
 
-void PhoneLink::setSession (const juce::String& name)
+void PhoneLink::setSession (const juce::String& name, double bpm, int beatsPerBar, bool empty)
 {
     if (server == nullptr)
         return;
 
     const juce::ScopedLock sl (server->lock);
     server->session = name;
+    server->tempo = juce::String (bpm, 2) + " " + juce::String (beatsPerBar) + " " + (empty ? "1" : "0");
 }
 
 PhoneLink::PhoneLink() = default;
@@ -573,7 +832,7 @@ bool PhoneLink::running() const { return server != nullptr; }
 
 juce::String PhoneLink::url() const
 {
-    return server != nullptr ? "http://" + server->address + ":" + juce::String (server->port) + "/" + server->token : juce::String();
+    return server != nullptr ? juce::String (server->secure ? "https://" : "http://") + server->address + ":" + juce::String (server->port) + "/" + server->token : juce::String();
 }
 
 std::vector<PhoneLink::Take> PhoneLink::takeReceived()

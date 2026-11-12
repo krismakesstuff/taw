@@ -77,7 +77,9 @@ struct HumPart
 
 // nearBpm: the tempo it was hummed to (the session's), if there was one; 0 finds it from the
 // take alone, which a beat is good for and a few sung notes aren't.
-HumPart arrange (const Heard&, bool asBeat, double nearBpm = 0.0);
+// downbeat: where in the take beat one fell, for a take made to a click at nearBpm (firstOnset
+// is then that, not the first sound); under 0, the first sound is taken to be beat one.
+HumPart arrange (const Heard&, bool asBeat, double nearBpm = 0.0, double downbeat = -1.0);
 
 // A time in seconds as beats at a tempo, on a grid (in beats; 0 leaves it alone).
 double humBeat (double seconds, double bpm, double grid);

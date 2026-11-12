@@ -12,6 +12,11 @@
   sounds are a kick and a tom, middle ones a snare and percussion.
 - Parts made from the phone's takes all start on the same bar line (the first one's);
   `phone here` moves that to the cursor's bar.
+- The phone's page records on its own, to a click: a bar counted in at the session's tempo (the
+  phone's, in a session with nothing in it yet), then the take, which lands with its beat one on
+  the bar line, so a part that starts off the beat stays there. The click can carry on through
+  the take, for headphones. For this the link is HTTPS with a certificate of taw's own: the phone
+  warns once. The `http` address still sends files.
 - `taw --phone` starts a new session with the phone link on (`taw my-song --phone`: in my-song);
   `:phone` on the session screen does the same.
 

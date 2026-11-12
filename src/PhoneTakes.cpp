@@ -72,7 +72,10 @@ void App::pollPhone()
     if (! phone.running())
         return;
 
-    phone.setSession (session != nullptr ? session->name() : juce::String());
+    if (session != nullptr)
+        phone.setSession (session->name(), session->bpm(), session->beatsPerBar(), session->numTracks() == 0 && phoneJob == nullptr);
+    else
+        phone.setSession ({});
 
     for (auto& take : phone.takeReceived())
         phoneWaiting.push_back (std::move (take));
@@ -128,11 +131,51 @@ void App::stepPhoneJob()
     if (import != nullptr || recording)
         return;
 
+    // Recorded on the phone to its click: the tempo and where beat one is in the take are known.
+    const bool first = job.tracksBefore == 0;
+    const bool clicked = job.take.downbeat >= 0.0 && job.take.bpm > 0.0;
+
+    // Every part starts on the same bar line, so one take sits over the last: the first bar
+    // line the first take's first beat could reach from the cursor ("phone here" moves it).
+    // The recording moves along to sit under its part, losing what won't fit before it.
+    const auto place = [this] (juce::ValueTree take, double leadSeconds)
+    {
+        const double spb = session->samplesPerBeat(), bar = juce::jmax (1, session->beatsPerBar());
+        const double lead = leadSeconds * sampleRate();
+
+        if (phoneStartBeat < 0.0 || phoneStartIn != session->folder())
+        {
+            phoneStartBeat = std::ceil (((double) (juce::int64) take[ids::start] + lead) / spb / bar - 1.0e-6) * bar;
+            phoneStartIn = session->folder();
+        }
+
+        const auto from = (juce::int64) std::llround (phoneStartBeat * spb - lead);
+        const auto cut = juce::jmax ((juce::int64) 0, -from);
+        take.setProperty (ids::start, from + cut, um());
+        take.setProperty (ids::offset, (juce::int64) take[ids::offset] + cut, um());
+        take.setProperty (ids::length, juce::jmax ((juce::int64) 1, (juce::int64) take[ids::length] - cut), um());
+        return phoneStartBeat;
+    };
+
     if (job.stage == PhoneJob::Stage::importing)
     {
         // Its import is over: with a new track (the last), or not at all (the import said why).
-        if (session->numTracks() <= job.tracksBefore || job.take.as == "audio")
+        if (session->numTracks() <= job.tracksBefore)
             return phoneJob.reset();
+
+        if (job.take.as == "audio")
+        {
+            // A plain recording made to the click: its beat one on the bar line, like a part's.
+            if (clicked)
+            {
+                if (first)
+                    session->tree().setProperty (ids::bpm, std::round (job.take.bpm), um());
+
+                place (session->track (session->numTracks() - 1).getChildWithName (ids::CLIP), job.take.downbeat);
+            }
+
+            return phoneJob.reset();
+        }
 
         // Muted: it's there to check the part against. (Still in the import's undo step.)
         session->track (session->numTracks() - 1).setProperty (ids::mute, true, um());
@@ -152,39 +195,24 @@ void App::stepPhoneJob()
             return phoneJob.reset();
         }
 
-        // In a session with nothing in it yet the take sets the tempo; otherwise it was hummed
-        // to the session's.
-        const bool first = job.tracksBefore == 0;
-        job.part = arrange (*heard, drums, first ? 0.0 : session->bpm());
-        job.heardTake = *heard;
-
         // One undo step from here (and no plugin window: nobody at the keys asked for one).
         const juce::ScopedValueSetter<bool> quiet (agentEditing, true);
         um()->beginNewTransaction ("phone: " + job.take.as + " from " + name);
 
-        if (first)
+        // The tempo: the click's if it was made to one. Else, in a session with nothing in it
+        // yet the take sets it, and otherwise it was hummed to the session's.
+        if (first && clicked)
+            session->tree().setProperty (ids::bpm, std::round (job.take.bpm), um());
+
+        job.part = clicked ? arrange (*heard, drums, session->bpm(), job.take.downbeat)
+                           : arrange (*heard, drums, first ? 0.0 : session->bpm());
+        job.heardTake = *heard;
+
+        if (first && ! clicked)
             session->tree().setProperty (ids::bpm, std::round (job.part.bpm), um());
 
-        // Every part starts on the same bar line, so one take sits over the last: the first
-        // bar line the first take's first beat could reach from the cursor ("phone here" moves
-        // it). The recording moves along to sit under its part, losing what won't fit before it.
-        auto take = session->track (session->numTracks() - 1).getChildWithName (ids::CLIP);
-        const double spb = session->samplesPerBeat(), bar = juce::jmax (1, session->beatsPerBar());
-        const double lead = job.part.firstOnset * sampleRate();
-
-        if (phoneStartBeat < 0.0 || phoneStartIn != session->folder())
-        {
-            phoneStartBeat = std::ceil (((double) (juce::int64) take[ids::start] + lead) / spb / bar - 1.0e-6) * bar;
-            phoneStartIn = session->folder();
-        }
-
-        job.startBeat = phoneStartBeat;
-        const auto from = (juce::int64) std::llround (job.startBeat * spb - lead);
-        const auto cut = juce::jmax ((juce::int64) 0, -from);
-        take.setProperty (ids::start, from + cut, um());
-        take.setProperty (ids::offset, (juce::int64) take[ids::offset] + cut, um());
-        take.setProperty (ids::length, juce::jmax ((juce::int64) 1, (juce::int64) take[ids::length] - cut), um());
-        const auto at = formatBars ((juce::int64) std::llround (job.startBeat * spb));
+        job.startBeat = place (session->track (session->numTracks() - 1).getChildWithName (ids::CLIP), job.part.firstOnset);
+        const auto at = formatBars ((juce::int64) std::llround (job.startBeat * session->samplesPerBeat()));
 
         if (drums)
         {

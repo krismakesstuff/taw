@@ -1106,7 +1106,7 @@ std::vector<int> beatSteps (const std::vector<HumHit>& hits, double nearBpm, dou
 }
 } // namespace
 
-HumPart arrange (const Heard& heard, bool asBeat, double nearBpm)
+HumPart arrange (const Heard& heard, bool asBeat, double nearBpm, double downbeat)
 {
     HumPart part;
 
@@ -1115,7 +1115,33 @@ HumPart arrange (const Heard& heard, bool asBeat, double nearBpm)
 
     std::vector<int> steps;
 
-    if (asBeat)
+    if (downbeat >= 0.0 && nearBpm > 0.0)
+    {
+        // Made to a click: the tempo and where beat one fell are known, and each onset goes
+        // where it falls from there (the grid still follows the player's drift).
+        std::vector<double> times;
+
+        if (asBeat)
+            for (const auto& hit : heard.hits)
+                times.push_back (hit.time);
+        else
+            for (const auto& note : heard.notes)
+                times.push_back (note.start);
+
+        part.bpm = nearBpm;
+        part.firstOnset = downbeat;
+        const double step = 15.0 / nearBpm;
+        const bool rest = times.front() > downbeat + 0.5 * step; // it doesn't start on beat one
+
+        if (rest)
+            times.insert (times.begin(), downbeat);
+
+        steps = stepsOf (times, step);
+
+        if (rest)
+            steps.erase (steps.begin());
+    }
+    else if (asBeat)
         steps = beatSteps (heard.hits, nearBpm, part.bpm, part.firstOnset);
     else
     {

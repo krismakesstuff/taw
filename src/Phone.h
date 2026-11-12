@@ -22,10 +22,15 @@ public:
     void stop();
     bool running() const;
 
-    juce::String url() const; // http://192.168.1.20:8317/k3x9p2
+    // https://192.168.1.20:8317/k3x9p2 (HTTPS, with a certificate of taw's own, so the page may
+    // record: the phone asks once whether to go on). The same address with http works too, for
+    // sending files only.
+    juce::String url() const;
 
-    // The session the recordings are going into (empty: none open), for the page to show.
-    void setSession (const juce::String& name);
+    // The session the recordings are going into (empty: none open), for the page to show, and
+    // what its click goes by: the tempo, the beats in a bar, and whether there's nothing in the
+    // session yet (the phone may then set the tempo).
+    void setSession (const juce::String& name, double bpm = 0.0, int beatsPerBar = 4, bool empty = false);
 
     // The instruments the page offers for a sung part (the scanned plugins' names).
     void setInstruments (const juce::StringArray& names);
@@ -36,6 +41,8 @@ public:
     {
         juce::File file;
         juce::String as, instrument;
+        double downbeat = -1.0; // recorded on the page to its click: where in the file beat one is (seconds) ...
+        double bpm = 0.0;       // ... and the click's tempo
     };
 
     // The recordings that have come in since last asked, whole, in a temporary folder that lasts

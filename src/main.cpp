@@ -4357,18 +4357,19 @@ int main (int argc, char** argv)
 
             // taw --phonetest <session-dir> <beat.wav> <melody.wav> (taw --humtest <folder> makes
             // them): sent as drums and as notes, each becomes a part beside its muted recording.
-            auto sendAs = [&] (const juce::String& path, const juce::String& as)
+            auto sendAs = [&] (const juce::String& path, const juce::String& as, const juce::String& more = {})
             {
                 juce::MemoryBlock file;
                 juce::File::getCurrentWorkingDirectory().getChildFile (path).loadFileAsData (file);
-                const bool taken = ask ("POST", appHome + "/up?name=" + as + ".wav&as=" + as + "&inst=", file).startsWith ("HTTP/1.1 200");
+                const int soFar = app->phone.received();
+                const bool taken = ask ("POST", appHome + "/up?name=" + as + ".wav&as=" + as + "&inst=" + more, file).startsWith ("HTTP/1.1 200");
 
                 for (const auto until = juce::Time::getMillisecondCounter() + 30000; juce::Time::getMillisecondCounter() < until;)
                 {
                     app->pumpBackgroundWork();
                     juce::Thread::sleep (5);
 
-                    if (app->phone.received() >= (as == "drums" ? 2 : 3) && app->phoneJob == nullptr && app->phoneWaiting.empty() && ! app->hasBackgroundWork())
+                    if (app->phone.received() > soFar && app->phoneJob == nullptr && app->phoneWaiting.empty() && ! app->hasBackgroundWork())
                         break;
                 }
 
@@ -4412,7 +4413,50 @@ int main (int argc, char** argv)
                 check ("its recording is muted too, and its notes are on an instrument track",
                        s.numTracks() == then + 2 && (bool) s.track (then)[taw::ids::mute] && taw::Session::isInstrumentTrack (s.track (then + 1))
                            && count (s.track (then + 1), taw::ids::NOTE) == 9);
+
+                // Recorded on the page to its click: beat one is where the page says (here a
+                // beat before the take starts sounding... the take's own start), not the first sound.
+                const auto firstBeat = [&] (int t)
+                {
+                    const auto clip = s.track (t).getChild (0);
+                    return clip.getNumChildren() > 0 ? (double) clip[taw::ids::beat] + (double) clip.getChild (0)[taw::ids::beat] : -1.0;
+                };
+                const double unclicked = firstBeat (then + 1);
+                const int again = s.numTracks();
+                check ("a melody recorded to the click is taken", sendAs (args[3], "notes", "&at=0&bpm=" + juce::String (s.bpm(), 2)));
+                const double clickedAt = firstBeat (again + 1);
+                std::printf ("       first note at beat %.2f without the click, %.2f with beat one at the file's start\n", unclicked, clickedAt);
+                check ("its notes fall from the click's beat one, not from the first note",
+                       s.numTracks() == again + 2 && count (s.track (again + 1), taw::ids::NOTE) == 9 && clickedAt >= unclicked);
+                const auto tempo = ask ("GET", appHome + "/tempo", {});
+                check ("the page can ask the tempo and the bar", tempo.endsWith ("\r\n\r\n" + juce::String (s.bpm(), 2) + " " + juce::String (s.beatsPerBar()) + " 0"));
             }
+
+            // HTTPS, asked as a browser would (curl, taking the certificate as it is).
+            if (appUrl.startsWith ("https://"))
+            {
+                juce::ChildProcess curl;
+
+                if (curl.start (juce::StringArray { "curl", "-sk", "--max-time", "10", appUrl }))
+                {
+                    std::atomic<bool> done { false };
+                    juce::String answer;
+                    std::thread reading ([&] { answer = curl.readAllProcessOutput(); done = true; });
+
+                    while (! done)
+                    {
+                        app->pumpBackgroundWork();
+                        juce::Thread::sleep (5);
+                    }
+
+                    reading.join();
+                    check ("the page is served over HTTPS", answer.contains ("Upload a file") && answer.contains ("Record with a count-in"));
+                }
+                else
+                    std::printf ("       (no curl: HTTPS not asked)\n");
+            }
+            else
+                check ("the link is HTTPS", false);
 
             check ("phone off ends it", app->execute ("phone off").ok && ! app->phone.running() && ! app->phoneVisible);
         }

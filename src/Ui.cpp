@@ -556,7 +556,7 @@ void Ui::drawPhone (App& app)
         line << L" \x00b7 " << waiting << " waiting to go in";
 
     canvas.text (x0 + 2, y, line, status.isNotEmpty() ? colour::ok : colour::faint, bg, false, boxW - 4);
-    canvas.text (x0 + 2, y0 + boxH - 2, L"phone on the same wifi \x00b7 let taw through the firewall if asked", colour::faint, bg, false, boxW - 4);
+    canvas.text (x0 + 2, y0 + boxH - 2, L"same wifi \x00b7 the phone warns once (taw's own certificate): go on \x00b7 firewall: let taw through", colour::faint, bg, false, boxW - 4);
     canvas.text (x0 + 2, y0 + boxH - 1, L"lands at the cursor on a new track \x00b7 esc hides \x00b7 phone off ends it", colour::faint, bg, false, boxW - 4);
 }
 

@@ -117,8 +117,8 @@ tracks hear all of them; `midi` shows them, switches ones you don't use off, and
 each is sending. Plugin settings are saved next to the session in `plugins/`.
 
 To edit notes, double-click a MIDI clip (or `shift+E` on the track): the MIDI editor opens in a
-window over the terminal, for the mouse. Drag notes to move them, drag an edge to change the
-length, double-click to draw one, right-click to delete; the lane below sets velocity or draws a
+window over the terminal, for the mouse. Drag notes to move them (alt+drag copies them, ctrl+c
+and ctrl+v copy and paste at the cursor), drag an edge to change the length, double-click to draw one, right-click to delete; the lane below sets velocity or draws a
 controller. `edit new` makes an empty clip to draw into. Audio clips open the same way in the
 audio editor, for placing the selection and clip edges down to the sample.
 

@@ -174,6 +174,16 @@ Key mouseKey (const std::string& params, char final)
     const auto p = csiParams (params.substr (1));
     Key k;
 
+    // The left button let go: what ends a drag.
+    if (final == 'm' && p.size() >= 3 && (p[0] & 64) == 0 && (p[0] & 3) == 0)
+    {
+        k.code = Key::Mouse;
+        k.release = true;
+        k.x = std::max (0, p[1] - 1);
+        k.y = std::max (0, p[2] - 1);
+        return k;
+    }
+
     if (final != 'M' || p.size() < 3 || (p[0] & 64) != 0 || (p[0] & 3) == 1 || (p[0] & 3) == 3)
         return k;
 

@@ -216,6 +216,7 @@ private:
     std::vector<Original> originals;
     Original anchor {};
     juce::Point<float> downAt;
+    bool copyOnDrag = false; // alt held on a note: the drag takes copies, the notes stay
     double downBeat = 0.0;
     int downPitch = 60;
     juce::Rectangle<float> marquee;
@@ -497,6 +498,64 @@ private:
         selected = copies;
     }
 
+    // Ctrl+C / ctrl+X: the selected notes, kept from the first one's start.
+    void copySelected (bool cut)
+    {
+        pruneSelection();
+
+        if (selected.empty())
+            return;
+
+        double lo = 1e9;
+
+        for (const auto& n : selected)
+            lo = std::min (lo, (double) n[ids::beat]);
+
+        app.copiedNotes.clear();
+
+        for (const auto& n : selected)
+        {
+            auto c = n.createCopy();
+            c.setProperty (ids::beat, (double) n[ids::beat] - lo, nullptr);
+            app.copiedNotes.push_back (c);
+        }
+
+        const auto count = juce::String ((int) selected.size()) + (selected.size() == 1 ? " note" : " notes");
+
+        if (cut)
+            deleteSelected();
+
+        app.say (Result::good ((cut ? "cut " : "copied ") + count + L" \x00b7 ctrl+v pastes at the cursor (a click on the ruler puts it there)"));
+    }
+
+    // Ctrl+V: at taw's cursor, which then goes to their end (on the grid), so the next paste follows on.
+    void pasteNotes()
+    {
+        // The cursor is in whole samples: a hair off a grid line is on it.
+        const auto raw = (double) app.cursor / spb();
+        const auto at = std::abs (snap (raw, false) - raw) <= 1.0 / spb() ? snap (raw, false) : raw;
+        double span = 0.0;
+        begin ("paste notes");
+        std::vector<juce::ValueTree> copies;
+
+        for (const auto& n : app.copiedNotes)
+        {
+            auto c = n.createCopy();
+            c.setProperty (ids::beat, at - zero() + (double) n[ids::beat], nullptr);
+            clip.appendChild (c, um());
+            copies.push_back (c);
+            span = std::max (span, (double) n[ids::beat] + (double) n[ids::len]);
+        }
+
+        growToFit (copies);
+        selected = copies;
+
+        const auto g = gridBeats();
+        span = g > 0.0 ? std::max (g, std::ceil (span / g - 1e-9) * g) : span;
+        app.moveTo (std::llround ((at + span) * spb()));
+        app.say (Result::good ("pasted " + juce::String ((int) copies.size()) + (copies.size() == 1 ? " note" : " notes")));
+    }
+
     void quantize()
     {
         const auto g = gridBeats();
@@ -652,7 +711,7 @@ private:
         g.setColour (colours.panel);
         g.fillRect (0, 0, getWidth(), toolbarH);
         g.setColour (colours.dim);
-        g.drawText (L"double-click: new note \x00b7 drag: move (alt: off the grid) \x00b7 edge: length \x00b7 right-click: delete \x00b7 r t / ctrl+wheel: zoom",
+        g.drawText (L"double-click: new note \x00b7 drag: move (alt: copy, ctrl: off the grid) \x00b7 ctrl+c x v \x00b7 edge: length \x00b7 right-click: delete \x00b7 r t / ctrl+wheel: zoom",
                     laneBox.getRight() + 12, 0, getWidth() - laneBox.getRight() - 18, toolbarH, juce::Justification::centredLeft, true);
 
         const auto roll = rollArea();
@@ -965,8 +1024,9 @@ private:
             return;
 
         const auto p = e.position;
-        const bool free = e.mods.isAltDown();
+        const bool free = e.mods.isAltDown() || ctrlOrCmd (e.mods);
         downAt = p;
+        copyOnDrag = false;
         downBeat = beatAt (p.x);
         downPitch = pitchAt (p.y);
         drag = Drag::none;
@@ -1049,7 +1109,8 @@ private:
             drag = p.x > r.getRight() - 6.0f && r.getWidth() > 12.0f ? Drag::resizeEnd
                    : p.x < r.getX() + 4.0f && r.getWidth() > 12.0f   ? Drag::resizeStart
                                                                      : Drag::move;
-            begin (drag == Drag::move ? "move notes" : "change note lengths");
+            copyOnDrag = drag == Drag::move && e.mods.isAltDown();
+            begin (copyOnDrag ? "copy notes" : drag == Drag::move ? "move notes" : "change note lengths");
             originals.clear();
 
             for (const auto& n : selected)
@@ -1128,7 +1189,8 @@ private:
             return;
 
         const auto p = e.position;
-        const bool free = e.mods.isAltDown();
+        // Off the grid: ctrl, or alt where alt isn't copying notes.
+        const bool free = ctrlOrCmd (e.mods) || (e.mods.isAltDown() && drag != Drag::move);
         const auto dx = beatAt (p.x) - downBeat;
 
         switch (drag)
@@ -1137,6 +1199,24 @@ private:
             {
                 if (! e.mouseWasDraggedSinceMouseDown()) // a click to select doesn't move anything
                     break;
+
+                // Alt: copies are made as the drag starts, and they're what moves (and is selected).
+                if (std::exchange (copyOnDrag, false))
+                {
+                    selected.clear();
+
+                    for (auto& o : originals)
+                    {
+                        const bool wasAnchor = o.node == anchor.node;
+                        auto c = o.node.createCopy();
+                        clip.appendChild (c, um());
+                        o.node = c;
+                        selected.push_back (c);
+
+                        if (wasAnchor)
+                            anchor.node = c;
+                    }
+                }
 
                 auto start = snap (anchor.start + dx, free);
                 auto delta = start - anchor.start;
@@ -1294,7 +1374,7 @@ private:
         }
 
         // Empty: a new note at the grid line before the click, as long as the last one.
-        const auto start = std::max (0.0, snapDown (beatAt (e.position.x), e.mods.isAltDown()));
+        const auto start = std::max (0.0, snapDown (beatAt (e.position.x), e.mods.isAltDown() || ctrlOrCmd (e.mods)));
         const auto n = addNote (start, pitchAt (e.position.y));
         selected = { n };
         audition ((int) n[ids::pitch], 0, lastVelocity, true);
@@ -1364,6 +1444,10 @@ private:
         }
         else if (letterOf (kp) == 'D' && ctrlHeld (kp) && ! mods.isAltDown() && any)
             duplicateSelected();
+        else if ((letterOf (kp) == 'C' || letterOf (kp) == 'X') && ctrlHeld (kp) && ! mods.isAltDown() && ! mods.isShiftDown() && any)
+            copySelected (letterOf (kp) == 'X');
+        else if (letterOf (kp) == 'V' && ctrlHeld (kp) && ! mods.isAltDown() && ! mods.isShiftDown() && ! app.copiedNotes.empty())
+            pasteNotes();
         else if (letterOf (kp) == 'Q' && ! mods.isAnyModifierKeyDown() && ! ctrlHeld (kp))
             quantize();
         // + and - (and r t, as on taw's timeline) zoom this window; the session's zoom stays.
@@ -1386,6 +1470,10 @@ private:
 
             if (k.code == Key::None)
                 return false;
+
+            // A copy or cut with no notes selected is taw's (the clip, the selection): ctrl+v is then its paste.
+            if (ctrlHeld (kp) && (letterOf (kp) == 'C' || letterOf (kp) == 'X'))
+                app.copiedNotes.clear();
 
             app.deferredKeys.push_back (k);
         }

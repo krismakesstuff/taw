@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Clips drag with the mouse on the timeline: along their track, onto the grid lines on screen,
+  their automation with them. A drag from empty lane selects time.
+- The MIDI editor copies notes: alt+drag takes copies of the selected notes, and ctrl+c / ctrl+x
+  / ctrl+v copy, cut and paste them at the cursor (in another clip too). Off the grid is now
+  ctrl+drag for notes (alt copies).
 - The phone link: `phone` shows a QR code; a phone on the same network opens its page and sends
   recordings, which land at the cursor on a new track. `phone off` ends it.
 - A recording sent from the phone as drums or as notes is made into the part: a beatboxed take

@@ -3714,16 +3714,17 @@ void App::dispatchKey (const Key& k)
         return;
     }
 
+    // Anything but more dragging ends a clip's drag (the button let go, or a key, or a press).
+    if (! (k.code == Key::Mouse && k.drag))
+    {
+        finishClipDrag();
+
+        if (k.code == Key::Mouse && k.release)
+            return;
+    }
+
     if (k.code == Key::Mouse)
     {
-        if (k.drag) // only scrubbing uses drags so far
-        {
-            if (mode == Mode::Main)
-                handleMouse (k);
-
-            return;
-        }
-
         if (mode == Mode::Main)
             handleMouse (k);
 
@@ -3756,11 +3757,17 @@ void App::handleMouse (const Key& k)
             const auto x = juce::jlimit (map.laneX, map.laneX + map.laneW - 1, k.x);
             moveTo (juce::jmax<juce::int64> (0, frameStart (juce::jmax<juce::int64> (0, map.positionAt (x)))), k.shift);
         }
+        else if (clipDrag.clip.isValid() && session != nullptr && map.valid)
+            dragClip (k.x);
+        else if (dragSelecting && session != nullptr && map.valid)
+            moveTo (juce::jmax<juce::int64> (0, map.positionAt (juce::jlimit (map.laneX, map.laneX + map.laneW, k.x))), true);
 
         return;
     }
 
-    scrubbing = session != nullptr && ! k.right && map.inLane (k.x) && k.y == map.videoY && videoLane();
+    clipDrag = {};
+    dragSelecting = false;
+    scrubbing =session != nullptr && ! k.right && map.inLane (k.x) && k.y == map.videoY && videoLane();
 
     if (scrubbing)
     {
@@ -3830,6 +3837,82 @@ void App::handleMouse (const Key& k)
 
     focusTrack (track, k.shift);
     moveTo (juce::jmax<juce::int64> (0, map.positionAt (k.x)), k.shift);
+
+    // What a drag from here does: on a clip (the one on top), moves it; on empty lane, selects.
+    dragSelecting = true;
+
+    if (k.shift || recording)
+        return;
+
+    const auto [t0, t1] = map.span (k.x);
+    const auto spb = session->samplesPerBeat();
+
+    if (const auto clip = midiClipAt (track, t0, t1); clip.isValid())
+        clipDrag = { clip, k.x, (double) clip[ids::beat] * spb, (double) clip[ids::len] * spb, false };
+    else
+    {
+        const auto audio = Session::clips (clipHolder (track));
+
+        for (auto it = audio.rbegin(); it != audio.rend() && ! clipDrag.clip.isValid(); ++it)
+            if (const auto s = (double) (juce::int64) (*it)[ids::start], len = (double) (juce::int64) (*it)[ids::length]; s < t1 && s + len > t0)
+                clipDrag = { *it, k.x, s, len, false };
+    }
+
+    dragSelecting = ! clipDrag.clip.isValid();
+}
+
+void App::dragClip (int x)
+{
+    auto& d = clipDrag;
+    const auto holder = d.clip.getParent();
+
+    if (! holder.isValid() || recording) // gone since it was pressed on (undone, an agent)
+    {
+        d = {};
+        return;
+    }
+
+    // As far as the mouse has gone, then onto the nearest grid line on screen (grid on).
+    const auto spb = session->samplesPerBeat();
+    auto to = d.from + (x - d.downX) * ui.lanes().spc;
+
+    if (const auto step = gridSpacing().finest(); step > 0.0)
+        to = std::round (to / step) * step;
+
+    to = std::max (0.0, to);
+    const bool beats = ! d.clip.hasType (ids::CLIP);
+    const auto now = beats ? (double) d.clip[ids::beat] * spb : (double) (juce::int64) d.clip[ids::start];
+
+    if (std::abs (to - now) < 0.5)
+        return;
+
+    if (! std::exchange (d.moved, true))
+        beginEdit ("move clip");
+
+    // A MIDI or hit clip's notes go with it: they're kept from where its content starts.
+    if (beats)
+        d.clip.setProperty (ids::beat, to / spb, um());
+    else
+        d.clip.setProperty (ids::start, (juce::int64) std::llround (to), um());
+
+    // (The cursor stays where it was pressed: moving it could scroll the view under the mouse.)
+    say (Result::good ("clip moved to " + formatBars ((juce::int64) std::llround (to)) + L" \x00b7 ctrl+z puts it back"));
+}
+
+void App::finishClipDrag()
+{
+    const auto d = std::exchange (clipDrag, {});
+    dragSelecting = false;
+
+    if (! d.moved || session == nullptr || ! d.clip.getParent().isValid())
+        return;
+
+    // Its automation goes with it (in the same undo step); a playlist's clip leaves the track's be.
+    const auto spb = session->samplesPerBeat();
+    const auto to = d.clip.hasType (ids::CLIP) ? (double) (juce::int64) d.clip[ids::start] : (double) d.clip[ids::beat] * spb;
+
+    if (const auto track = d.clip.getParent(); track.hasType (ids::TRACK))
+        moveAutomation (track, d.from / spb, d.length / spb, to / spb);
 }
 
 Result App::openMidiEditor (const juce::ValueTree& clip)

@@ -170,7 +170,12 @@ off View > Allow Mouse Reporting (Terminal.app).
   Shift-click stretches the time and track selections to it.
 - Double-click a clip: selects it and opens it in its editor, MIDI or audio (shift+E, or
   `edit`, from the keyboard).
-- `taw --exec` takes `:click X Y` and `:dblclick X Y` (cells of its 160×44 screen).
+- Drag a clip (audio, MIDI or hits; the one on top): it moves along its track, onto the grid
+  lines on screen when the grid is on, as one undo step. Its automation goes with it when the
+  button is let go. Not while recording.
+- Drag from empty lane: selects time.
+- `taw --exec` takes `:click X Y`, `:dblclick X Y` and `:drag X Y X2` (cells of its 160×44
+  screen).
 
 ### The editors
 
@@ -203,7 +208,8 @@ One MIDI clip, for fine work with the mouse.
 - **Shared with taw:** it edits the session itself, one undo step per gesture, so ctrl+z (from
   either side) and the timeline follow. The cursor and playhead are taw's: clicking the ruler
   moves the cursor; the view follows the playhead while playing.
-- **Notes:** drag to move (snapped to the editor's grid; alt: free), drag an edge to change the
+- **Notes:** drag to move (snapped to the editor's grid; ctrl: free), alt+drag to copy what's
+  selected (the copies move, the notes stay), drag an edge to change the
   length, double-click empty space to draw one (as long and loud as the last one touched),
   right-click or Delete to remove. Drag on empty space selects (shift adds). A note moved or
   stretched past the clip takes the clip with it. Other clips' notes on the track show as
@@ -219,7 +225,10 @@ One MIDI clip, for fine work with the mouse.
 - **Toolbar:** the grid (bar to 1/32, triplets, off; it starts at the session's `grid` step) and
   quantize (note starts in the selection, or the whole clip, to the grid; also `q`).
 - **Keys** while it's in front: Delete, ↑↓ transpose (shift: an octave), ←→ move by the grid
-  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, `q` quantize, `r` `t`
+  (ctrl: a bar), ctrl+A select all, ctrl+D duplicate after the selection, ctrl+C / ctrl+X copy / cut the
+  selected notes and ctrl+V pastes them at taw's cursor (into this clip, or another one opened
+  since; the cursor goes to their end, so pastes follow on; with no notes selected ctrl+C is
+  taw's, as before), `q` quantize, `r` `t`
   (or `+` `-`) zoom the window around taw's cursor (the session's zoom stays), Esc clears the selection, then hands the keys back to taw. Everything else goes to taw:
   space plays, ctrl+z undoes, ctrl+s saves, shift+E closes it.
 - **Mouse wheel:** scrolls pitch; shift: time; ctrl: zoom time around the mouse; alt: row height.

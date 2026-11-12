@@ -816,6 +816,7 @@ public:
     // or a clip for its bar (growing the one just before when it reaches the bar).
     void addHit (int track, double beat, float vel);
     Clipboard clipboard;
+    std::vector<juce::ValueTree> copiedNotes; // the MIDI editor's ctrl+c: notes, from the first one's start (beats)
 
     static juce::StringArray splitPaths (const juce::String& text);
     static juce::String expandHome (const juce::String& path); // ~/x -> /Users/you/x (not on Windows)
@@ -1124,6 +1125,21 @@ public:
     juce::int64 frameStart (juce::int64 pos) const;     // the first sample showing the frame at pos
     Result stepFrame (int direction, bool second, bool extendSelection); // the video row's arrows
     bool scrubbing = false; // a click on the video row: dragging moves the cursor (and the picture)
+
+    // A clip pressed on with the mouse on the timeline: dragging moves it along its track (to
+    // the grid lines on screen, with the grid on), one undo step; letting go ends it, and its
+    // automation follows. Pressed on empty lane instead, a drag selects time.
+    struct ClipDrag
+    {
+        juce::ValueTree clip;
+        int downX = 0;
+        double from = 0.0, length = 0.0; // where it was and how long, in samples
+        bool moved = false;
+    };
+    ClipDrag clipDrag;
+    bool dragSelecting = false;
+    void dragClip (int x);
+    void finishClipDrag();
 
     // Keycast (KeyCast.h): a window showing the keys pressed, for screen recordings. "keycast"
     // shows or hides it and sets its look; that and its place are kept in settings.json.

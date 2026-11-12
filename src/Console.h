@@ -38,6 +38,7 @@ struct Key
     int x = 0, y = 0;
     bool right = false, doubleClick = false;
     bool drag = false; // moved with the left button held, once per cell
+    bool release = false; // the left button let go (ends a drag)
 };
 
 // Raw terminal access: alternate screen, VT output, unbuffered key events.

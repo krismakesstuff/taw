@@ -2605,6 +2605,33 @@ int main (int argc, char** argv)
                 continue;
             }
 
+            // ":drag 80 12 95" presses in that cell, drags along the row to column 95 and lets go.
+            if (args[i].startsWith (":drag "))
+            {
+                app.screenText (160, 44);
+                const auto xy = juce::StringArray::fromTokens (args[i].fromFirstOccurrenceOf (" ", false, false), " ", "");
+                taw::Key k;
+                k.code = taw::Key::Mouse;
+                k.x = xy[0].getIntValue();
+                k.y = xy[1].getIntValue();
+                app.pressKey (k);
+                k.drag = true;
+
+                for (const int to = xy[2].getIntValue(); k.x != to;)
+                {
+                    k.x += to > k.x ? 1 : -1;
+                    app.pressKey (k);
+                }
+
+                k.drag = false;
+                k.release = true;
+                app.pressKey (k);
+                std::printf ("%-29s cursor %s  track %d  selection %s  %s\n", args[i].toRawUTF8(), app.formatBars (app.cursor).toRawUTF8(), app.focused + 1,
+                             app.hasTimeSelection() ? (app.formatBars (app.timeSelection().getStart()) + " - " + app.formatBars (app.timeSelection().getEnd())).toRawUTF8() : "none",
+                             app.message.toRawUTF8());
+                continue;
+            }
+
             // ":sleep 500" waits (timing tests: tap tempo).
             if (args[i].startsWith (":sleep "))
             {
@@ -3624,7 +3651,7 @@ int main (int argc, char** argv)
             for (const auto& k : keys)
                 out.add (juce::String (k.ctrl ? "ctrl+" : "") + (k.alt ? "alt+" : "") + (k.shift ? "shift+" : "")
                          + (k.code == taw::Key::Char    ? juce::String::charToString ((juce::juce_wchar) k.ch)
-                            : k.code == taw::Key::Mouse ? juce::String (k.drag ? "drag" : k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
+                            : k.code == taw::Key::Mouse ? juce::String (k.release ? "up" : k.drag ? "drag" : k.right ? "right" : "click") + (k.doubleClick ? "2" : "") + "@" + juce::String (k.x) + "," + juce::String (k.y)
                                                         : juce::String (names[k.code])));
 
             return out.joinIntoString (" ");
@@ -3644,13 +3671,13 @@ int main (int argc, char** argv)
             { "\x1b[47;9u", "alt+/" }, { "\x1b[122;5u", "ctrl+z" }, { "\x1b[13u", "Enter" },
             // kitty's shift+return; taw's Terminal profile: ctrl+up/down
             { "\x1b[13;2u", "shift+Enter" }, { "\x1b[1;5A", "ctrl+Up" }, { "\x1b[1;5B", "ctrl+Down" },
-            // SGR mouse: presses and left drags (not releases, the wheel or the middle button), cells from 0
-            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<34;10;5M", "" },
+            // SGR mouse: presses, left drags and the left button let go (not the wheel or the middle button), cells from 0
+            { "\x1b[<0;10;5M", "click@9,4" }, { "\x1b[<0;10;5m", "up@9,4" }, { "\x1b[<2;10;5m", "" }, { "\x1b[<64;10;5M", "" }, { "\x1b[<34;10;5M", "" },
             { "\x1b[<1;10;5M", "" }, { "\x1b[<6;3;2M", "shift+right@2,1" }, { "\x1b[<16;3;2M", "ctrl+click@2,1" },
-            { "\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M", "click@19,6 click2@19,6 click@19,6" },
+            { "\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M\x1b[<0;20;7m\x1b[<0;20;7M", "click@19,6 up@19,6 click2@19,6 up@19,6 click@19,6" },
             { "\x1b[<0;30;7M\x1b[<0;31;7M", "click@29,6 click@30,6" },
             // a drag: once per cell it reaches, none where it was pressed; shift kept
-            { "\x1b[<0;40;7M\x1b[<32;40;7M\x1b[<32;41;7M\x1b[<32;41;7M\x1b[<36;43;8M\x1b[<0;43;8m", "click@39,6 drag@40,6 shift+drag@42,7" },
+            { "\x1b[<0;40;7M\x1b[<32;40;7M\x1b[<32;41;7M\x1b[<32;41;7M\x1b[<36;43;8M\x1b[<0;43;8m", "click@39,6 drag@40,6 shift+drag@42,7 up@42,7" },
         };
 
         // Control bytes made readable: esc[1;5D, 0x1a.

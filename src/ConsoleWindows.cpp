@@ -323,6 +323,7 @@ std::vector<Key> Console::poll()
             const auto buttons = m.dwButtonState & (FROM_LEFT_1ST_BUTTON_PRESSED | RIGHTMOST_BUTTON_PRESSED);
             const auto pressed = buttons & ~buttonsDown;
             const bool twice = (m.dwEventFlags & DOUBLE_CLICK) != 0;
+            const bool leftUp = m.dwEventFlags == 0 && (buttonsDown & FROM_LEFT_1ST_BUTTON_PRESSED) != 0 && (buttons & FROM_LEFT_1ST_BUTTON_PRESSED) == 0;
 
             if (m.dwEventFlags != MOUSE_MOVED && m.dwEventFlags != MOUSE_WHEELED && m.dwEventFlags != MOUSE_HWHEELED)
                 buttonsDown = buttons;
@@ -355,6 +356,15 @@ std::vector<Key> Console::poll()
                 keys.push_back (k);
                 dragX = m.dwMousePosition.X;
                 dragY = m.dwMousePosition.Y;
+            }
+            else if (leftUp)
+            {
+                Key k;
+                k.code = Key::Mouse;
+                k.release = true;
+                k.x = m.dwMousePosition.X;
+                k.y = m.dwMousePosition.Y;
+                keys.push_back (k);
             }
 
             continue;

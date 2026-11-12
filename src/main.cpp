@@ -3982,6 +3982,12 @@ int main (int argc, char** argv)
 
         printHeard (*heard, args[2].getDoubleValue(), args.size() > 3 ? args[3].getDoubleValue() : 0.25);
         std::printf ("(%.0f ms)\n", juce::Time::getMillisecondCounterHiRes() - started);
+
+        // taw --hum <file> ... contour: the sung pitch itself, a line every 20 ms where there is one.
+        if (args.contains ("contour"))
+            for (size_t i = 0; i < heard->contour.size(); i += 2)
+                if (const auto p = heard->contour[i]; p > 0.0f)
+                    std::printf ("%7.2f s  %6.2f  %*s*\n", (double) i * heard->contourHop, (double) p, juce::jlimit (0, 60, juce::roundToInt ((p - 36.0f) * 3.0f)), "");
         return 0;
     }
 

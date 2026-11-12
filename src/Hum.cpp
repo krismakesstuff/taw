@@ -696,6 +696,8 @@ Heard hear (const float* x, int n, double rate)
     auto track = trackPitch (x, n, rate);
     findNotes (track, heard);
     findHits (x, n, rate, peak, heard);
+    heard.contour = std::move (track.pitch);
+    heard.contourHop = track.hop;
     return heard;
 }
 

@@ -38,6 +38,12 @@ struct Heard
     std::vector<HumNote> notes;
     std::vector<HumHit> hits;
 
+    // The pitch as it was sung, before it was cut into notes: a MIDI note with its fraction every
+    // contourHop seconds (tuning taken out), 0 where nothing is sung. For bends, and for seeing
+    // what the notes were made from.
+    std::vector<float> contour;
+    double contourHop = 0.0;
+
     double seconds = 0.0;
     double tuningCents = 0.0; // the singer against A 440: every note was this far off, on average
     double pitched = 0.0;     // how much of the sounding time is held notes (0..1)

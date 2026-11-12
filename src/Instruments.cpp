@@ -433,6 +433,12 @@ Result App::phoneCommand (const juce::String& arg)
     if (arg.equalsIgnoreCase ("off") || arg.equalsIgnoreCase ("stop"))
     {
         const bool was = phone.running();
+
+        // A take being listened to is let finish (it reads the file the link is about to delete).
+        if (phoneJob != nullptr && phoneJob->heard.valid())
+            phoneJob->heard.wait();
+
+        phoneJob.reset();
         phone.stop();
         phoneVisible = false;
         phoneWaiting.clear(); // their files went with the link
@@ -454,6 +460,13 @@ Result App::phoneCommand (const juce::String& arg)
     if (juce::String error; ! phone.start (error))
         return Result::fail ("phone link: " + error);
 
+    // The instruments the page offers for a sung part.
+    juce::StringArray names;
+
+    for (const auto& d : plugins.instruments())
+        names.addIfNotAlreadyThere (d.name);
+
+    phone.setInstruments (names);
     phoneVisible = true;
     statsVisible = midiPanelVisible = helpVisible = settingsVisible = pluginPickerVisible = false;
     return Result::good ("phone link on at " + phone.url() + L" \x00b7 esc hides the code \x00b7 phone off ends it");
@@ -466,27 +479,6 @@ bool App::handlePhoneKey (const Key& k)
 
     phoneVisible = false;
     return true;
-}
-
-// What the phone sent goes in like a typed import: at the cursor, each on a new track, one at a
-// time, when nothing else is importing or recording.
-void App::pollPhone()
-{
-    if (! phone.running())
-        return;
-
-    phone.setSession (session != nullptr ? session->name() : juce::String());
-
-    for (auto& f : phone.takeReceived())
-        phoneWaiting.push_back (f);
-
-    if (phoneWaiting.empty() || session == nullptr || import != nullptr || recording)
-        return;
-
-    const auto file = phoneWaiting.front();
-    phoneWaiting.erase (phoneWaiting.begin());
-    auto r = startImport ({ file.getFullPathName() }, -1, ImportAs::audio);
-    say (r.ok ? Result::good ("from the phone: " + file.getFileName()) : r);
 }
 
 bool App::handleMidiPanelKey (const Key& k)

@@ -29,6 +29,14 @@ const char* const page = R"html(<!doctype html>
   p { margin: 0 0 20px; color: #9a9890; overflow-wrap: anywhere; }
   p b { color: #e8e6e1; }
   p.off { color: #e0705c; }
+  .what { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; }
+  .what span { color: #9a9890; margin-right: 4px; }
+  .what label { flex: 1; }
+  .what input { position: absolute; opacity: 0; }
+  .what b { display: block; padding: 10px 4px; border-radius: 10px; background: #2a2e35; text-align: center; font-weight: 500; font-size: 15px; }
+  .what input:checked + b { background: #e8e6e1; color: #14161a; }
+  select { width: 100%; margin: 0 0 12px; padding: 12px; border-radius: 10px; border: 0; background: #2a2e35; color: #e8e6e1; font: inherit; }
+  #hint { font-size: 14px; margin: 0 0 16px; }
   label.button { display: block; margin: 0 0 12px; padding: 18px; border-radius: 12px; text-align: center; font-weight: 600; }
   label.record { background: #c8452f; color: #fff; }
   label.pick { background: #2a2e35; color: #e8e6e1; }
@@ -45,6 +53,14 @@ const char* const page = R"html(<!doctype html>
 <body>
 <h1>taw</h1>
 <p id="session">&nbsp;</p>
+<div class="what">
+  <span>Make it</span>
+  <label><input type="radio" name="as" value="audio" checked><b>a recording</b></label>
+  <label><input type="radio" name="as" value="drums"><b>drums</b></label>
+  <label><input type="radio" name="as" value="notes"><b>notes</b></label>
+</div>
+<select id="inst" hidden></select>
+<p id="hint"></p>
 <label class="button record">Record now<input id="record" type="file" accept="audio/*" capture></label>
 <label class="button pick">Send a recording<input id="pick" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.ogg,.aif,.aiff,.wma" multiple></label>
 <ul id="list"></ul>
@@ -81,7 +97,53 @@ const char* const page = R"html(<!doctype html>
   ask();
   setInterval (ask, 4000);
 
+  // What the recording is to become: remembered on this phone.
+  const inst = document.getElementById('inst');
+  const hint = document.getElementById('hint');
+  const kept = key => { try { return localStorage.getItem (key); } catch (e) { return null; } };
+  const keep = (key, value) => { try { localStorage.setItem (key, value); } catch (e) {} };
+  const chosen = () => document.querySelector ('input[name=as]:checked').value;
+
+  function showChoice () {
+    const as = chosen();
+    inst.hidden = as !== 'notes';
+    hint.textContent = as === 'drums' ? 'Beatbox it: kicks, snares, hats. taw puts the hits on drum tracks, with the recording beside them, muted.'
+                     : as === 'notes' ? 'Hum or sing it. taw writes the notes for the instrument, with the recording beside them, muted.'
+                     : 'The recording goes on a track as it is.';
+  }
+
+  for (const radio of document.querySelectorAll ('input[name=as]')) {
+    radio.checked = radio.value === (kept ('taw.as') || 'audio');
+    radio.addEventListener ('change', () => { keep ('taw.as', chosen()); showChoice(); });
+  }
+
+  inst.addEventListener ('change', () => keep ('taw.inst', inst.value));
+
+  fetch (home + '/instruments', { cache: 'no-store' })
+    .then (r => r.ok ? r.text() : '')
+    .then (text => {
+      const none = document.createElement ('option');
+      none.value = '';
+      none.textContent = 'no instrument yet (pick one in taw)';
+      inst.append (none);
+
+      for (const name of text.split ('\n').filter (n => n)) {
+        const o = document.createElement ('option');
+        o.value = o.textContent = name;
+        inst.append (o);
+      }
+
+      inst.value = kept ('taw.inst') || '';
+
+      if (inst.selectedIndex < 0)
+        inst.value = '';
+    })
+    .catch (() => {});
+
+  showChoice();
+
   function send (file) {
+    const as = chosen(), instrument = as === 'notes' ? inst.value : '';
     const row = document.createElement('li');
     const note = document.createElement('small');
     const bar = document.createElement('div');
@@ -96,7 +158,7 @@ const char* const page = R"html(<!doctype html>
 
     queue = queue.then (() => new Promise (done => {
       const x = new XMLHttpRequest();
-      x.open ('POST', home + '/up?name=' + encodeURIComponent (file.name));
+      x.open ('POST', home + '/up?name=' + encodeURIComponent (file.name) + '&as=' + as + '&inst=' + encodeURIComponent (instrument));
       x.upload.onprogress = e => {
         if (e.lengthComputable) {
           fill.style.width = (100 * e.loaded / e.total) + '%';
@@ -106,7 +168,8 @@ const char* const page = R"html(<!doctype html>
       x.onload = () => {
         const ok = x.status === 200;
         row.className = ok ? 'ok' : 'bad';
-        note.textContent = ok ? (x.responseText ? 'in ' + x.responseText : 'in taw, waiting for a session') : (x.responseText || 'taw said no');
+        note.textContent = ok ? (x.responseText ? 'in ' + x.responseText : 'in taw, waiting for a session') + (as === 'audio' ? '' : ', being made into ' + as)
+                              : (x.responseText || 'taw said no');
         bar.remove();
         done();
       };
@@ -332,6 +395,12 @@ struct PhoneLink::Server final : private juce::Thread
         if (method == "GET" && path == home + "/session")
             return reply (socket, "200 OK", "text/plain; charset=utf-8", sessionName());
 
+        if (method == "GET" && path == home + "/instruments")
+        {
+            const juce::ScopedLock sl (lock);
+            return reply (socket, "200 OK", "text/plain; charset=utf-8", instruments.joinIntoString ("\n"));
+        }
+
         // A refusal is read by the phone only if what it was sending is taken off the line first
         // (closing on unread data resets the connection, and the answer goes with it). Up to 32 MB
         // of it: more isn't worth the wait.
@@ -356,12 +425,20 @@ struct PhoneLink::Server final : private juce::Thread
         if (method != "POST" || path != home + "/up")
             return refuse ("404 Not Found", "not here");
 
-        // An upload: the file's name in the query, the file itself as the body.
-        juce::String name;
+        // An upload: the file's name and what to make of it in the query, the file itself as the body.
+        juce::String name, as ("audio"), instrument;
 
         for (const auto& pair : juce::StringArray::fromTokens (query, "&", ""))
+        {
+            const auto value = juce::URL::removeEscapeChars (pair.fromFirstOccurrenceOf ("=", false, false));
+
             if (pair.startsWith ("name="))
-                name = juce::URL::removeEscapeChars (pair.substring (5));
+                name = value;
+            else if (pair.startsWith ("as=") && (value == "drums" || value == "notes"))
+                as = value;
+            else if (pair.startsWith ("inst="))
+                instrument = value.trim().substring (0, 80);
+        }
 
         name = juce::File::createLegalFileName (name.trim()).substring (0, 120);
 
@@ -421,7 +498,7 @@ struct PhoneLink::Server final : private juce::Thread
 
         {
             const juce::ScopedLock sl (lock);
-            arrived.push_back (file);
+            arrived.push_back ({ file, as, instrument });
             ++count;
             statusText = "got " + name;
         }
@@ -450,10 +527,20 @@ struct PhoneLink::Server final : private juce::Thread
     juce::File folder;
 
     juce::CriticalSection lock;
-    std::vector<juce::File> arrived;
+    std::vector<Take> arrived;
     juce::String statusText, session;
+    juce::StringArray instruments;
     int count = 0;
 };
+
+void PhoneLink::setInstruments (const juce::StringArray& names)
+{
+    if (server == nullptr)
+        return;
+
+    const juce::ScopedLock sl (server->lock);
+    server->instruments = names;
+}
 
 void PhoneLink::setSession (const juce::String& name)
 {
@@ -489,7 +576,7 @@ juce::String PhoneLink::url() const
     return server != nullptr ? "http://" + server->address + ":" + juce::String (server->port) + "/" + server->token : juce::String();
 }
 
-std::vector<juce::File> PhoneLink::takeReceived()
+std::vector<PhoneLink::Take> PhoneLink::takeReceived()
 {
     if (server == nullptr)
         return {};

@@ -547,7 +547,8 @@ void Ui::drawPhone (App& app)
     canvas.text (x0 + (fits ? 19 : 21), y, url, colour::text, bg, true, boxW - 23);
     ++y;
 
-    const auto status = app.phone.status();
+    const auto making = app.phoneStatus();
+    const auto status = making.isNotEmpty() ? making : app.phone.status();
     const int waiting = (int) app.phoneWaiting.size();
     auto line = status.isNotEmpty() ? status : juce::String ("nothing sent yet");
 

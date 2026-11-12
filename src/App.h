@@ -5,6 +5,7 @@
 #include "Bounce.h"
 #include "AudioEditor.h"
 #include "BrowserWindow.h"
+#include "Hum.h"
 #include "Import.h"
 #include "Library.h"
 #include "LiveKeys.h"
@@ -20,6 +21,7 @@
 #include "Video.h"
 
 #include <functional>
+#include <future>
 #include <optional>
 #include <map>
 #include <set>
@@ -471,13 +473,34 @@ public:
 
     // phone: the phone link (Phone.h). phone turns it on and shows its address as a QR code;
     // esc hides the panel (the link stays on); phone off ends it. What the phone sends is
-    // imported at the cursor on a new track, one file at a time.
+    // imported at the cursor on a new track, one take at a time. Sent as drums or as notes
+    // (PhoneTakes.cpp), the take is listened to as well (Hum.h) and its part is built beside it:
+    // hits on a sample track for each drum, or notes on an instrument track, starting on a bar,
+    // with the recording muted, lined up under it, for reference.
     Result phoneCommand (const juce::String& arg);
     bool handlePhoneKey (const Key&);
     void pollPhone();
     PhoneLink phone;
     bool phoneVisible = false;
-    std::vector<juce::File> phoneWaiting; // arrived, not imported yet
+    std::vector<PhoneLink::Take> phoneWaiting; // arrived, not started on yet
+
+    struct PhoneJob
+    {
+        PhoneLink::Take take;
+        enum class Stage { importing, listening, drums } stage = Stage::importing;
+        int tracksBefore = 0;                       // the session, before the take
+        std::future<std::optional<Heard>> heard;    // listened to while it's imported
+        Heard heardTake;                            // what was heard (its drums' sounds pick the samples)
+        HumPart part;
+        double startBeat = 0.0;                     // where the part goes: a bar line
+        juce::StringArray kinds;                    // drums: a sample track each, one at a time
+        int kind = 0;
+        bool sampleComing = false;                  // this kind's sample is being imported
+    };
+    std::unique_ptr<PhoneJob> phoneJob;
+    void stepPhoneJob();
+    void writePhoneHits (int track, const juce::String& kind);
+    juce::String phoneStatus() const; // for the panel: what's being made of the take
     SystemStats system; // sampled about once a second
     double systemSampledAt = 0.0;
     bool midiPanelVisible = false;

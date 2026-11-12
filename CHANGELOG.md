@@ -4,6 +4,10 @@
 
 - The phone link: `phone` shows a QR code; a phone on the same network opens its page and sends
   recordings, which land at the cursor on a new track. `phone off` ends it.
+- A recording sent from the phone as drums or as notes is made into the part: a beatboxed take
+  becomes hits on a sample track for each drum (samples picked from the library), a hummed or
+  sung one becomes notes on the instrument chosen on the phone. The recording sits beside the
+  part, muted, lined up with it.
 
 - The sample browser has a guide to its keys and mouse: `?` in it, or the toolbar's `?` button.
 - The README explains the sample library: indexing folders, what's measured, and browsing.

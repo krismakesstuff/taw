@@ -4257,12 +4257,12 @@ int main (int argc, char** argv)
         if (got.size() == 2)
         {
             juce::MemoryBlock back;
-            got[0].loadFileAsData (back);
-            check ("the first whole, under its name", got[0].getFileName() == "my take.m4a" && back == take);
-            check ("the second kept inside the link's folder", got[1].getParentDirectory() == got[0].getParentDirectory());
+            got[0].file.loadFileAsData (back);
+            check ("the first whole, under its name", got[0].file.getFileName() == "my take.m4a" && back == take && got[0].as == "audio");
+            check ("the second kept inside the link's folder", got[1].file.getParentDirectory() == got[0].file.getParentDirectory());
         }
 
-        const auto folder = got.empty() ? juce::File() : got[0].getParentDirectory();
+        const auto folder = got.empty() ? juce::File() : got[0].file.getParentDirectory();
         const auto code = taw::PhoneLink::qr (url);
         check ("the address makes a QR code", code.size() >= 21);
 
@@ -4336,6 +4336,66 @@ int main (int argc, char** argv)
             check ("it's a clip on a new track, named after the file",
                    app->session->numTracks() == tracksBefore + 1 && track[taw::ids::name].toString() == "phone take" && track.getNumChildren() > 0);
             std::printf ("       %s\n", app->message.toRawUTF8());
+
+            // taw --phonetest <session-dir> <beat.wav> <melody.wav> (taw --humtest <folder> makes
+            // them): sent as drums and as notes, each becomes a part beside its muted recording.
+            auto sendAs = [&] (const juce::String& path, const juce::String& as)
+            {
+                juce::MemoryBlock file;
+                juce::File::getCurrentWorkingDirectory().getChildFile (path).loadFileAsData (file);
+                const bool taken = ask ("POST", appHome + "/up?name=" + as + ".wav&as=" + as + "&inst=", file).startsWith ("HTTP/1.1 200");
+
+                for (const auto until = juce::Time::getMillisecondCounter() + 30000; juce::Time::getMillisecondCounter() < until;)
+                {
+                    app->pumpBackgroundWork();
+                    juce::Thread::sleep (5);
+
+                    if (app->phone.received() >= (as == "drums" ? 2 : 3) && app->phoneJob == nullptr && app->phoneWaiting.empty() && ! app->hasBackgroundWork())
+                        break;
+                }
+
+                std::printf ("       %s\n", app->message.toRawUTF8());
+                return taken;
+            };
+
+            auto count = [] (const juce::ValueTree& of, const juce::Identifier& type)
+            {
+                int n = 0;
+
+                for (const auto& clip : of)
+                    for (const auto& child : clip)
+                        n += child.hasType (type) ? 1 : 0;
+
+                return n;
+            };
+
+            if (args.size() >= 4)
+            {
+                const int before = app->session->numTracks();
+                check ("a beat sent as drums is taken", sendAs (args[2], "drums"));
+                auto& s = *app->session;
+                check ("its recording is on a track, muted", s.numTracks() > before && s.track (before)[taw::ids::name].toString() == "drums" && (bool) s.track (before)[taw::ids::mute]);
+
+                juce::StringArray made;
+                int hits = 0;
+
+                for (int t = before + 1; t < s.numTracks(); ++t)
+                {
+                    made.add (s.track (t)[taw::ids::name].toString());
+                    hits += count (s.track (t), taw::ids::HIT);
+                    check ("a drum is a sample track", taw::Session::isSampleTrack (s.track (t)));
+                }
+
+                std::printf ("       %s: %d hits\n", made.joinIntoString (", ").toRawUTF8(), hits);
+                check ("a track for each drum heard, with all its hits", made == juce::StringArray { "Kick", "Hihat", "Snare", "Open hat" } && hits == 16);
+
+                const int then = s.numTracks();
+                check ("a melody sent as notes is taken", sendAs (args[3], "notes"));
+                check ("its recording is muted too, and its notes are on an instrument track",
+                       s.numTracks() == then + 2 && (bool) s.track (then)[taw::ids::mute] && taw::Session::isInstrumentTrack (s.track (then + 1))
+                           && count (s.track (then + 1), taw::ids::NOTE) == 9);
+            }
+
             check ("phone off ends it", app->execute ("phone off").ok && ! app->phone.running() && ! app->phoneVisible);
         }
         std::printf ("%d failed\n", failures);

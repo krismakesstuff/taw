@@ -72,6 +72,7 @@ target_sources(taw PRIVATE
     src/Midi.cpp
     src/MidiEditor.cpp
     src/Phone.cpp
+    src/PhoneTakes.cpp
     ${qrcodegen_SOURCE_DIR}/cpp/qrcodegen.cpp
     src/Plugins.cpp
     src/Ui.cpp

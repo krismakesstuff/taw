@@ -27,9 +27,20 @@ public:
     // The session the recordings are going into (empty: none open), for the page to show.
     void setSession (const juce::String& name);
 
+    // The instruments the page offers for a sung part (the scanned plugins' names).
+    void setInstruments (const juce::StringArray& names);
+
+    // A recording that came in, and what the phone asked to be made of it: "audio" (just the
+    // recording), "drums" (a beat: hits on sample tracks) or "notes" (a melody, on instrument).
+    struct Take
+    {
+        juce::File file;
+        juce::String as, instrument;
+    };
+
     // The recordings that have come in since last asked, whole, in a temporary folder that lasts
     // until stop.
-    std::vector<juce::File> takeReceived();
+    std::vector<Take> takeReceived();
 
     // For the panel: how many have come in, and what's happening now ("receiving take.m4a 40%").
     int received() const;

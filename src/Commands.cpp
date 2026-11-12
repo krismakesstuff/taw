@@ -757,7 +757,7 @@ Result App::setLoop (const juce::String& argIn)
 Result App::executeAppLevel (const juce::String& line)
 {
     const auto trimmed = line.trim();
-    const auto needsSession = Result::fail (trimmed + L" needs a session open \x00b7 here: help, index, library, scan, agents, hub, keycast, dark|light|grey, dev, q");
+    const auto needsSession = Result::fail (trimmed + L" needs a session open \x00b7 here: help, phone, index, library, scan, agents, hub, keycast, dark|light|grey, dev, q");
     Parsed p;
 
     // A track number ("3 v -6") fails to parse with no tracks: that's a session's command too.
@@ -773,6 +773,7 @@ Result App::executeAppLevel (const juce::String& line)
     if (v == "agents")             return agentsCommand (p.args[0]);
     if (v == "hub")                return hubCommand (p.rest.trim());
     if (v == "keycast")            return keycastCommand (p.rest.trim());
+    if (v == "phone")              return p.rest.trim().isEmpty() ? startPhoneSession() : Result::fail (L"phone starts a new session with the phone link on");
     if (v == "q" || v == "quit" || v == "exit") { quit(); return Result::good(); }
 
     if (v == "light" || v == "dark" || v == "grey" || v == "gray")

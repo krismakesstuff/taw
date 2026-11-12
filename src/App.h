@@ -478,6 +478,8 @@ public:
     // hits on a sample track for each drum, or notes on an instrument track, starting on a bar,
     // with the recording muted, lined up under it, for reference.
     Result phoneCommand (const juce::String& arg);
+    Result startPhoneSession();  // a new session ("phone", unless a name was given) with the link on: taw --phone, :phone
+    bool phoneAtStart = false;   // taw --phone: once the device is open
     bool handlePhoneKey (const Key&);
     void pollPhone();
     PhoneLink phone;

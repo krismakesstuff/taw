@@ -766,6 +766,10 @@ void App::proceedToSession()
     {
         { timing::Scope t ("sample rate matched"); matchDeviceSampleRate(); }
         { timing::Scope t ("playback graph built"); rebuildGraph(); }
+
+        if (std::exchange (phoneAtStart, false))
+            say (phoneCommand ("on"));
+
         return;
     }
 
@@ -778,10 +782,23 @@ void App::proceedToSession()
             if (tmpl.name.equalsIgnoreCase (pendingTemplate))
             {
                 say (createSession (tmpl));
+
+                if (session != nullptr && std::exchange (phoneAtStart, false))
+                    say (phoneCommand ("on"));
+
                 return;
             }
 
         say (Result::fail ("no template called " + pendingTemplate));
+    }
+
+    // taw --phone: a new session with the phone link on.
+    if (std::exchange (phoneAtStart, false))
+    {
+        say (startPhoneSession());
+
+        if (session != nullptr)
+            return;
     }
 
     // One list: recent sessions first (the newest is selected, so Enter reopens it), then

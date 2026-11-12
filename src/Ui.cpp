@@ -2960,6 +2960,7 @@ void Ui::drawHelp (App& app)
 #endif
                 { L"quit", L"esc  ctrl+q" } } },
             { L"COMMANDS  (: opens the line)", {
+                { L"new session + phone link", L":phone" },
                 { L"add a sample folder", L":index f" },
                 { L"folders and samples", L":library" },
                 { L"scan plugins (again)", L":scan (retry)" },
@@ -4143,7 +4144,7 @@ void Ui::drawTemplatePicker (App& app)
         canvas.put (x, h - 2, L' ', -1, colour::text);
 
         if (app.screenCommand.isEmpty())
-            canvas.text (x + 2, h - 2, L"help \x00b7 index <folder> \x00b7 library \x00b7 scan \x00b7 agents on|off \x00b7 hub \x00b7 keycast \x00b7 dark|light|grey \x00b7 dev \x00b7 q",
+            canvas.text (x + 2, h - 2, L"help \x00b7 phone \x00b7 index <folder> \x00b7 library \x00b7 scan \x00b7 agents on|off \x00b7 hub \x00b7 keycast \x00b7 dark|light|grey \x00b7 dev \x00b7 q",
                          colour::faint, -1, false, w - x - 3);
 
         canvas.text (1, h - 1, L"enter runs it \x00b7 esc closes \x00b7 a folder can be dropped after index", colour::dim, -1, false, w - 2);

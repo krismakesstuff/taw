@@ -472,6 +472,20 @@ Result App::phoneCommand (const juce::String& arg)
     return Result::good ("phone link on at " + phone.url() + L" \x00b7 esc hides the code \x00b7 phone off ends it");
 }
 
+Result App::startPhoneSession()
+{
+    if (session == nullptr)
+    {
+        if (newSessionName.trim().isEmpty() && dateSessionNames)
+            newSessionName = "phone"; // dated, and never one that's there already
+
+        if (const auto made = createSession (Template()); ! made.ok)
+            return made;
+    }
+
+    return phoneCommand ("on");
+}
+
 bool App::handlePhoneKey (const Key& k)
 {
     if (! phoneVisible || ! commandLine.isEmpty() || k.code != Key::Escape)

@@ -275,6 +275,7 @@ int main (int argc, char** argv)
                    "  taw                 open the session in this folder, or start a new one\n"
                    "  taw my-song         open my-song, or create it\n"
                    "  taw my-song -t 3mic create my-song from the 3mic template\n"
+                   "  taw --phone         a new session with the phone link on (taw my-song --phone: in my-song)\n"
                    "  taw --mcp           an MCP server for agents, editing the session open in taw\n"
                    "                      (claude mcp add taw -- <path to taw> --mcp)\n\n"
 #if JUCE_WINDOWS
@@ -1356,6 +1357,16 @@ int main (int argc, char** argv)
             app->pressKey (k);
         }
         check (app->quitting() && ! app->screenCommandOpen && app->newSessionName.isEmpty(), "ctrl+q quits, from the command line too");
+
+        // :phone: a new session, named for it, with the phone link on.
+        {
+            const auto made = app->executeAppLevel ("phone");
+            std::printf ("       %s\n", made.message.toRawUTF8());
+            check (made.ok && app->session != nullptr && app->session->name().startsWith ("phone") && app->session->numTracks() == 0,
+                   ":phone makes a new session called phone");
+            check (app->phone.running() && app->phoneVisible, "with the phone link on, its code showing");
+            app->phoneCommand ("off");
+        }
 
         app->theme = themeBefore;
         app->saveSettings();
@@ -4585,6 +4596,10 @@ int main (int argc, char** argv)
         args.removeRange (t, 2);
     }
 
+    // taw --phone [name]: a new session (or the one named) with the phone link on.
+    const bool phoneAtStart = args.contains ("--phone");
+    args.removeString ("--phone");
+
 #if TAW_HUB
     // taw hub: the hub's page, no session (a session folder called hub: taw ./hub).
     const bool hubPage = args.size() == 1 && args[0] == "hub";
@@ -4606,7 +4621,7 @@ int main (int argc, char** argv)
     auto target = args.isEmpty() ? cwd : cwd.getChildFile (args[0]);
 
     // Plain taw from inside a session (its audio folder, say) opens that session.
-    if (args.isEmpty())
+    if (args.isEmpty() && ! phoneAtStart)
         for (auto up = cwd; up != up.getParentDirectory(); up = up.getParentDirectory())
             if (taw::Session::existsIn (up))
             {
@@ -4617,7 +4632,7 @@ int main (int argc, char** argv)
     juce::File openDir, newParent;
     juce::String newName;
 
-    if (taw::Session::existsIn (target) && ! hubPage)
+    if (taw::Session::existsIn (target) && ! hubPage && ! (phoneAtStart && args.isEmpty()))
     {
         openDir = target;
     }
@@ -4631,7 +4646,7 @@ int main (int argc, char** argv)
     // straight back to it (opening it also recovers a take that was recording).
     taw::safety::installCloseHandler();
     const auto unclean = taw::safety::findUncleanExit();
-    const bool reopen = unclean.found && openDir == juce::File() && args.isEmpty() && ! hubPage && taw::Session::existsIn (unclean.session);
+    const bool reopen = unclean.found && openDir == juce::File() && args.isEmpty() && ! hubPage && ! phoneAtStart && taw::Session::existsIn (unclean.session);
 
     if (reopen)
         openDir = unclean.session;
@@ -4655,6 +4670,7 @@ int main (int argc, char** argv)
             app.reportUncleanExit (unclean.crashLog, reopen);
 
         app.openHubFirst = hubPage;
+        app.phoneAtStart = phoneAtStart;
 
         status = app.run();
     }
